@@ -1,5 +1,5 @@
 {
-  "name": "spiffe-example-role",
+  "name": "basic-spiffe",
   "cel_program": {
     "variables": [
             {
@@ -41,7 +41,6 @@
   "not_before_leeway": 150,
   "clock_skew_leeway": 60,
   "bound_audiences": [
-    "aud",
-    "aud1"
+    "spiffe://sjc-1.k8s2-control.ncp.com/controlplane/vm/fluentd"
   ]
 }
