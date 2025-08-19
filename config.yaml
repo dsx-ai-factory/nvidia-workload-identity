@@ -1,0 +1,48 @@
+# SPIFFE JWT Issuer Configuration
+spiffe:
+  # Trust domain configuration
+  trust_domain:
+    region: "SJC-1"
+    cloud_tenant_id: "k8s2-control"
+    domain: "ncp.com"  # or "ncp.cn" for China
+  
+  # Issuer configuration
+  issuer:
+    spiffe_id: "spiffe://sjc-1.k8s2-control.ncp.com/spire/server"
+  
+  # JWT configuration
+  jwt:
+    ttl: "1h"
+    signing_algorithm: "RS256"
+    
+  # Default audiences
+  default_audiences:
+    - "spiffe://sjc-1.k8s2-control.ncp.com/controlplane/vm/fluentd"
+    - "ssa://SSA_service_id"
+    - "sf://Starfleet_service_id"
+
+# Product configurations
+products:
+  controlplane:
+    name: "controlplane"
+    allowed_services:
+      - "fluentbit"
+      - "fluentd"
+      - "prometheus"
+      - "grafana"
+  
+  vmaas:
+    name: "vmaas"
+    allowed_services:
+      - "compute"
+      - "storage"
+      - "network"
+
+# VM configurations
+vm:
+  # Custom claims to include in JWT
+  default_claims:
+    region: "SJC-1"
+    tenant: "k8s2-control"
+    deployment: "production"
+    environment: "prod"

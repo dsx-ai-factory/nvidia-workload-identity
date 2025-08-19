@@ -1,0 +1,47 @@
+{
+  "name": "spiffe-example-role",
+  "cel_program": {
+    "variables": [
+            {
+        "name": "is_spiffe",
+        "expression": "regex.extract(claims.sub, r'^spiffe://[^.]+\\.[^.]+\\.[^.]+\\.[^/]+/[^/]+/[^/]+/[^/]+$').hasValue()"
+      },
+      {
+        "name": "subject_parts",
+        "expression": "claims.sub.split('/')"
+      },
+      {
+        "name": "domain_parts",
+        "expression": "is_spiffe ? subject_parts[2].split('.') : []"
+      },
+      {
+        "name": "region",
+        "expression": "is_spiffe ? domain_parts[0] : ''"
+      },
+      {
+        "name": "tenant_id",
+        "expression": "is_spiffe ? domain_parts[1] : ''"
+      },
+      {
+        "name": "product",
+        "expression": "is_spiffe ? subject_parts[3] : ''"
+      },
+      {
+        "name": "resource_type",
+        "expression": "is_spiffe ? subject_parts[4] : ''"
+      },
+      {
+        "name": "resource_id",
+        "expression": "is_spiffe ? subject_parts[5] : ''"
+      }
+    ],
+    "expression": "is_spiffe ? pb.Auth{policies: ['spiffe-authenticated', 'region-' + region, 'tenant-' + tenant_id, 'product-' + product, 'resource-type-' + resource_type, 'resource-id-' + resource_id]} : false"
+  },
+  "expiration_leeway": 150,
+  "not_before_leeway": 150,
+  "clock_skew_leeway": 60,
+  "bound_audiences": [
+    "aud",
+    "aud1"
+  ]
+}
