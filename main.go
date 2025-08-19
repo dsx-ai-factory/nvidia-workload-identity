@@ -4,11 +4,18 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
+	"github.com/MicahParks/jwkset"
+	"github.com/MicahParks/keyfunc/v3"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
@@ -19,13 +26,56 @@ import (
 // SPIFFEJWTClaims represents the custom claims for SPIFFE JWT
 type SPIFFEJWTClaims struct {
 	jwt.RegisteredClaims
-	Claims map[string]interface{} `json:"claims"`
+	Claims map[string]any `json:"claims"`
 }
 
 // SPIFFEJWTIssuer handles SPIFFE JWT creation
 type SPIFFEJWTIssuer struct {
 	privateKey *rsa.PrivateKey
 	issuerID   spiffeid.ID
+}
+
+// API request and response structs
+type TokenRequest struct {
+	IssuerID      string         `json:"issuer_id"`
+	Region        string         `json:"region"`
+	CloudTenantID string         `json:"cloud_tenant_id"`
+	Domain        string         `json:"domain"`
+	ProductName   string         `json:"product_name"`
+	ResourceName  string         `json:"resource_name,omitempty"`
+	Audiences     []string       `json:"audiences"`
+	CustomClaims  map[string]any `json:"custom_claims,omitempty"`
+	TTL           string         `json:"ttl"`
+}
+
+type TokenResponse struct {
+	AccessToken string   `json:"access_token"`
+	TokenType   string   `json:"token_type"`
+	ExpiresIn   int      `json:"expires_in"`
+	Subject     string   `json:"subject"`
+	Issuer      string   `json:"issuer"`
+	Audiences   []string `json:"audiences"`
+}
+
+type ValidateRequest struct {
+	Token string `json:"token"`
+}
+
+type ValidateResponse struct {
+	Valid    bool           `json:"valid"`
+	Error    string         `json:"error,omitempty"`
+	Issuer   string         `json:"issuer,omitempty"`
+	Subject  string         `json:"subject,omitempty"`
+	Audience []string       `json:"audience,omitempty"`
+	Expires  int64          `json:"expires,omitempty"`
+	Claims   map[string]any `json:"claims,omitempty"`
+}
+
+// Server represents the HTTP server with SPIFFE JWT issuer
+type Server struct {
+	issuer  *SPIFFEJWTIssuer
+	keyfunc keyfunc.Keyfunc
+	mux     *http.ServeMux
 }
 
 // NewSPIFFEJWTIssuer creates a new SPIFFE JWT issuer
@@ -43,12 +93,17 @@ func NewSPIFFEJWTIssuer(issuerID spiffeid.ID) (*SPIFFEJWTIssuer, error) {
 }
 
 // IssueJWT creates a SPIFFE JWT with the specified parameters
-func (issuer *SPIFFEJWTIssuer) IssueJWT(subject spiffeid.ID, audiences []string, ttl time.Duration, customClaims map[string]interface{}) (string, error) {
+func (issuer *SPIFFEJWTIssuer) IssueJWT(subject spiffeid.ID, audiences []string, ttl time.Duration, customClaims map[string]any) (string, error) {
+	return issuer.IssueJWTWithIssuer(subject, audiences, ttl, customClaims, issuer.issuerID)
+}
+
+// IssueJWTWithIssuer creates a SPIFFE JWT with a custom issuer ID
+func (issuer *SPIFFEJWTIssuer) IssueJWTWithIssuer(subject spiffeid.ID, audiences []string, ttl time.Duration, customClaims map[string]any, issuerID spiffeid.ID) (string, error) {
 	now := time.Now()
 
 	claims := SPIFFEJWTClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer:    issuer.issuerID.String(),
+			Issuer:    issuerID.String(),
 			Subject:   subject.String(),
 			Audience:  audiences,
 			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
@@ -59,6 +114,9 @@ func (issuer *SPIFFEJWTIssuer) IssueJWT(subject spiffeid.ID, audiences []string,
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+
+	// Set the key ID header to match the JWKS
+	token.Header["kid"] = "spiffe-jwt-key"
 
 	return token.SignedString(issuer.privateKey)
 }
@@ -98,92 +156,282 @@ func WithWorkloadAPI(ctx context.Context) error {
 	return nil
 }
 
-func main() {
-
-	// Run SPIFFE ID format examples
-	ExampleConfigurations()
-
-	// Run complete JWT issuance demo
-	if err := DemoJWTIssuance(); err != nil {
-		log.Printf("Demo JWT issuance failed: %v", err)
-	}
-
-	// Example 1: Manual JWT creation (for demonstration)
-	fmt.Println("=== Manual JWT Creation Example ===")
-
-	// Create issuer SPIFFE ID
-	issuerID, err := spiffeid.FromString("spiffe://sjc-1.k8s2-control.ncp.com/spire/server")
+// NewServer creates a new server instance
+func NewServer() (*Server, error) {
+	// Create a dummy issuer SPIFFE ID (will be overridden per request)
+	issuerID, err := spiffeid.FromString("spiffe://localhost/server")
 	if err != nil {
-		log.Fatalf("Failed to create issuer SPIFFE ID: %v", err)
+		return nil, fmt.Errorf("failed to create issuer SPIFFE ID: %w", err)
 	}
 
 	// Create JWT issuer
 	issuer, err := NewSPIFFEJWTIssuer(issuerID)
 	if err != nil {
-		log.Fatalf("Failed to create JWT issuer: %v", err)
+		return nil, fmt.Errorf("failed to create JWT issuer: %w", err)
 	}
 
-	// Generate subject SPIFFE ID using the specified format
-	vmUUID := uuid.New().String()
-	subjectID, err := GenerateSPIFFEID("SJC-1", "k8s2-control", "com", "controlplane", vmUUID)
+	// Create a JWK from the RSA public key
+	jwk, err := jwkset.NewJWKFromKey(&issuer.privateKey.PublicKey, jwkset.JWKOptions{
+		Metadata: jwkset.JWKMetadataOptions{
+			KID: "spiffe-jwt-key",
+			ALG: jwkset.AlgRS256,
+		},
+	})
 	if err != nil {
-		log.Fatalf("Failed to generate subject SPIFFE ID: %v", err)
+		return nil, fmt.Errorf("failed to create JWK: %w", err)
 	}
 
-	// Define audiences
-	audiences := []string{
-		"spiffe://sjc-1.k8s2-control.ncp.com/controlplane/vm/fluentd",
-		"ssa://SSA_service_id",
-		"sf://Starfleet_service_id",
-	}
-
-	// Custom claims
-	customClaims := map[string]interface{}{
-		"region":     "SJC-1",
-		"tenant":     "k8s2-control",
-		"product":    "controlplane",
-		"vm_uuid":    vmUUID,
-		"deployment": "production",
-	}
-
-	// Issue JWT with 1 hour TTL
-	token, err := issuer.IssueJWT(subjectID, audiences, time.Hour, customClaims)
+	// Create a storage and add the JWK
+	storage := jwkset.NewMemoryStorage()
+	err = storage.KeyWrite(context.Background(), jwk)
 	if err != nil {
-		log.Fatalf("Failed to issue JWT: %v", err)
+		return nil, fmt.Errorf("failed to write JWK to storage: %w", err)
 	}
 
-	fmt.Printf("Issued JWT Token:\n%s\n\n", token)
-	fmt.Printf("Subject SPIFFE ID: %s\n", subjectID.String())
-	fmt.Printf("Issuer SPIFFE ID: %s\n", issuerID.String())
-	fmt.Printf("Audiences: %v\n", audiences)
-	fmt.Printf("Custom Claims: %+v\n\n", customClaims)
+	// Create keyfunc with the storage
+	keyFunc, err := keyfunc.New(keyfunc.Options{
+		Storage: storage,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create keyfunc: %w", err)
+	}
 
-	// Validate the JWT we just created
-	fmt.Println("=== JWT Validation Example ===")
-	if err := ValidateJWTExample(token, issuer); err != nil {
+	server := &Server{
+		issuer:  issuer,
+		keyfunc: keyFunc,
+		mux:     http.NewServeMux(),
+	}
+
+	// Setup routes
+	server.mux.HandleFunc("GET /.well-known/jwks.json", server.jwksHandler)
+	server.mux.HandleFunc("POST /token", server.tokenHandler)
+	server.mux.HandleFunc("POST /validate", server.validateHandler)
+	server.mux.HandleFunc("GET /health", server.healthHandler)
+
+	return server, nil
+}
+
+// ServeHTTP implements http.Handler interface
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.mux.ServeHTTP(w, r)
+}
+
+// jwksHandler serves the JSON Web Key Set
+func (s *Server) jwksHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+
+	// Get the JWKS from keyfunc's storage
+	storage := s.keyfunc.Storage()
+	jwksJSON, err := storage.JSONPublic(context.Background())
+	if err != nil {
+		log.Printf("Error getting JWKS JSON: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Write(jwksJSON)
+}
+
+// tokenHandler issues JWT tokens
+func (s *Server) tokenHandler(w http.ResponseWriter, r *http.Request) {
+	// Parse request
+	var req TokenRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON request", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.IssuerID == "" {
+		http.Error(w, "issuer_id is required", http.StatusBadRequest)
+		return
+	}
+	if req.Region == "" {
+		http.Error(w, "region is required", http.StatusBadRequest)
+		return
+	}
+	if req.CloudTenantID == "" {
+		http.Error(w, "cloud_tenant_id is required", http.StatusBadRequest)
+		return
+	}
+	if req.Domain == "" {
+		http.Error(w, "domain is required", http.StatusBadRequest)
+		return
+	}
+	if req.ProductName == "" {
+		http.Error(w, "product_name is required", http.StatusBadRequest)
+		return
+	}
+	if len(req.Audiences) == 0 {
+		http.Error(w, "audiences is required", http.StatusBadRequest)
+		return
+	}
+	if req.TTL == "" {
+		http.Error(w, "ttl is required", http.StatusBadRequest)
+		return
+	}
+
+	// Generate resource name if not provided
+	if req.ResourceName == "" {
+		req.ResourceName = uuid.New().String()
+	}
+
+	// Parse and validate issuer SPIFFE ID
+	issuerID, err := spiffeid.FromString(req.IssuerID)
+	if err != nil {
+		log.Printf("Invalid issuer SPIFFE ID: %v", err)
+		http.Error(w, "Invalid issuer SPIFFE ID", http.StatusBadRequest)
+		return
+	}
+
+	// Generate subject SPIFFE ID
+	subjectID, err := GenerateSPIFFEID(req.Region, req.CloudTenantID, req.Domain, req.ProductName, req.ResourceName)
+	if err != nil {
+		log.Printf("Failed to generate subject SPIFFE ID: %v", err)
+		http.Error(w, "Failed to generate SPIFFE ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Parse TTL
+	ttl, err := time.ParseDuration(req.TTL)
+	if err != nil {
+		log.Printf("Invalid TTL format: %v", err)
+		http.Error(w, "Invalid TTL format", http.StatusBadRequest)
+		return
+	}
+
+	// Issue JWT using the server's issuer with the requested issuer ID
+	token, err := s.issuer.IssueJWTWithIssuer(subjectID, req.Audiences, ttl, req.CustomClaims, issuerID)
+	if err != nil {
+		log.Printf("Failed to issue JWT: %v", err)
+		http.Error(w, "Failed to issue JWT", http.StatusInternalServerError)
+		return
+	}
+
+	// Response
+	response := TokenResponse{
+		AccessToken: token,
+		TokenType:   "Bearer",
+		ExpiresIn:   int(ttl.Seconds()),
+		Subject:     subjectID.String(),
+		Issuer:      issuerID.String(),
+		Audiences:   req.Audiences,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding token response: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+}
+
+// validateHandler validates JWT tokens using keyfunc
+func (s *Server) validateHandler(w http.ResponseWriter, r *http.Request) {
+	var req ValidateRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON request", http.StatusBadRequest)
+		return
+	}
+
+	if req.Token == "" {
+		http.Error(w, "Token is required", http.StatusBadRequest)
+		return
+	}
+
+	// Parse and validate the JWT using keyfunc
+	keyFunc := func(token *jwt.Token) (interface{}, error) {
+		return s.keyfunc.Keyfunc(token)
+	}
+	token, err := jwt.ParseWithClaims(req.Token, &SPIFFEJWTClaims{}, keyFunc)
+	if err != nil {
 		log.Printf("JWT validation failed: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(ValidateResponse{
+			Valid: false,
+			Error: err.Error(),
+		})
+		return
 	}
 
-	// Example 2: Using actual SPIFFE Workload API (requires SPIRE agent)
-	fmt.Println("\n=== SPIFFE Workload API Example ===")
-	fmt.Println("Note: This requires a running SPIRE agent and proper workload registration")
-
-	// Uncomment the following line to test with actual SPIFFE Workload API
-	if err := WithWorkloadAPI(context.Background()); err != nil {
-	    log.Printf("Workload API example failed (this is expected without SPIRE agent): %v", err)
+	if !token.Valid {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(ValidateResponse{
+			Valid: false,
+			Error: "token is not valid",
+		})
+		return
 	}
 
-	// Example 3: TLS configuration with SPIFFE
-	fmt.Println("\n=== SPIFFE TLS Configuration Example ===")
+	// Extract claims
+	if claims, ok := token.Claims.(*SPIFFEJWTClaims); ok {
+		w.Header().Set("Content-Type", "application/json")
+		resp := ValidateResponse{
+			Valid:    true,
+			Issuer:   claims.Issuer,
+			Subject:  claims.Subject,
+			Audience: claims.Audience,
+			Expires:  claims.ExpiresAt.Time.Unix(),
+			Claims:   claims.Claims,
+		}
+		json.NewEncoder(w).Encode(resp)
+	} else {
+		http.Error(w, "Failed to extract claims", http.StatusInternalServerError)
+	}
+}
 
-	// This shows how to create TLS config using SPIFFE (requires SPIRE agent)
-	// import "github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
-	// tlsConfig := tlsconfig.MTLSClientConfig(source, source, tlsconfig.AuthorizeAny())
-	fmt.Println("TLS configuration would use SPIFFE X.509 certificates for mTLS")
+// healthHandler provides health check endpoint
+func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+}
 
-	fmt.Println("\nTo use with actual SPIRE:")
-	fmt.Println("1. Start SPIRE server and agent")
-	fmt.Println("2. Register this workload with appropriate SPIFFE ID")
-	fmt.Println("3. Uncomment the WorkloadAPI example code")
-	fmt.Println("4. Set SPIFFE_ENDPOINT_SOCKET environment variable")
+func main() {
+	// Create server
+	server, err := NewServer()
+	if err != nil {
+		log.Fatalf("Failed to create server: %v", err)
+	}
+
+	// Create HTTP server
+	httpServer := &http.Server{
+		Addr:    ":8080",
+		Handler: server,
+	}
+
+	// Setup graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Start server in a goroutine
+	go func() {
+		log.Printf("Starting SPIFFE JWT server on %s", httpServer.Addr)
+		log.Printf("JWKS endpoint: http://localhost%s/.well-known/jwks.json", httpServer.Addr)
+		log.Printf("Token endpoint: http://localhost%s/token", httpServer.Addr)
+		log.Printf("Validate endpoint: http://localhost%s/validate", httpServer.Addr)
+		log.Printf("Health endpoint: http://localhost%s/health", httpServer.Addr)
+
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed to start: %v", err)
+		}
+	}()
+
+	// Wait for shutdown signal
+	<-sigChan
+	log.Println("Shutting down server...")
+
+	// Create shutdown context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Shutdown server gracefully
+	if err := httpServer.Shutdown(ctx); err != nil {
+		log.Printf("Server shutdown error: %v", err)
+	} else {
+		log.Println("Server shut down gracefully")
+	}
 }

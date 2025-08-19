@@ -7,7 +7,9 @@ replace github.com/openbao/openbao/sdk/v2 => ./openbao/sdk
 replace github.com/openbao/openbao/api/v2 => ./openbao/api
 
 require (
-	github.com/golang-jwt/jwt/v5 v5.0.0
+	github.com/MicahParks/jwkset v0.8.0
+	github.com/MicahParks/keyfunc/v3 v3.6.1
+	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/google/cel-go v0.26.0
 	github.com/google/uuid v1.6.0
 	github.com/openbao/openbao/sdk/v2 v2.3.1

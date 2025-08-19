@@ -5,18 +5,18 @@ cd openbao
 go run . server -dev -dev-root-token-id="dev-only-token"
 ```
 
-# Create userpass
+## Setup Authentication and Policies
 
 ```bash
 export VAULT_ADDR=http://localhost:8200
 export VAULT_TOKEN=dev-only-token
+
+# Create userpass auth and user
 bao auth enable userpass
 bao write auth/userpass/users/testing password=testing token_policies=example
-bao write sys/policies/acl/example policy='path "identity/oidc/token/example"
-{ capabilities = ["read"] }'
+bao write sys/policies/acl/example policy='path "identity/oidc/token/example" { capabilities = ["read"] }'
 
 # Set up identity
-
 bao write identity/oidc/key/default algorithm=EdDSA
 bao write identity/oidc/role/example key=default client_id=aud
 
@@ -30,9 +30,10 @@ export BAO_TOKEN=$(bao login -field=token -method=userpass username=testing pass
 export JWT=$(bao read identity/oidc/token/example -format=json | jq -r ".data.token")
 
 # Create SPIFFE-aware CEL roles
-
 BAO_TOKEN="dev-only-token" bao write auth/jwt/cel/role/basic-spiffe @cel-role.json
 ```
+
+Expected output:
 ```
 Key                  Value
 ---                  -----
@@ -45,7 +46,9 @@ name                 example
 not_before_leeway    150
 ```
 
-# Test the CEL roles with SPIFFE JWTs
+## Test the CEL roles with SPIFFE JWTs
+
+```bash
 # First, generate a SPIFFE JWT using the Go application
 go run . > jwt_output.txt
 
@@ -60,7 +63,9 @@ bao write auth/jwt/cel/login jwt=$JWT
 # Example with actual SPIFFE JWT (when available)
 # export SPIFFE_JWT="eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9..."
 # bao write auth/jwt/cel/login role=basic-spiffe jwt=$SPIFFE_JWT
+```
 
+Expected output:
 ```
 Key                  Value
 ---                  -----
