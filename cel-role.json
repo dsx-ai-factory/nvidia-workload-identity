@@ -2,9 +2,9 @@
   "name": "basic-spiffe",
   "cel_program": {
     "variables": [
-            {
+      {
         "name": "is_spiffe",
-        "expression": "regex.extract(claims.sub, r'^spiffe://[^.]+\\.[^.]+\\.[^.]+\\.[^/]+/[^/]+/[^/]+/[^/]+$').hasValue()"
+        "expression": "claims.sub.matches(r'^spiffe://[^.]+\\.[^.]+\\.[^.]+\\.[^/]+/[^/]+/[^/]+/[^/]+$')"
       },
       {
         "name": "subject_parts",
