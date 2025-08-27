@@ -1,0 +1,74 @@
+# OpenBao Helm Chart Values
+# Using local image override for development
+
+# Server configuration  
+server:
+  # Use local built image (overrides default quay.io/openbao/openbao:2.3.2)
+  image:
+    registry: ""
+    repository: openbao
+    tag: dev
+    pullPolicy: Never
+  # Resources
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 200m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+
+  # Readiness probe
+  readinessProbe:
+    enabled: true
+    path: "/v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204"
+
+  # Liveness probe  
+  livenessProbe:
+    enabled: true
+    path: "/v1/sys/health?standbyok=true"
+    initialDelaySeconds: 60
+
+  # Service configuration
+  service:
+    enabled: true
+    type: ClusterIP
+    port: 8200
+    targetPort: 8200
+
+  # Data storage
+  dataStorage:
+    enabled: true
+    size: 10Gi
+    storageClass: null
+    accessMode: ReadWriteOnce
+
+  # HA mode disabled for demo
+  ha:
+    enabled: false
+
+  # Standalone mode
+  standalone:
+    enabled: true
+    config: |
+      ui = true
+      listener "tcp" {
+        tls_disable = 1
+        address = "[::]:8200"
+        cluster_address = "[::]:8201"
+      }
+      storage "file" {
+        path = "/openbao/data"
+      }
+
+# UI configuration
+ui:
+  enabled: false
+
+# Injector (not needed for this demo)
+injector:
+  enabled: false
+
+# CSI (not needed for this demo)  
+csi:
+  enabled: false

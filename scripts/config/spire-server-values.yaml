@@ -4,6 +4,7 @@ global:
   spire:
     trustDomain: "example.org"
     clusterName: "spire-demo"
+    jwtIssuer: "oidc-discovery.example.org"
     caSubject:
       country: "US"
       organization: "SPIFFE"
@@ -119,6 +120,6 @@ spire-agent:
 spiffe-csi-driver:
   enabled: true
   
-# Disable OIDC discovery provider for simple setup
+# Enable OIDC discovery provider for JWT validation
 spiffe-oidc-discovery-provider:
-  enabled: false
+  enabled: true

@@ -22,6 +22,7 @@ Deploy SPIRE server and agent on Kind using Helm charts with a demo workload.
   - Fetches JWT tokens via SPIFFE Workload API
   - Refreshes at 80% of token expiry with retries
   - Writes to `/var/run/secrets/nvidia.com/spiffe/token`
+- **OpenBao** with SPIFFE JWT authentication configured
 
 ## Individual Steps
 
@@ -30,6 +31,7 @@ Deploy SPIRE server and agent on Kind using Helm charts with a demo workload.
 ./02-install-spire-helm.sh     # Install SPIRE
 ./03-verify-spire.sh           # Verify setup  
 ./04-demo-nginx.sh             # Deploy demo workload
+./05-deploy-bao.sh             # Deploy OpenBao with SPIFFE auth
 ```
 
 ## Configuration
@@ -37,6 +39,7 @@ Deploy SPIRE server and agent on Kind using Helm charts with a demo workload.
 - `config/kind-config.yaml` - Cluster settings
 - `config/spire-server-values.yaml` - SPIRE Helm values
 - `config/demo-nginx.yaml` - Demo workload with resources
+- `config/bao-values.yaml` - OpenBao Helm values with local image
 
 ## Troubleshooting
 
@@ -51,6 +54,10 @@ kubectl exec -n spire-server statefulset/spire-server -c spire-server -- \
 # Check demo workload
 kubectl logs demo-nginx -c spiffe-sidecar
 kubectl exec demo-nginx -c nginx -- cat /var/run/secrets/nvidia.com/spiffe/token
+
+# Check OpenBao
+kubectl get pods -n bao
+kubectl port-forward -n bao svc/openbao 8200:8200
 ```
 
 ## Integration
