@@ -1,0 +1,124 @@
+# SPIRE Helm Values - Latest chart configuration for Kind cluster
+
+global:
+  spire:
+    trustDomain: "example.org"
+    clusterName: "spire-demo"
+    caSubject:
+      country: "US"
+      organization: "SPIFFE"
+      commonName: "SPIRE Server CA"
+
+spire-server:
+  enabled: true
+  nameOverride: server
+  
+  # Use StatefulSet for persistence
+  kind: statefulset
+  
+  # Image configuration
+  image:
+    registry: ghcr.io
+    repository: spiffe/spire-server
+    tag: "1.12.4"  # Latest version from chart
+    pullPolicy: IfNotPresent
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 8081
+
+  # Persistence configuration
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClass: standard
+
+  # Resource configuration
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # Security context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+
+  # Logging configuration
+  logLevel: DEBUG
+
+  # Node attestation configuration
+  nodeAttestor:
+    k8sPSAT:
+      enabled: true
+      serviceAccountAllowList:
+        - "spire-server:spire-agent"
+
+  # Workload attestation configuration
+  workloadAttestors:
+    k8s:
+      enabled: true
+    unix:
+      enabled: true
+
+spire-agent:
+  enabled: true
+  nameOverride: agent
+
+  # Image configuration
+  image:
+    registry: ghcr.io
+    repository: spiffe/spire-agent
+    tag: "1.12.4"  # Latest version from chart
+    pullPolicy: IfNotPresent
+
+  # Security context (agent needs root for node operations)
+  securityContext:
+    runAsUser: 0
+    privileged: true
+
+  # Resource configuration
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+  # Logging configuration
+  logLevel: DEBUG
+
+  # Server connection configuration - fix the port issue
+  server:
+    address: "spire-server.spire-server"
+    port: 8081
+
+  # Node attestation configuration
+  nodeAttestor:
+    k8sPSAT:
+      enabled: true
+      cluster: "spire-demo"
+
+  # Workload attestation configuration
+  workloadAttestors:
+    k8s:
+      enabled: true
+    unix:
+      enabled: true
+
+
+
+# Enable CSI driver for file-based token injection
+spiffe-csi-driver:
+  enabled: true
+  
+# Disable OIDC discovery provider for simple setup
+spiffe-oidc-discovery-provider:
+  enabled: false
