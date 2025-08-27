@@ -11,13 +11,47 @@ spec:
     image: nginx:alpine
     ports:
     - containerPort: 80
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+    volumeMounts:
+    - name: spiffe-tokens
+      mountPath: /var/run/secrets/nvidia.com/spiffe
+      readOnly: true
+    env:
+    - name: SPIFFE_TOKEN_PATH
+      value: "/var/run/secrets/nvidia.com/spiffe/token"
+  - name: spiffe-sidecar
+    image: spiffe-token-fetcher:latest
+    imagePullPolicy: Never  # Use local image
+    args:
+    - "-socket=unix:///var/run/secrets/spire.io/spire-agent.sock"
+    - "-audience=spiffe://example.org"
+    - "-output=/var/run/secrets/nvidia.com/spiffe/token"
+    - "-retries=3"
+    - "-verbose=true"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 50m
+        memory: 64Mi
     volumeMounts:
     - name: spiffe-csi
       mountPath: /var/run/secrets/spire.io
       readOnly: true
+    - name: spiffe-tokens
+      mountPath: /var/run/secrets/nvidia.com/spiffe
   volumes:
   - name: spiffe-csi
     csi:
       driver: csi.spiffe.io
       readOnly: true
+  - name: spiffe-tokens
+    emptyDir: {}
   restartPolicy: Never

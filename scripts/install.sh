@@ -37,7 +37,7 @@ main() {
     echo "Your SPIRE cluster is ready with:"
     echo "- SPIRE server and agent running"
     echo "- Demo nginx pod with SPIFFE identity: spiffe://example.org/nginx"
-    echo "- Workload API socket at: ./spire-sockets/agent.sock"
+    echo "- JWT tokens automatically fetched by Go sidecar"
     echo "- Run './cleanup.sh' when done"
 }
 

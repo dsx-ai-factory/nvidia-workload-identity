@@ -1,0 +1,36 @@
+# Build stage
+FROM golang:1.25 AS builder
+
+WORKDIR /app
+
+# Copy go modules files
+COPY go.mod go.sum ./
+
+# Copy openbao dependency
+COPY openbao/ ./openbao/
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY cmd/spiffe-token-fetcher/ ./cmd/spiffe-token-fetcher/
+
+# Build the binary
+RUN go build -o spiffe-token-fetcher ./cmd/spiffe-token-fetcher
+
+# Final stage
+FROM debian:bookworm-slim
+
+# Install ca-certificates for TLS
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /root/
+
+# Copy the binary from builder stage
+COPY --from=builder /app/spiffe-token-fetcher .
+
+# Create directory for tokens
+RUN mkdir -p /var/run/secrets/nvidia.com/spiffe
+
+# Run the token fetcher
+ENTRYPOINT ["./spiffe-token-fetcher"]

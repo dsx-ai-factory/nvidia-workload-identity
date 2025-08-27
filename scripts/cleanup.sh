@@ -61,13 +61,6 @@ main() {
     log_info "Starting cleanup process..."
     
     cleanup_kind_cluster
-    cleanup_generated_files
-    
-    # Clean up demo pods via the demo script
-    if [[ -f "${SCRIPT_DIR}/04-demo-nginx.sh" ]]; then
-        log_info "Cleaning up demo pods..."
-        "${SCRIPT_DIR}/04-demo-nginx.sh" cleanup || true
-    fi
     
     log_success "Cleanup completed!"
     echo

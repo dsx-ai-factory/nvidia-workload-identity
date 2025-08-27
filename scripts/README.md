@@ -1,107 +1,61 @@
-# SPIRE on Kind - Setup Scripts
+# SPIRE on Kind
 
-Scripts to deploy SPIRE server and agent on a Kind cluster using the latest Helm charts.
+Deploy SPIRE server and agent on Kind using Helm charts with a demo workload.
 
 ## Prerequisites
 
-- Docker (running)
-- kubectl
-- Kind
-- Helm
+- Docker, kubectl, Kind, Helm
 
 ## Quick Start
 
 ```bash
-# Run complete installation
-./install.sh
-
-# Or run individual steps:
-./01-setup-kind-cluster.sh     # Setup Kind cluster
-./02-install-spire-helm.sh     # Install SPIRE with Helm
-./03-verify-spire.sh           # Verify installation
-./04-demo-nginx.sh             # Deploy demo nginx with SPIFFE access
-
-# Cleanup when done
-./cleanup.sh
+./install.sh    # Complete setup
+./cleanup.sh    # Remove everything
 ```
 
-## Files
+## What It Creates
 
-```
-scripts/
-├── config/
-│   ├── kind-config.yaml           # Kind cluster configuration
-│   ├── spire-server-values.yaml   # SPIRE Helm values
-│   └── demo-nginx.yaml            # Demo nginx pod configuration
-├── 01-setup-kind-cluster.sh       # Create Kind cluster
-├── 02-install-spire-helm.sh       # Install SPIRE with Helm
-├── 03-verify-spire.sh             # Verify installation
-├── 04-demo-nginx.sh               # Deploy demo nginx with SPIFFE access
-├── install.sh                     # Complete installation script
-├── cleanup.sh                     # Cleanup resources
-└── common.sh                      # Shared functions
+- **Kind cluster** (2 nodes) with trust domain `example.org`
+- **SPIRE server/agent** with k8s PSAT attestation 
+- **SPIFFE CSI driver** for JWT file injection
+- **Demo nginx pod** with Go sidecar that:
+  - Fetches JWT tokens via SPIFFE Workload API
+  - Refreshes at 80% of token expiry with retries
+  - Writes to `/var/run/secrets/nvidia.com/spiffe/token`
+
+## Individual Steps
+
+```bash
+./01-setup-kind-cluster.sh     # Create cluster
+./02-install-spire-helm.sh     # Install SPIRE
+./03-verify-spire.sh           # Verify setup  
+./04-demo-nginx.sh             # Deploy demo workload
 ```
 
 ## Configuration
 
-Edit configuration files directly:
-- `config/kind-config.yaml` - Kind cluster settings
-- `config/spire-server-values.yaml` - SPIRE Helm values including CSI driver
-- `config/demo-nginx.yaml` - Demo workload pod configuration
-
-## What It Creates
-
-- **Kind cluster**: Multi-node cluster (spire-demo)
-- **SPIRE server**: v1.12.4 running on port 8081
-- **SPIRE agent**: DaemonSet on all nodes with k8s PSAT attestation
-- **SPIFFE CSI driver**: For file-based token injection
-- **Trust domain**: `example.org`
-- **Demo workload**: Nginx pod with SPIFFE identity access via CSI
-
-## Cleanup
-
-```bash
-./cleanup.sh                # Remove everything (cluster, demo pods)
-```
+- `config/kind-config.yaml` - Cluster settings
+- `config/spire-server-values.yaml` - SPIRE Helm values
+- `config/demo-nginx.yaml` - Demo workload with resources
 
 ## Troubleshooting
 
-**Check pod status:**
 ```bash
+# Check status
 kubectl get pods -n spire-server
-```
 
-**Check agent registration:**
-```bash
+# Check agent registration  
 kubectl exec -n spire-server statefulset/spire-server -c spire-server -- \
   /opt/spire/bin/spire-server agent list
-```
 
-**Check logs:**
-```bash
-kubectl logs -n spire-server statefulset/spire-server -c spire-server
-kubectl logs -n spire-server daemonset/spire-agent
-```
-
-**Check CSI driver:**
-```bash
-kubectl get pods -n spire-server -l app.kubernetes.io/name=spiffe-csi-driver
-kubectl get csidriver csi.spiffe.io
+# Check demo workload
+kubectl logs demo-nginx -c spiffe-sidecar
+kubectl exec demo-nginx -c nginx -- cat /var/run/secrets/nvidia.com/spiffe/token
 ```
 
 ## Integration
 
-This setup supports the SPIFFE/SPIRE authentication flow for Bao integration:
-
+Provides SPIFFE JWT tokens for Bao authentication:
 ```
-k8s PSAT → SPIRE Agent → SPIRE Server → SPIFFE JWT → Bao Auth
+k8s PSAT → SPIRE Agent → SPIRE Server → JWT → Bao Auth
 ```
-
-**Authentication Method**: Kubernetes Projected Service Account Token (k8s PSAT)
-- SPIRE agents authenticate using Kubernetes service account tokens
-- No shared secrets or pre-deployed certificates required
-- Leverages Kubernetes' built-in security model
-
-**Workload Access**: SPIFFE identities are accessible via:
-- CSI driver mounted socket at `/var/run/secrets/spire.io/spire-agent.sock`
-- Workload API for dynamic identity retrieval

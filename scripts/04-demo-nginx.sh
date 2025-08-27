@@ -7,11 +7,41 @@ set -euo pipefail
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "${SCRIPT_DIR}")"
 NAMESPACE="${DEMO_NAMESPACE:-default}"
 POD_NAME="${POD_NAME:-demo-nginx}"
+CLUSTER_NAME="${CLUSTER_NAME:-spire-demo}"
 
 # Source common functions
 source "${SCRIPT_DIR}/common.sh"
+
+# Build SPIFFE token fetcher image
+build_spiffe_token_fetcher() {
+    log_info "Building SPIFFE token fetcher Docker image..."
+    
+    cd "${PROJECT_ROOT}"
+    
+    # Build the Docker image
+    docker build -f Dockerfile.spiffe-token-fetcher -t spiffe-token-fetcher:latest .
+    
+    log_success "Docker image built successfully"
+}
+
+# Load images into Kind cluster
+load_images_to_kind() {
+    log_info "Loading Docker images into Kind cluster..."
+    
+    # Check if Kind cluster exists
+    if ! kind get clusters | grep -q "^${CLUSTER_NAME}$"; then
+        log_error "Kind cluster '${CLUSTER_NAME}' not found. Please run install.sh first."
+        exit 1
+    fi
+    
+    # Load the image into Kind
+    kind load docker-image spiffe-token-fetcher:latest --name "${CLUSTER_NAME}"
+    
+    log_success "Images loaded into Kind cluster"
+}
 
 # Create nginx pod with SPIFFE socket mount
 create_nginx_pod() {
@@ -24,16 +54,8 @@ create_nginx_pod() {
         return 1
     fi
     
-    # Apply the configuration with variable substitution if needed
-    if [[ "${POD_NAME}" != "demo-nginx" ]] || [[ "${NAMESPACE}" != "default" ]]; then
-        # Create temporary file with substitutions
-        local temp_config="${SCRIPT_DIR}/demo-nginx-temp.yaml"
-        sed "s/name: demo-nginx/name: ${POD_NAME}/g; s/namespace: default/namespace: ${NAMESPACE}/g" "$config_file" > "$temp_config"
-        kubectl apply -f "$temp_config"
-        rm -f "$temp_config"
-    else
-        kubectl apply -f "$config_file"
-    fi
+    # Apply the configuration
+    kubectl apply -f "$config_file"
     
     log_success "Nginx pod created"
 }
@@ -77,68 +99,86 @@ create_spire_entry() {
 
 # Verify SPIFFE token access
 verify_token_access() {
-        log_info "Verifying SPIFFE CSI token injection in nginx pod..."
+    log_info "Verifying SPIFFE sidecar token extraction in nginx pod..."
     
-    # Check if SPIFFE CSI directory exists
-    log_info "Checking SPIFFE CSI directory..."
-    if kubectl exec -n ${NAMESPACE} ${POD_NAME} -- test -d /var/run/secrets/spire.io; then
-        log_success "✓ SPIFFE CSI directory exists"
+    # Check if SPIFFE token directory exists
+    log_info "Checking SPIFFE token directory..."
+    if kubectl exec -n ${NAMESPACE} ${POD_NAME} -c nginx -- test -d /var/run/secrets/nvidia.com/spiffe; then
+        log_success "✓ SPIFFE token directory exists"
     else
-        log_error "✗ SPIFFE CSI directory not found"
+        log_error "✗ SPIFFE token directory not found"
         return 1
     fi
     
+    # Wait for the sidecar to generate the token file (up to 60 seconds)
+    log_info "Waiting for SPIFFE sidecar to generate JWT token (timeout: 60s)..."
+    local timeout=60
+    local count=0
+    while [[ $count -lt $timeout ]]; do
+        if kubectl exec -n ${NAMESPACE} ${POD_NAME} -c nginx -- test -f /var/run/secrets/nvidia.com/spiffe/token 2>/dev/null; then
+            log_success "✓ SPIFFE token file found after ${count} seconds"
+            break
+        fi
+        sleep 1
+        ((count++))
+    done
+    
     # List files in the SPIFFE directory
-    log_info "Listing files in SPIFFE CSI directory..."
-    kubectl exec -n ${NAMESPACE} ${POD_NAME} -- ls -la /var/run/secrets/spire.io/ || true
+    log_info "Listing files in SPIFFE token directory..."
+    kubectl exec -n ${NAMESPACE} ${POD_NAME} -c nginx -- ls -la /var/run/secrets/nvidia.com/spiffe/ || true
     
-    # Check for specific SPIFFE identity files
-    local files_found=0
+    # Check for the SPIFFE token file
+    log_info "Checking for SPIFFE token file..."
     
-    log_info "Checking for SPIFFE identity files..."
-    
-    # Check for SVID (certificate)
-    if kubectl exec -n ${NAMESPACE} ${POD_NAME} -- test -f /var/run/secrets/spire.io/svid.pem 2>/dev/null; then
-        log_success "✓ SVID certificate found"
-        files_found=$((files_found + 1))
+    if kubectl exec -n ${NAMESPACE} ${POD_NAME} -c nginx -- test -f /var/run/secrets/nvidia.com/spiffe/token 2>/dev/null; then
+        log_success "✓ SPIFFE token file found"
+        
+        # Check if token has content
+        local token_size
+        token_size=$(kubectl exec -n ${NAMESPACE} ${POD_NAME} -c nginx -- wc -c < /var/run/secrets/nvidia.com/spiffe/token 2>/dev/null || echo "0")
+        
+        if [[ "$token_size" -gt 0 ]]; then
+            log_success "✓ SPIFFE JWT token has content ($token_size bytes)"
+            
+            # Check if it looks like a JWT token (should start with eyJ)
+            local token_start
+            token_start=$(kubectl exec -n ${NAMESPACE} ${POD_NAME} -c nginx -- head -c 10 /var/run/secrets/nvidia.com/spiffe/token 2>/dev/null || echo "")
+            
+            if [[ "$token_start" =~ ^eyJ ]]; then
+                log_success "✓ Token appears to be a valid JWT format"
+                log_info "JWT token preview: ${token_start}..."
+            else
+                log_warning "Token doesn't appear to be JWT format, got: ${token_start}..."
+            fi
+        else
+            log_warning "SPIFFE token file is empty"
+        fi
     else
-        log_warning "SVID certificate not found"
-    fi
-    
-    # Check for private key
-    if kubectl exec -n ${NAMESPACE} ${POD_NAME} -- test -f /var/run/secrets/spire.io/key.pem 2>/dev/null; then
-        log_success "✓ Private key found"
-        files_found=$((files_found + 1))
-    else
-        log_warning "Private key not found"
-    fi
-    
-    # Check for CA bundle
-    if kubectl exec -n ${NAMESPACE} ${POD_NAME} -- test -f /var/run/secrets/spire.io/bundle.pem 2>/dev/null; then
-        log_success "✓ CA bundle found"
-        files_found=$((files_found + 1))
-    else
-        log_warning "CA bundle not found"
+        log_error "✗ SPIFFE token file not found"
+        return 1
     fi
     
     # Verify environment variables
     log_info "Checking SPIFFE environment variables..."
     local token_path
-    token_path=$(kubectl exec -n ${NAMESPACE} ${POD_NAME} -- printenv SPIFFE_TOKEN_PATH 2>/dev/null || echo "")
+    token_path=$(kubectl exec -n ${NAMESPACE} ${POD_NAME} -c nginx -- printenv SPIFFE_TOKEN_PATH 2>/dev/null || echo "")
     
-    if [[ "$token_path" == "/var/run/secrets/spire.io/svid.pem" ]]; then
+    if [[ "$token_path" == "/var/run/secrets/nvidia.com/spiffe/token" ]]; then
         log_success "✓ SPIFFE_TOKEN_PATH correctly configured: $token_path"
     else
         log_warning "SPIFFE_TOKEN_PATH not set or incorrect: '$token_path'"
     fi
     
-    if [[ $files_found -gt 0 ]]; then
-        log_success "✓ Demo nginx pod has SPIFFE identity files available ($files_found/3 files found)"
-        log_info "Note: Files are automatically rotated by the SPIRE CSI driver"
+    # Check sidecar status
+    log_info "Checking SPIFFE sidecar status..."
+    if kubectl exec -n ${NAMESPACE} ${POD_NAME} -c spiffe-sidecar -- ps | grep -q "go\|spiffe-fetcher" 2>/dev/null; then
+        log_success "✓ SPIFFE Go sidecar is active"
     else
-        log_error "✗ No SPIFFE identity files found"
-        return 1
+        log_warning "SPIFFE Go sidecar may not be running"
     fi
+    
+    log_success "✓ Demo nginx pod has SPIFFE JWT access via sidecar"
+    log_info "Note: JWT is automatically refreshed by the sidecar at 80% of expiry time"
 }
 
 # Display pod information
@@ -152,10 +192,13 @@ show_pod_info() {
     kubectl describe pod ${POD_NAME} -n ${NAMESPACE} | grep -A 10 -B 5 -E "(Mounts|Volumes|Environment)"
     echo
     echo "Access the nginx pod:"
-    echo "kubectl exec -it ${POD_NAME} -n ${NAMESPACE} -- sh"
+    echo "kubectl exec -it ${POD_NAME} -n ${NAMESPACE} -c nginx -- sh"
     echo
-    echo "Check SPIFFE socket:"
-    echo "kubectl exec ${POD_NAME} -n ${NAMESPACE} -- ls -la /run/spire/sockets/"
+    echo "Check SPIFFE JWT token:"
+    echo "kubectl exec ${POD_NAME} -n ${NAMESPACE} -c nginx -- cat /var/run/secrets/nvidia.com/spiffe/token"
+    echo
+    echo "Check sidecar logs:"
+    echo "kubectl logs ${POD_NAME} -n ${NAMESPACE} -c spiffe-sidecar"
     echo
     echo "Clean up when done:"
     echo "kubectl delete pod ${POD_NAME} -n ${NAMESPACE}"
@@ -179,6 +222,12 @@ main() {
         exit 1
     fi
     
+    # Build and load the Docker image for the sidecar
+    log_info "Building and loading SPIFFE token fetcher image..."
+    build_spiffe_token_fetcher
+    load_images_to_kind
+    echo
+    
     # Create and configure the demo pod
     create_nginx_pod
     wait_for_pod
@@ -194,9 +243,10 @@ main() {
     log_success "Demo nginx pod is ready and configured for SPIFFE!"
     echo
     echo "The nginx pod now has:"
-    echo "- Access to the SPIRE agent socket at /run/spire/sockets/agent.sock"
-    echo "- SPIFFE token directory mounted at /var/run/secrets/nvidia.com/spiffe"
+    echo "- SPIFFE sidecar that fetches JWT from CSI driver"
+    echo "- SPIFFE JWT file at /var/run/secrets/nvidia.com/spiffe/token"
     echo "- SPIRE entry configured for identity: spiffe://example.org/nginx"
+    echo "- JWT automatically refreshed at 80% of expiry time with retries"
 }
 
 # Handle script interruption
