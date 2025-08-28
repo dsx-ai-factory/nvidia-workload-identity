@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# verify-spire.sh
+# 03-verify-spire.sh
 # Comprehensive verification script for SPIRE installation
 
 set -euo pipefail

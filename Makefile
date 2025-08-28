@@ -10,15 +10,15 @@ help: ## Show this help message
 	@echo "Available targets:"
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-install: cluster spire verify-spire nginx bao ## Complete setup: Kind cluster + SPIRE + Demo workload + OpenBao
+install: cluster spire verify-spire bao nginx ## Complete setup: Kind cluster + SPIRE + OpenBao + Demo workload
 	@echo ""
 	@echo "✅ Installation complete!"
 	@echo ""
 	@echo "Your cluster is ready with:"
 	@echo "- SPIRE server and agent running"
+	@echo "- OpenBao with CEL JWT authentication configured"
 	@echo "- Demo nginx pod with SPIFFE identity"
 	@echo "- JWT tokens automatically fetched by Go sidecar"
-	@echo "- OpenBao with CEL JWT authentication configured"
 	@echo ""
 	@echo "Next steps:"
 	@echo "  make test     # Run integration tests"
@@ -67,10 +67,10 @@ spire: ## Install SPIRE only
 	@echo "🔐 Installing SPIRE..."
 	@./scripts/02-install-spire-helm.sh
 
-nginx: ## Deploy demo nginx only
-	@echo "🌐 Deploying demo nginx..."
-	@./scripts/04-demo-nginx.sh
-
 bao: ## Deploy OpenBao only
 	@echo "🔒 Deploying OpenBao..."
-	@./scripts/05-deploy-bao.sh
+	@./scripts/04-deploy-bao.sh
+
+nginx: ## Deploy demo nginx only
+	@echo "🌐 Deploying demo nginx..."
+	@./scripts/05-demo-nginx.sh

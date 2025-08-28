@@ -90,9 +90,9 @@ display_cluster_info() {
     echo
     echo "Next Steps:"
     echo "==========="
-    echo "1. Run './install-spire-helm.sh' to install SPIRE server with Helm"
-    echo "2. Run './verify-spire.sh' to verify the installation"
-    echo "3. Use './cleanup.sh' to clean up when done"
+    echo "1. Run 'make install' to complete the full setup"
+    echo "2. Run 'make test' to verify the installation"
+    echo "3. Use 'make clean' to clean up when done"
 }
 
 # Cleanup function

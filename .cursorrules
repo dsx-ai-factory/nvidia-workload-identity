@@ -164,5 +164,14 @@ trap "kill $pf_pid 2>/dev/null || true" EXIT
 - Avoid marketing language in documentation (e.g., "Zero-Trust Architecture", "Production-Ready"). Keep it factual and technical.
 - Update this cursorrules file as needed when given general directives.
 - ALWAYS update .cursorrules immediately when receiving general directives - do not forget this step.
-- When moving files, validate that all references are updated.
 - Prefer to keep temporary data in memory rather than as temp files. Temp files can leave leftovers if the scripts exit with error.
+
+## File Movement and Reference Validation
+- When moving, renaming, or deleting files, ALWAYS validate that all references are updated:
+  1. Use `grep` to search for old file names/paths across the entire codebase
+  2. Check documentation files (README.md, scripts' help text, comments)
+  3. Check configuration files (Makefile, Dockerfile, YAML files)
+  4. Check script internal references and cross-references
+  5. Update import statements, include paths, and relative references
+  6. Test that the changes work end-to-end before considering the task complete
+- This validation is MANDATORY and must be done systematically, not assumed

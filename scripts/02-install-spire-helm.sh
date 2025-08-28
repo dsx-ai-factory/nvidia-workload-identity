@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# install-spire-helm.sh
+# 02-install-spire-helm.sh
 # Installs SPIRE server and agent using Helm charts
 
 set -euo pipefail
@@ -173,7 +173,7 @@ display_info() {
     echo
     echo "Next Steps:"
     echo "==========="
-    echo "1. Run './verify-spire.sh' to perform comprehensive verification"
+    echo "1. Run 'make verify-spire' to perform comprehensive verification"
     echo "2. Configure your applications to use SPIFFE workload API"
     echo "3. Check the SPIFFE token location: /var/run/secrets/nvidia.com/spiffe/token"
 }

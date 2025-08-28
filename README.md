@@ -32,8 +32,8 @@ make help       # Show all available targets
 make cluster      # Create cluster
 make spire        # Install SPIRE  
 make verify-spire # Verify SPIRE installation  
-make nginx        # Deploy demo workload
 make bao          # Deploy OpenBao with SPIFFE auth
+make nginx        # Deploy demo workload
 ```
 
 ## Configuration

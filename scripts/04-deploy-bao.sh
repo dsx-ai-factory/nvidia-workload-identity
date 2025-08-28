@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# 05-deploy-bao.sh
-# Build and deploy OpenBao to the Kind cluster
+# 04-deploy-bao.sh
+# Deploy OpenBao to the Kind cluster
 
 set -euo pipefail
 
