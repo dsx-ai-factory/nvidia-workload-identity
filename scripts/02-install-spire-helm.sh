@@ -10,7 +10,7 @@ CLUSTER_NAME="${CLUSTER_NAME:-spire-demo}"
 NAMESPACE="${SPIRE_NAMESPACE:-spire-system}"
 SPIRE_SERVER_NAMESPACE="${SPIRE_SERVER_NAMESPACE:-spire-server}"
 HELM_RELEASE_NAME="${HELM_RELEASE_NAME:-spire}"
-SPIRE_TRUST_DOMAIN="${SPIRE_TRUST_DOMAIN:-example.org}"
+SPIRE_TRUST_DOMAIN="${SPIRE_TRUST_DOMAIN:-sjc-1.k8s2-control.nvidia.com}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Source common functions

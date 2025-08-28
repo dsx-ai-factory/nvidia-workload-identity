@@ -2,9 +2,9 @@
 
 global:
   spire:
-    trustDomain: "example.org"
+    trustDomain: "sjc-1.k8s2-control.nvidia.com"
     clusterName: "spire-demo"
-    jwtIssuer: "oidc-discovery.example.org"
+    jwtIssuer: "oidc-discovery.sjc-1.k8s2-control.nvidia.com"
     caSubject:
       country: "US"
       organization: "SPIFFE"
@@ -16,6 +16,16 @@ spire-server:
   
   # Use StatefulSet for persistence
   kind: statefulset
+  
+  # Controller Manager configuration
+  # https://github.com/spiffe/helm-charts-hardened/blob/main/charts/spire/charts/spire-server/README.md
+  controllerManager:
+    enabled: true
+    identities:
+      clusterSPIFFEIDs:
+        # Override the default template to use namespace/pod pattern
+        default:
+          spiffeIDTemplate: spiffe://{{ .TrustDomain }}/{{ .PodMeta.Namespace }}/pod/{{ .PodMeta.Name }}
   
   # Image configuration
   image:

@@ -231,7 +231,7 @@ configure_spiffe_auth() {
     echo "$oidc_ca_cert" > "$cert_file"
     
     bao write auth/spiffe/config \
-        bound_issuer="oidc-discovery.example.org" \
+        bound_issuer="oidc-discovery.sjc-1.k8s2-control.nvidia.com" \
         oidc_discovery_url="https://spire-spiffe-oidc-discovery-provider.spire-server" \
         oidc_discovery_ca_pem=@"$cert_file" >/dev/null
     
@@ -253,8 +253,8 @@ configure_spiffe_auth() {
     
     # Create a role for nginx workload using bao CLI
     bao write auth/spiffe/role/nginx \
-        bound_subject="spiffe://example.org/ns/default/sa/default" \
-        bound_audiences="spiffe://example.org" \
+        bound_subject="spiffe://sjc-1.k8s2-control.nvidia.com/default/pod/demo-nginx" \
+        bound_audiences="spiffe://sjc-1.k8s2-control.nvidia.com" \
         user_claim="sub" \
         role_type="jwt" \
         policies="spiffe-policy" \

@@ -72,31 +72,6 @@ wait_for_pod() {
     fi
 }
 
-# Create SPIRE entry for the nginx pod
-create_spire_entry() {
-    log_info "Creating SPIRE entry for nginx pod..."
-    
-    local server_pod
-    server_pod=$(kubectl get pods -n spire-server -l app.kubernetes.io/name=server -o jsonpath='{.items[0].metadata.name}')
-    
-    if [[ -z "$server_pod" ]]; then
-        log_error "SPIRE server pod not found"
-        return 1
-    fi
-    
-    # Create SPIRE entry for the nginx pod (or update if exists)
-    if kubectl exec -n spire-server "$server_pod" -c spire-server -- \
-        /opt/spire/bin/spire-server entry create \
-        -spiffeID "spiffe://example.org/nginx" \
-        -parentID "spiffe://example.org/spire/agent/k8s_psat/spire-demo/$(kubectl get node spire-demo-worker -o jsonpath='{.metadata.uid}')" \
-        -selector "k8s:ns:${NAMESPACE}" \
-        -selector "k8s:pod-name:${POD_NAME}" 2>/dev/null; then
-        log_success "SPIRE entry created for nginx pod"
-    else
-        log_info "SPIRE entry already exists for nginx pod"
-    fi
-}
-
 # Verify SPIFFE token access
 verify_token_access() {
     log_info "Verifying SPIFFE sidecar token extraction in nginx pod..."
@@ -231,7 +206,6 @@ main() {
     # Create and configure the demo pod
     create_nginx_pod
     wait_for_pod
-    create_spire_entry
     
     echo
     verify_token_access
@@ -245,7 +219,6 @@ main() {
     echo "The nginx pod now has:"
     echo "- SPIFFE sidecar that fetches JWT from CSI driver"
     echo "- SPIFFE JWT file at /var/run/secrets/nvidia.com/spiffe/token"
-    echo "- SPIRE entry configured for identity: spiffe://example.org/nginx"
     echo "- JWT automatically refreshed at 80% of expiry time with retries"
 }
 
