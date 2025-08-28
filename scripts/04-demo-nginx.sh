@@ -47,7 +47,7 @@ load_images_to_kind() {
 create_nginx_pod() {
     log_info "Creating demo nginx pod with SPIFFE access..."
     
-    local config_file="${SCRIPT_DIR}/config/demo-nginx.yaml"
+    local config_file="${PROJECT_ROOT}/config/demo-nginx.yaml"
     
     if [[ ! -f "$config_file" ]]; then
         log_error "Demo nginx configuration file not found: $config_file"

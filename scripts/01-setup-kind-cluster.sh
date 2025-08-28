@@ -7,8 +7,9 @@ set -euo pipefail
 
 # Configuration
 CLUSTER_NAME="${CLUSTER_NAME:-spire-demo}"
-KIND_CONFIG_FILE="${KIND_CONFIG_FILE:-config/kind-config.yaml}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "${SCRIPT_DIR}")"
+KIND_CONFIG_FILE="${KIND_CONFIG_FILE:-${PROJECT_ROOT}/config/kind-config.yaml}"
 
 # Source common functions
 source "${SCRIPT_DIR}/common.sh"
@@ -46,38 +47,27 @@ check_prerequisites() {
 check_kind_config() {
     log_info "Checking Kind cluster configuration..."
     
-    if [[ ! -f "${SCRIPT_DIR}/${KIND_CONFIG_FILE}" ]]; then
-        log_error "Kind configuration file not found: ${SCRIPT_DIR}/${KIND_CONFIG_FILE}"
-        log_info "Expected file: ${KIND_CONFIG_FILE}"
+    if [[ ! -f "${KIND_CONFIG_FILE}" ]]; then
+        log_error "Kind configuration file not found: ${KIND_CONFIG_FILE}"
         exit 1
     fi
     
-
-    
-    log_success "Kind configuration validated at ${SCRIPT_DIR}/${KIND_CONFIG_FILE}"
+    log_success "Kind configuration validated at ${KIND_CONFIG_FILE}"
 }
 
 # Create the Kind cluster
 create_cluster() {
     log_info "Creating Kind cluster '${CLUSTER_NAME}'..."
     
-    # Check if cluster already exists
+    # Check if cluster already exists and delete it
     if kind get clusters | grep -q "^${CLUSTER_NAME}$"; then
-        log_warning "Cluster '${CLUSTER_NAME}' already exists"
-        read -p "Do you want to delete and recreate it? (y/N): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            log_info "Deleting existing cluster..."
-            kind delete cluster --name "${CLUSTER_NAME}"
-        else
-            log_info "Using existing cluster"
-            return 0
-        fi
+        log_info "Deleting existing cluster '${CLUSTER_NAME}'..."
+        kind delete cluster --name "${CLUSTER_NAME}"
     fi
     
-    
     # Create the cluster
-    kind create cluster --config="${SCRIPT_DIR}/${KIND_CONFIG_FILE}" --name="${CLUSTER_NAME}"
+    log_info "Creating new cluster..."
+    kind create cluster --config="${KIND_CONFIG_FILE}" --name="${CLUSTER_NAME}"
     
     # Wait for cluster to be ready
     log_info "Waiting for cluster to be ready..."
@@ -105,14 +95,60 @@ display_cluster_info() {
     echo "3. Use './cleanup.sh' to clean up when done"
 }
 
+# Cleanup function
+cleanup_cluster() {
+    log_info "Cleaning up Kind cluster..."
+    
+    # Check if cluster exists
+    if kind get clusters | grep -q "^${CLUSTER_NAME}$"; then
+        log_info "Deleting Kind cluster '${CLUSTER_NAME}'..."
+        kind delete cluster --name "${CLUSTER_NAME}"
+        log_success "Kind cluster '${CLUSTER_NAME}' deleted"
+    else
+        log_info "Kind cluster '${CLUSTER_NAME}' not found"
+    fi
+    
+    log_success "Cleanup completed!"
+}
+
+# Display usage
+usage() {
+    echo "Usage: $0 [OPTIONS]"
+    echo ""
+    echo "Creates or manages a Kind cluster configured for SPIRE deployment"
+    echo ""
+    echo "Options:"
+    echo "  cleanup    Delete the Kind cluster"
+    echo "  help       Show this help message"
+    echo ""
+    echo "Environment Variables:"
+    echo "  CLUSTER_NAME      Name of the Kind cluster (default: spire-demo)"
+    echo "  KIND_CONFIG_FILE  Path to Kind configuration file"
+}
+
 # Main execution
 main() {
-    log_info "Starting Kind cluster setup for SPIRE..."
-    
-    check_prerequisites
-    check_kind_config
-    create_cluster
-    display_cluster_info
+    case "${1:-}" in
+        "cleanup")
+            cleanup_cluster
+            ;;
+        "help")
+            usage
+            ;;
+        "")
+            log_info "Starting Kind cluster setup for SPIRE..."
+            check_prerequisites
+            check_kind_config
+            create_cluster
+            display_cluster_info
+            ;;
+        *)
+            echo "Error: Unknown option '$1'"
+            echo ""
+            usage
+            exit 1
+            ;;
+    esac
 }
 
 # Handle script interruption

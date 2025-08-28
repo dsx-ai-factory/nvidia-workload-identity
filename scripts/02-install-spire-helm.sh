@@ -12,6 +12,7 @@ SPIRE_SERVER_NAMESPACE="${SPIRE_SERVER_NAMESPACE:-spire-server}"
 HELM_RELEASE_NAME="${HELM_RELEASE_NAME:-spire}"
 SPIRE_TRUST_DOMAIN="${SPIRE_TRUST_DOMAIN:-sjc-1.k8s2-control.nvidia.com}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "${SCRIPT_DIR}")"
 
 # Source common functions
 source "${SCRIPT_DIR}/common.sh"
@@ -69,7 +70,7 @@ add_helm_repo() {
 check_spire_server_config() {
     log_info "Checking SPIRE server configuration..."
     
-    local config_file="${SCRIPT_DIR}/config/spire-server-values.yaml"
+    local config_file="${PROJECT_ROOT}/config/spire-server-values.yaml"
     
     if [[ ! -f "$config_file" ]]; then
         log_error "SPIRE server configuration file not found: $config_file"
@@ -100,7 +101,7 @@ install_spire() {
     helm upgrade --install spire spiffe/spire \
         --namespace "${SPIRE_SERVER_NAMESPACE}" \
         --create-namespace \
-        --values "${SCRIPT_DIR}/config/spire-server-values.yaml" \
+        --values "${PROJECT_ROOT}/config/spire-server-values.yaml" \
         --timeout 10m \
         --wait
     

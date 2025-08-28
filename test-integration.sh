@@ -9,7 +9,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Source common functions
-source "${SCRIPT_DIR}/common.sh"
+source "${SCRIPT_DIR}/scripts/common.sh"
 
 # Test SPIFFE to Bao authentication
 test_spiffe_auth() {

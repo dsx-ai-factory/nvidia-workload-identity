@@ -33,4 +33,4 @@ COPY --from=builder /app/spiffe-token-fetcher .
 RUN mkdir -p /var/run/secrets/nvidia.com/spiffe
 
 # Run the token fetcher
-ENTRYPOINT ["./spiffe-token-fetcher"]
+ENTRYPOINT ["/root/spiffe-token-fetcher"]

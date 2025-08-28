@@ -26,7 +26,9 @@ This project demonstrates SPIFFE JWT authentication with OpenBao's CEL (Common E
 
 ### File Organization
 - **NEVER embed files in scripts** - always reference external files on disk
-- Use `scripts/config/` directory for all configuration files
+- Use `config/` directory for all configuration files
+- Use `config/policies/` subdirectory for OpenBao policy files
+- Use `scripts/` directory for numbered step scripts
 - Policy files: Use separate `.hcl` files for each OpenBao policy
 
 ### Script Requirements
@@ -167,5 +169,7 @@ trap "kill $pf_pid 2>/dev/null || true" EXIT
 
 ## More Rules
 - Keep documentation concise. It should be easy to skim and get all information needed. Do not add unneeded info.
+- Avoid marketing language in documentation (e.g., "Zero-Trust Architecture", "Production-Ready"). Keep it factual and technical.
 - Update this cursorrules file as needed when given general directives.
-- 
+- ALWAYS update .cursorrules immediately when receiving general directives - do not forget this step.
+- When moving files, validate that all references are updated.

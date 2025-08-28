@@ -66,7 +66,7 @@ add_bao_helm_repo() {
 deploy_bao() {
     log_info "Deploying OpenBao using Helm chart..."
     
-    local values_file="${SCRIPT_DIR}/config/bao-values.yaml"
+    local values_file="${PROJECT_ROOT}/config/bao-values.yaml"
     
     if [[ ! -f "$values_file" ]]; then
         log_error "Bao Helm values file not found: $values_file"
@@ -238,7 +238,7 @@ configure_spiffe_auth() {
     rm -f "$cert_file"
     
     # Create policies for SPIFFE authenticated users  
-    local policy_file="$SCRIPT_DIR/config/spiffe-policy.hcl"
+    local policy_file="$PROJECT_ROOT/config/policies/spiffe-policy.hcl"
     
     if [[ ! -f "$policy_file" ]]; then
         log_error "SPIFFE policy file not found: $policy_file"
@@ -251,16 +251,16 @@ configure_spiffe_auth() {
     bao policy write spiffe-authenticated "$policy_file" >/dev/null
     
     # Create additional CEL-based policies for different components
-    local config_dir="$SCRIPT_DIR/config"
+    local policies_dir="$PROJECT_ROOT/config/policies"
     
-    bao policy write region-sjc-1 "$config_dir/region-sjc-1-policy.hcl" >/dev/null
-    bao policy write tenant-k8s2-control "$config_dir/tenant-k8s2-control-policy.hcl" >/dev/null
-    bao policy write product-default "$config_dir/product-default-policy.hcl" >/dev/null
-    bao policy write resource-type-pod "$config_dir/resource-type-pod-policy.hcl" >/dev/null
-    bao policy write resource-id-demo-nginx "$config_dir/resource-id-demo-nginx-policy.hcl" >/dev/null
+    bao policy write region-sjc-1 "$policies_dir/region-sjc-1-policy.hcl" >/dev/null
+    bao policy write tenant-k8s2-control "$policies_dir/tenant-k8s2-control-policy.hcl" >/dev/null
+    bao policy write product-default "$policies_dir/product-default-policy.hcl" >/dev/null
+    bao policy write resource-type-pod "$policies_dir/resource-type-pod-policy.hcl" >/dev/null
+    bao policy write resource-id-demo-nginx "$policies_dir/resource-id-demo-nginx-policy.hcl" >/dev/null
     
     # Create CEL role using the cel-role.json file but updated for our trust domain
-    local cel_role_file="$PROJECT_ROOT/cel-role.json"
+    local cel_role_file="$PROJECT_ROOT/config/cel-role.json"
     if [[ ! -f "$cel_role_file" ]]; then
         log_error "CEL role file not found: $cel_role_file"
         cleanup_port_forward
