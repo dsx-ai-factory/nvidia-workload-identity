@@ -1,6 +1,6 @@
 # SPIFFE + OpenBao CEL Demo Makefile
 
-.PHONY: help install clean test verify-spire cluster spire nginx bao
+.PHONY: help install clean test verify-spire cluster spire nginx bao status
 
 # Default target
 help: ## Show this help message
