@@ -133,14 +133,6 @@ fi
 kubectl wait --for=condition=Ready pod/pod-name --timeout=60s
 ```
 
-### Temporary File Handling
-```bash
-local temp_file=$(mktemp)
-echo "$content" > "$temp_file"
-# Use temp_file
-rm -f "$temp_file"
-```
-
 ### Port Forward with Cleanup
 ```bash
 kubectl port-forward svc/service 8200:8200 &
@@ -173,3 +165,4 @@ trap "kill $pf_pid 2>/dev/null || true" EXIT
 - Update this cursorrules file as needed when given general directives.
 - ALWAYS update .cursorrules immediately when receiving general directives - do not forget this step.
 - When moving files, validate that all references are updated.
+- Prefer to keep temporary data in memory rather than as temp files. Temp files can leave leftovers if the scripts exit with error.

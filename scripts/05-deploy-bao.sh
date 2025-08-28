@@ -186,7 +186,10 @@ configure_spiffe_auth() {
     export VAULT_ADDR=http://127.0.0.1:8200
     export VAULT_TOKEN="$root_token"
     
-    bao auth enable jwt >/dev/null
+    # Check if JWT auth is already enabled
+    if ! bao auth list | grep -q "jwt/"; then
+        bao auth enable jwt >/dev/null
+    fi
     
     # Extract the TLS certificate from the OIDC discovery provider
     log_info "Extracting TLS certificate from OIDC discovery provider..."
@@ -210,16 +213,10 @@ configure_spiffe_auth() {
     # Configure JWT auth with OIDC Discovery URL using bao CLI
     log_info "Configuring JWT authentication with OIDC Discovery URL..."
     
-    # Write certificate to temporary file for bao CLI
-    local cert_file=$(mktemp)
-    echo "$oidc_ca_cert" > "$cert_file"
-    
+    # Configure JWT auth with certificate via stdin
     bao write auth/jwt/config \
         oidc_discovery_url="https://spire-spiffe-oidc-discovery-provider.spire-server" \
-        oidc_discovery_ca_pem=@"$cert_file" >/dev/null
-    
-    # Clean up temporary file
-    rm -f "$cert_file"
+        oidc_discovery_ca_pem="$oidc_ca_cert" >/dev/null
     
     # Create policies for SPIFFE authenticated users  
     local policy_file="$PROJECT_ROOT/config/policies/spiffe-policy.hcl"
@@ -253,10 +250,9 @@ configure_spiffe_auth() {
     fi
     
     # Update the cel-role.json bound_audiences for our trust domain and create the role
-    local temp_cel_role=$(mktemp)
-    jq '.bound_audiences = ["spiffe://sjc-1.k8s2-control.nvidia.com"]' "$cel_role_file" > "$temp_cel_role"
-    bao write auth/jwt/cel/role/basic-spiffe @"$temp_cel_role" >/dev/null
-    rm -f "$temp_cel_role"
+    local updated_cel_role
+    updated_cel_role=$(jq '.bound_audiences = ["spiffe://sjc-1.k8s2-control.nvidia.com"]' "$cel_role_file")
+    echo "$updated_cel_role" | bao write auth/jwt/cel/role/basic-spiffe - >/dev/null
     
     log_success "SPIFFE JWT authentication configured"
     
