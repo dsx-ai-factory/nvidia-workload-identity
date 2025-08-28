@@ -53,9 +53,10 @@ test_spiffe_auth() {
     
     local auth_result
     auth_result=$(kubectl exec demo-nginx -c nginx -- \
-        wget -qO- --post-data='{"jwt":"'$(kubectl exec demo-nginx -c nginx -- cat /var/run/secrets/nvidia.com/spiffe/token)'","role":"nginx"}' \
-        --header="Content-Type: application/json" \
-        http://openbao.bao:8200/v1/auth/spiffe/login 2>/dev/null || echo "failed")
+        curl -s -X POST \
+        -H "Content-Type: application/json" \
+        -d '{"jwt":"'$(kubectl exec demo-nginx -c nginx -- cat /var/run/secrets/nvidia.com/spiffe/token)'","role":"basic-spiffe"}' \
+        http://openbao.bao:8200/v1/auth/jwt/cel/login 2>/dev/null || echo "failed")
     
     if [[ "$auth_result" == "failed" ]] || [[ -z "$auth_result" ]]; then
         log_error "Authentication to Bao failed"
@@ -80,7 +81,7 @@ test_spiffe_auth() {
     if [[ -n "$client_token" ]]; then
         local secret_result
         secret_result=$(kubectl exec demo-nginx -c nginx -- \
-            wget -qO- --header="X-Vault-Token: $client_token" \
+            curl -s -H "X-Vault-Token: $client_token" \
             http://openbao.bao:8200/v1/secret/data/nginx 2>/dev/null || echo "failed")
         
         if echo "$secret_result" | grep -q '"username"'; then

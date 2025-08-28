@@ -1,0 +1,171 @@
+# SPIFFE + OpenBao CEL Project Rules
+
+## Project Overview
+This project demonstrates SPIFFE JWT authentication with OpenBao's CEL (Common Expression Language) enabled JWT auth method. It includes:
+- Kind cluster setup with SPIRE server/agent
+- SPIFFE workload identity management via ClusterSPIFFEID CRDs
+- OpenBao deployment with CEL-based dynamic policy assignment
+- Go sidecar for JWT token fetching and refresh
+- End-to-end integration testing
+
+## Core Architecture Principles
+
+### SPIFFE Identity Pattern
+- Trust domain: `sjc-1.k8s2-control.nvidia.com`
+- SPIFFE ID template: `spiffe://{{ .TrustDomain }}/{{ .PodMeta.Namespace }}/pod/{{ .PodMeta.Name }}`
+- Use namespace/pod pattern, not service account identities
+- JWT issuer: `oidc-discovery.sjc-1.k8s2-control.nvidia.com`
+
+### OpenBao CEL Integration
+- Use JWT CEL authentication (`/v1/auth/jwt/cel/login`), not static JWT auth
+- CEL program parses SPIFFE ID components for dynamic policy assignment
+- Policies: `spiffe-authenticated`, `region-*`, `tenant-*`, `product-*`, `resource-type-*`, `resource-id-*`
+- Use OIDC Discovery Provider with TLS certificate extraction
+
+## Development Guidelines
+
+### File Organization
+- **NEVER embed files in scripts** - always reference external files on disk
+- Use `scripts/config/` directory for all configuration files
+- Policy files: Use separate `.hcl` files for each OpenBao policy
+
+### Script Requirements
+- **All scripts must be repeatable and idempotent**
+- Use `curl` instead of `wget` for all HTTP requests
+- Scripts must handle cleanup and error scenarios
+- Use common logging functions from `common.sh`
+
+### Container and Image Standards
+- Build images locally from source when using unreleased changes
+- Load all custom images into Kind cluster via `kind load docker-image`
+- Use specific image tags, avoid `latest` in production-like configs
+- Go applications: Use multi-stage builds with minimal runtime images
+- Include resource limits and requests for all containers
+
+### Kubernetes Patterns
+- Use Helm charts with values files instead of raw YAML
+- Configure via `values.yaml` files, not `--set` flags
+- Use `kubectl wait` with timeouts instead of sleep loops
+
+### SPIRE Configuration
+- Use official SPIRE Helm charts (`spiffe/spire`) 
+- Configure via `controllerManager.identities.clusterSPIFFEIDs.default.spiffeIDTemplate`
+- Enable SPIFFE OIDC Discovery Provider for JWT validation
+- Use CSI driver for workload token access, not hostPath mounts
+
+### OpenBao Configuration  
+- Build from source using `make docker-dev` in `openbao/` directory
+- Use official OpenBao Helm chart with local image override
+- Configure JWT auth with OIDC Discovery URL and CA certificate
+- Extract TLS certificates using temporary Alpine containers
+- Use `bao` CLI with port-forwarding, not `kubectl exec` with `curl`
+- Use temporary files for multi-line content (certificates, policies)
+- Clean up temporary files and background processes
+
+### Go Development
+- Use Go 1.25+
+- Import `spiffe-go` version matching base repository
+- Use structured logging and proper error handling
+- Build from project root with `cmd/` pattern
+
+### Testing and Validation
+- Include comprehensive integration tests
+- Test both positive and negative scenarios  
+- Verify SPIFFE ID assignment and CEL policy evaluation
+- Check token refresh and retry mechanisms
+- Validate OpenBao authentication and secret access
+- Include end-to-end cleanup and restart testing
+
+## Code Style Guidelines
+
+### Shell Scripts
+- Use `#!/bin/bash` shebang
+- Include error handling with `set -euo pipefail` where appropriate  
+- Use consistent logging with color coding (only in `common.sh`)
+- Include usage documentation and examples
+- Use meaningful variable names with consistent casing
+- Include cleanup functions with proper trap handling
+
+### YAML Configuration
+- Use 2-space indentation
+- Include resource limits and requests
+- Use meaningful labels and annotations
+- Include proper volume mounts and security contexts
+- Use ConfigMaps/Secrets for sensitive data when possible
+
+### Go Code
+- Follow standard Go formatting and conventions
+- Use structured logging with consistent fields
+- Include comprehensive error handling and context
+- Use flag package for CLI arguments with sensible defaults
+- Include unit tests for business logic
+- Use proper context handling for cancellation
+
+## Naming Conventions
+- Avoid redundant terminology (e.g., "JWT token" → "JWT")
+- Use consistent naming: `spiffe-token-fetcher`, `demo-nginx`, `openbao`
+- Kubernetes resources: Use descriptive names with component labels
+- Environment variables: Use UPPER_SNAKE_CASE
+- File names: Use kebab-case for scripts, camelCase for Go
+
+## Dependencies and Versions
+- Kubernetes: v1.30+ (required by OpenBao Helm chart)
+- Kind: Latest stable version with `kindest/node:v1.30.0`
+- SPIRE: Use latest stable Helm chart (`spiffe/spire`)
+- OpenBao: Build from main branch for latest features
+- Go: Version 1.25+ with matching spiffe-go library version
+
+## Common Patterns to Follow
+
+### Error Handling
+```bash
+if ! command; then
+    log_error "Command failed"
+    cleanup_function
+    return 1
+fi
+```
+
+### Kubernetes Resource Waiting
+```bash
+kubectl wait --for=condition=Ready pod/pod-name --timeout=60s
+```
+
+### Temporary File Handling
+```bash
+local temp_file=$(mktemp)
+echo "$content" > "$temp_file"
+# Use temp_file
+rm -f "$temp_file"
+```
+
+### Port Forward with Cleanup
+```bash
+kubectl port-forward svc/service 8200:8200 &
+local pf_pid=$!
+trap "kill $pf_pid 2>/dev/null || true" EXIT
+```
+
+## Anti-Patterns to Avoid
+- Embedding configuration in scripts
+- Using `wget` instead of `curl`
+- Manual `kubectl exec` for API calls when CLI tools exist
+- Hardcoded timeouts without configurability
+- Missing cleanup in error scenarios
+- Reverting user's manual configuration changes
+- Creating files without validating they don't exist
+- Using `latest` tags in production configurations
+- Skipping validation steps that could fail silently
+
+## When Making Changes
+1. Always run full end-to-end tests after modifications
+2. Update documentation and examples to reflect changes
+3. Ensure backward compatibility where possible
+4. Add appropriate error handling and logging
+5. Check that configuration changes are applied via scripts, not manually
+6. Only manually query cluster state for debugging and validation. Do not make changes to cluster state and then continue without updating the deployment scripts. Everything must be repeatable.
+
+## More Rules
+- Keep documentation concise. It should be easy to skim and get all information needed. Do not add unneeded info.
+- Update this cursorrules file as needed when given general directives.
+- 

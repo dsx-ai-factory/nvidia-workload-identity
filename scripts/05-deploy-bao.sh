@@ -202,7 +202,7 @@ configure_spiffe_auth() {
     export VAULT_ADDR=http://127.0.0.1:8200
     export VAULT_TOKEN="$root_token"
     
-    bao auth enable -path=spiffe jwt >/dev/null
+    bao auth enable jwt >/dev/null
     
     # Extract the TLS certificate from the OIDC discovery provider
     log_info "Extracting TLS certificate from OIDC discovery provider..."
@@ -230,15 +230,14 @@ configure_spiffe_auth() {
     local cert_file=$(mktemp)
     echo "$oidc_ca_cert" > "$cert_file"
     
-    bao write auth/spiffe/config \
-        bound_issuer="oidc-discovery.sjc-1.k8s2-control.nvidia.com" \
+    bao write auth/jwt/config \
         oidc_discovery_url="https://spire-spiffe-oidc-discovery-provider.spire-server" \
         oidc_discovery_ca_pem=@"$cert_file" >/dev/null
     
     # Clean up temporary file
     rm -f "$cert_file"
     
-    # Create a policy for SPIFFE authenticated users
+    # Create policies for SPIFFE authenticated users  
     local policy_file="$SCRIPT_DIR/config/spiffe-policy.hcl"
     
     if [[ ! -f "$policy_file" ]]; then
@@ -248,18 +247,32 @@ configure_spiffe_auth() {
         return 1
     fi
     
-    # Create policy using bao CLI with policy file
-    bao policy write spiffe-policy "$policy_file" >/dev/null
+    # Create the main spiffe-authenticated policy
+    bao policy write spiffe-authenticated "$policy_file" >/dev/null
     
-    # Create a role for nginx workload using bao CLI
-    bao write auth/spiffe/role/nginx \
-        bound_subject="spiffe://sjc-1.k8s2-control.nvidia.com/default/pod/demo-nginx" \
-        bound_audiences="spiffe://sjc-1.k8s2-control.nvidia.com" \
-        user_claim="sub" \
-        role_type="jwt" \
-        policies="spiffe-policy" \
-        ttl="1h" \
-        max_ttl="1h" >/dev/null
+    # Create additional CEL-based policies for different components
+    local config_dir="$SCRIPT_DIR/config"
+    
+    bao policy write region-sjc-1 "$config_dir/region-sjc-1-policy.hcl" >/dev/null
+    bao policy write tenant-k8s2-control "$config_dir/tenant-k8s2-control-policy.hcl" >/dev/null
+    bao policy write product-default "$config_dir/product-default-policy.hcl" >/dev/null
+    bao policy write resource-type-pod "$config_dir/resource-type-pod-policy.hcl" >/dev/null
+    bao policy write resource-id-demo-nginx "$config_dir/resource-id-demo-nginx-policy.hcl" >/dev/null
+    
+    # Create CEL role using the cel-role.json file but updated for our trust domain
+    local cel_role_file="$PROJECT_ROOT/cel-role.json"
+    if [[ ! -f "$cel_role_file" ]]; then
+        log_error "CEL role file not found: $cel_role_file"
+        cleanup_port_forward
+        trap - EXIT
+        return 1
+    fi
+    
+    # Update the cel-role.json bound_audiences for our trust domain and create the role
+    local temp_cel_role=$(mktemp)
+    jq '.bound_audiences = ["spiffe://sjc-1.k8s2-control.nvidia.com"]' "$cel_role_file" > "$temp_cel_role"
+    bao write auth/jwt/cel/role/basic-spiffe @"$temp_cel_role" >/dev/null
+    rm -f "$temp_cel_role"
     
     log_success "SPIFFE JWT authentication configured"
     
@@ -293,9 +306,9 @@ show_bao_info() {
     kubectl get configmap bao-init-keys -n "${NAMESPACE}" -o jsonpath='{.data.root_token}' 2>/dev/null || echo "Not available"
     echo
     echo
-    echo "Test SPIFFE authentication:"
+    echo "Test SPIFFE CEL authentication:"
     echo "jwt=\\\$(kubectl exec demo-nginx -c nginx -- cat /var/run/secrets/nvidia.com/spiffe/token)"
-    echo "kubectl exec demo-nginx -c nginx -- wget -qO- --post-data=\"{\\\"jwt\\\":\\\"\\\$jwt\\\",\\\"role\\\":\\\"nginx\\\"}\" --header=\"Content-Type: application/json\" http://openbao.${NAMESPACE}:8200/v1/auth/spiffe/login" 
+    echo "kubectl exec demo-nginx -c nginx -- curl -s -X POST -H \\\"Content-Type: application/json\\\" -d \\\"{\\\\\\\"jwt\\\\\\\":\\\\\\\"\\\$jwt\\\\\\\",\\\\\\\"role\\\\\\\":\\\\\\\"basic-spiffe\\\\\\\"}\\\" http://openbao.${NAMESPACE}:8200/v1/auth/jwt/cel/login" 
 }
 
 # Cleanup function
