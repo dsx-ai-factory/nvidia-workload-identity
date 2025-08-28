@@ -8,7 +8,7 @@
             "mode": "auto",
             "program": "${workspaceFolder}/cmd/cel-evaluator",
             "args": [
-                "scripts/cel-role.json"
+                "config/cel-role.json"
             ],
             "cwd": "${workspaceFolder}",
             "env": {},
@@ -21,7 +21,7 @@
             "mode": "debug",
             "program": "${workspaceFolder}/cmd/cel-evaluator",
             "args": [
-                "scripts/cel-role.json"
+                "config/cel-role.json"
             ],
             "cwd": "${workspaceFolder}",
             "env": {},

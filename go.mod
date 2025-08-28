@@ -2,13 +2,9 @@ module spiffe-jwt-issuer
 
 go 1.25
 
-replace github.com/openbao/openbao/sdk/v2 => ./openbao/sdk
-
-replace github.com/openbao/openbao/api/v2 => ./openbao/api
-
 require (
 	github.com/google/cel-go v0.26.1
-	github.com/openbao/openbao/sdk/v2 v2.3.1
+	github.com/openbao/openbao/sdk/v2 v2.4.0
 	github.com/spiffe/go-spiffe/v2 v2.5.0
 )
 

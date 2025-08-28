@@ -6,9 +6,6 @@ WORKDIR /app
 # Copy go modules files
 COPY go.mod go.sum ./
 
-# Copy openbao dependency
-COPY openbao/ ./openbao/
-
 # Download dependencies
 RUN go mod download
 

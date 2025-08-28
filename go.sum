@@ -150,6 +150,10 @@ github.com/openbao/go-kms-wrapping/entropy/v2 v2.1.0 h1:f+OX5kI8KLPYhzRhqhQTQPas
 github.com/openbao/go-kms-wrapping/entropy/v2 v2.1.0/go.mod h1:2ZTItykGc/yQcdNfyK2TPBYKlOibfwSPr7ugFyqGXlI=
 github.com/openbao/go-kms-wrapping/v2 v2.5.0 h1:vHGKqdPCIkygkTFlDyq3fvhe2G7GGEJOztrhpSwNy4M=
 github.com/openbao/go-kms-wrapping/v2 v2.5.0/go.mod h1:fnDDM+YoNBmpvqBWqeCnEBPEbQdzwAUoaZrLNDmDqmY=
+github.com/openbao/openbao/api/v2 v2.4.0 h1:OcHJgexGt65qFNcpNNqM2v3otaWt8YhfD7Q5Sy6CWZc=
+github.com/openbao/openbao/api/v2 v2.4.0/go.mod h1:ULxn1SwPo/txs19I1VHEBBqMspG8wiZ17qe9DMjCwP0=
+github.com/openbao/openbao/sdk/v2 v2.4.0 h1:OuXvHwgKIPSKe8+70swFibVT7BxlmBv/9hCx136isuw=
+github.com/openbao/openbao/sdk/v2 v2.4.0/go.mod h1:mBkdbTK18AlurO36PWLtn7Sqe7UIas98q4/pm+HcE1U=
 github.com/pascaldekloe/goe v0.1.0 h1:cBOtyMzM9HTpWjXfbbunk26uA6nG3a8n06Wieeh0MwY=
 github.com/pascaldekloe/goe v0.1.0/go.mod h1:lzWF7FIEvWOWxwDKqyGYQf6ZUaNfKdP144TG7ZOy1lc=
 github.com/pierrec/lz4 v2.6.1+incompatible h1:9UY3+iC23yxF0UfGaYrGplQ+79Rg+h/q9FV9ix19jjM=

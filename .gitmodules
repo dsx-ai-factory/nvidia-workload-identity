@@ -1,3 +1,0 @@
-[submodule "openbao"]
-	path = openbao
-	url = https://github.com/openbao/openbao.git

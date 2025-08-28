@@ -137,6 +137,3 @@ vault-data/
 bao-data/
 raft-data/
 audit.log
-
-# CEL specific temporary files
-cel-*.json.tmp
