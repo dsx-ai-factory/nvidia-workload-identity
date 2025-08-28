@@ -14,22 +14,9 @@ CLUSTER_NAME="${CLUSTER_NAME:-spire-demo}"
 # Source common functions
 source "${SCRIPT_DIR}/common.sh"
 
-# Build Bao Docker image
-build_bao_image() {
-    log_info "Building OpenBao Docker image from source..."
-    
-    cd "${PROJECT_ROOT}/openbao"
-    
-    # Use the official build process from the Makefile
-    log_info "Building OpenBao using make docker-dev..."
-    make docker-dev
-    
-    log_success "OpenBao Docker image built successfully"
-}
-
-# Load Bao image into Kind cluster
-load_bao_image() {
-    log_info "Loading OpenBao image into Kind cluster..."
+# Check if Kind cluster exists
+check_cluster() {
+    log_info "Checking Kind cluster..."
     
     # Check if Kind cluster exists
     if ! kind get clusters | grep -q "^${CLUSTER_NAME}$"; then
@@ -37,10 +24,7 @@ load_bao_image() {
         exit 1
     fi
     
-    # Load the image into Kind
-    kind load docker-image openbao:dev --name "${CLUSTER_NAME}"
-    
-    log_success "OpenBao image loaded into Kind cluster"
+    log_success "Kind cluster '${CLUSTER_NAME}' found"
 }
 
 # Create Bao namespace
@@ -329,9 +313,8 @@ main() {
         exit 1
     fi
     
-    # Build and deploy Bao
-    build_bao_image
-    load_bao_image
+    # Deploy Bao
+    check_cluster
     add_bao_helm_repo
     deploy_bao
     wait_for_bao

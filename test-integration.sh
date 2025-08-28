@@ -66,7 +66,8 @@ test_spiffe_auth() {
     # Check if we got a client token back
     if echo "$auth_result" | grep -q '"client_token"'; then
         log_success "✓ SPIFFE JWT authentication to Bao successful!"
-        log_info "Response: $(echo "$auth_result" | head -c 100)..."
+        log_info "Authentication Response:"
+        echo "$auth_result" | jq . 2>/dev/null || echo "$auth_result"
     else
         log_error "Authentication response doesn't contain client_token"
         log_info "Response: $auth_result"
@@ -86,7 +87,8 @@ test_spiffe_auth() {
         
         if echo "$secret_result" | grep -q '"username"'; then
             log_success "✓ Secret access successful!"
-            log_info "Secret data: $(echo "$secret_result" | head -c 150)..."
+            log_info "Secret Response:"
+            echo "$secret_result" | jq . 2>/dev/null || echo "$secret_result"
         else
             log_warning "Secret access failed or no data returned"
             log_info "Response: $secret_result"

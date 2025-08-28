@@ -1,14 +1,14 @@
 # OpenBao Helm Chart Values
-# Using local image override for development
+# Using official OpenBao 2.4.0 release
 
 # Server configuration  
 server:
-  # Use local built image (overrides default quay.io/openbao/openbao:2.3.2)
+  # Use official OpenBao 2.4.0 image
   image:
-    registry: ""
-    repository: openbao
-    tag: dev
-    pullPolicy: Never
+    registry: quay.io
+    repository: openbao/openbao
+    tag: "2.4.0"
+    pullPolicy: IfNotPresent
   # Resources
   resources:
     requests:

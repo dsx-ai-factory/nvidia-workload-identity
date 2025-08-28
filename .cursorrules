@@ -56,8 +56,8 @@ This project demonstrates SPIFFE JWT authentication with OpenBao's CEL (Common E
 - Use CSI driver for workload token access, not hostPath mounts
 
 ### OpenBao Configuration  
-- Build from source using `make docker-dev` in `openbao/` directory
-- Use official OpenBao Helm chart with local image override
+- Use official OpenBao 2.4.0 release from quay.io/openbao/openbao:2.4.0
+- Use official OpenBao Helm chart with official image
 - Configure JWT auth with OIDC Discovery URL and CA certificate
 - Extract TLS certificates using temporary Alpine containers
 - Use `bao` CLI with port-forwarding, not `kubectl exec` with `curl`
@@ -114,7 +114,7 @@ This project demonstrates SPIFFE JWT authentication with OpenBao's CEL (Common E
 - Kubernetes: v1.30+ (required by OpenBao Helm chart)
 - Kind: Latest stable version with `kindest/node:v1.30.0`
 - SPIRE: Use latest stable Helm chart (`spiffe/spire`)
-- OpenBao: Build from main branch for latest features
+- OpenBao: Version 2.4.0 official release
 - Go: Version 1.25+ with matching spiffe-go library version
 
 ## Common Patterns to Follow
