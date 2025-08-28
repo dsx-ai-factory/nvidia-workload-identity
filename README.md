@@ -125,5 +125,5 @@ flowchart TD
 ### Key Features:
 
 - **SPIFFE Identity**: Workloads get cryptographically verifiable identities
-- **Dynamic Policy Assignment**: CEL program parses SPIFFE ID components (`region`, `tenant`, `product`, `resource-type`, `resource-id`) from pattern `spiffe://region.tenant.product.nvidia.com/resource-type/resource-id` and assigns policies dynamically
+- **Dynamic Policy Assignment**: CEL program parses SPIFFE ID components (`region`, `tenant`, `product`, `resource-type`, `resource-id`) from pattern `spiffe://region.tenant.nvidia.com/product/resource-type/resource-id` and assigns policies dynamically
 - **Automatic JWT Refresh**: Go sidecar refreshes tokens at 80% expiry with retry logic
