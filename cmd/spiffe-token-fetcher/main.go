@@ -71,11 +71,12 @@ func fetchJWTWithRetry(ctx context.Context, jwtSource *workloadapi.JWTSource, au
 
 func main() {
 	var (
-		socketPath = flag.String("socket", "unix:///var/run/secrets/spire.io/spire-agent.sock", "Path to SPIRE Workload API socket")
-		audience   = flag.String("audience", "spiffe://example.org", "JWT audience")
-		outputPath = flag.String("output", "/var/run/secrets/nvidia.com/spiffe/token", "Output file path for JWT token")
-		maxRetries = flag.Int("retries", 3, "Maximum number of retry attempts")
-		verbose    = flag.Bool("verbose", true, "Enable verbose logging")
+		socketPath     = flag.String("socket", "unix:///var/run/secrets/spire.io/spire-agent.sock", "Path to SPIRE Workload API socket")
+		audience       = flag.String("audience", "spiffe://example.org", "JWT audience")
+		outputPath     = flag.String("output", "/var/run/secrets/nvidia.com/spiffe/token", "Output file path for JWT token")
+		maxRetries     = flag.Int("retries", 3, "Maximum number of retry attempts")
+		verbose        = flag.Bool("verbose", true, "Enable verbose logging")
+		exitAfterFetch = flag.Bool("exit-after-fetch", false, "Exit after fetching the initial JWT (for init container use)")
 	)
 	flag.Parse()
 
@@ -85,6 +86,7 @@ func main() {
 		log.Printf("Audience: %s", *audience)
 		log.Printf("Output: %s", *outputPath)
 		log.Printf("Max retries: %d", *maxRetries)
+		log.Printf("Exit after fetch: %t", *exitAfterFetch)
 	}
 
 	ctx := context.Background()
@@ -143,6 +145,14 @@ func main() {
 		if *verbose {
 			log.Printf("SPIFFE JWT updated for identity: %s", jwt.ID)
 			log.Printf("JWT length: %d characters", len(jwtData))
+		}
+
+		// Exit after initial fetch if running as init container
+		if *exitAfterFetch {
+			if *verbose {
+				log.Println("Initial JWT fetch complete, exiting (init container mode)")
+			}
+			return
 		}
 
 		// Use the JWT's built-in Expiry method

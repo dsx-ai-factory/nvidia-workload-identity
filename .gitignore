@@ -4,8 +4,8 @@
 *.dll
 *.so
 *.dylib
-cel-evaluator
-spiffe-token-fetcher
+/cel-evaluator
+/spiffe-token-fetcher
 
 # Test binary, built with `go test -c`
 *.test

@@ -6,6 +6,30 @@ metadata:
   labels:
     app: demo-nginx
 spec:
+  initContainers:
+  - name: spiffe-init
+    image: spiffe-token-fetcher:latest
+    imagePullPolicy: Never  # Use local image
+    args:
+    - "-socket=unix:///var/run/secrets/spire.io/spire-agent.sock"
+    - "-audience=spiffe://sjc-1.k8s2-control.nvidia.com"
+    - "-output=/var/run/secrets/nvidia.com/spiffe/token"
+    - "-retries=3"
+    - "-verbose=true"
+    - "-exit-after-fetch=true"  # Exit after initial token fetch
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 50m
+        memory: 64Mi
+    volumeMounts:
+    - name: spiffe-csi
+      mountPath: /var/run/secrets/spire.io
+      readOnly: true
+    - name: spiffe-tokens
+      mountPath: /var/run/secrets/nvidia.com/spiffe
   containers:
   - name: nginx
     image: nginx:alpine
