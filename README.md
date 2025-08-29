@@ -4,7 +4,7 @@ Complete demonstration of SPIFFE JWT authentication with OpenBao's CEL (Common E
 
 ## Prerequisites
 
-- Docker, kubectl, Kind, Helm
+- Docker, kubectl, Kind, Helm, Openbao CLI
 
 ## Quick Start
 

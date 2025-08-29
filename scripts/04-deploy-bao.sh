@@ -10,6 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "${SCRIPT_DIR}")"
 NAMESPACE="${BAO_NAMESPACE:-bao}"
 CLUSTER_NAME="${CLUSTER_NAME:-spire-demo}"
+BAO_CHART_VERSION="${BAO_CHART_VERSION:-0.16.2}"
 
 # Source common functions
 source "${SCRIPT_DIR}/common.sh"
@@ -61,7 +62,8 @@ deploy_bao() {
     helm upgrade --install openbao openbao/openbao \
         --namespace "${NAMESPACE}" \
         --create-namespace \
-        --values "$values_file"
+        --values "$values_file" \
+        --version "${BAO_CHART_VERSION}"
     
     log_success "OpenBao deployed with Helm"
 }
