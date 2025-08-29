@@ -108,13 +108,6 @@ flowchart TD
     CEL -->|"Bao Token"| Nginx
     Nginx -->|"Access Secrets<br/>secret/*"| BAO
     
-    %% Styling
-    classDef cluster fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
-    classDef spire fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
-    classDef app fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
-    classDef bao fill:#fff3e0,stroke:#f57c00,stroke-width:2px
-    classDef flow fill:#fce4ec,stroke:#c2185b,stroke-width:2px
-    
     class K8s,Worker cluster
     class SPIRE,SPIRE_Server,SPIRE_Agent,OIDC,CSI spire
     class Pod,Nginx,Sidecar,Volume app
