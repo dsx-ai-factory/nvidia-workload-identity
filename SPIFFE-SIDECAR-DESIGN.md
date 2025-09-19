@@ -8,24 +8,34 @@ HTTP service sidecar that provides SPIFFE JWT via localhost-only metadata endpoi
 
 ```mermaid
 flowchart TD
-    subgraph Pod["Target Pod"]
-        App["Application Container"]
-        Sidecar["SPIFFE JWT Sidecar<br/>169.254.169.254:8080<br/>TTL=1"]
+    subgraph Cluster["Kubernetes Cluster"]
+        subgraph Node["Kubernetes Node"]
+            subgraph Pod["VMI Pod"]
+                subgraph VM["KubeVirt VM"]
+                    CustomerApp["Customer Application"]
+                    NetInterface["Network Interface<br/>169.254.169.254"]
+                end
+                Sidecar["SPIFFE JWT Sidecar<br/>TTL=1"]
+            end
+            SpireAgent["SPIRE Agent<br/>(DaemonSet)"]
+            Socket["Unix Domain Socket<br/>/var/run/secrets/spire.io/spire-agent.sock"]
+        end
+        SpireServer["SPIRE Server"]
+        K8sSecret["Kubernetes Secret<br/>Common Keys"]
     end
     
-    subgraph Node["Kubernetes Node"]
-        SpireAgent["SPIRE Agent<br/>(DaemonSet)"]
-        Socket["Unix Domain Socket<br/>/var/run/secrets/spire.io/spire-agent.sock"]
-    end
-    
-    App -->|"POST /v1/metadata/identity<br/>(metadata endpoint)"| Sidecar
+    CustomerApp -->|"POST /v1/metadata/identity"| NetInterface
+    NetInterface --> Sidecar
     Sidecar -->|"Workload API"| Socket
     Socket --> SpireAgent
-    SpireAgent -->|"JWT SVID"| Socket
+    SpireAgent -->|"K8s PSAT Auth"| SpireServer
+    K8sSecret --> SpireServer
+    SpireServer -->|"JWT SVID"| SpireAgent
+    SpireAgent --> Socket
     
-    class Pod cluster
-    class App,Sidecar app
-    class Node,SpireAgent,Socket spire
+    class Cluster cluster
+    class VM,CustomerApp,NetInterface app
+    class Node,SpireAgent,Socket,Sidecar,SpireServer,K8sSecret spire
 ```
 
 ## Components
