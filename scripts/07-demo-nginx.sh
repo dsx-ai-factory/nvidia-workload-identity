@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 05-demo-nginx.sh
+# 07-demo-nginx.sh
 # Deploys a demo nginx pod and verifies SPIFFE token access
 
 set -euo pipefail

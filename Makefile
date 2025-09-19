@@ -1,6 +1,6 @@
 # SPIFFE + OpenBao CEL Demo Makefile
 
-.PHONY: help install clean test verify-spire cluster spire nginx bao status
+.PHONY: help install clean test verify-spire cluster kubevirt kyverno spire nginx bao status
 
 # Default target
 help: ## Show this help message
@@ -10,11 +10,13 @@ help: ## Show this help message
 	@echo "Available targets:"
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-install: cluster spire verify-spire bao nginx ## Complete setup: Kind cluster + SPIRE + OpenBao + Demo workload
+install: cluster kubevirt kyverno spire verify-spire bao nginx ## Complete setup: Kind cluster + KubeVirt + Kyverno + SPIRE + OpenBao + Demo workload
 	@echo ""
 	@echo "✅ Installation complete!"
 	@echo ""
 	@echo "Your cluster is ready with:"
+	@echo "- KubeVirt and CDI for virtual machine management"
+	@echo "- Kyverno policy engine for Kubernetes governance"
 	@echo "- SPIRE server and agent running"
 	@echo "- OpenBao with CEL JWT authentication configured"
 	@echo "- Demo nginx pod with SPIFFE identity"
@@ -37,7 +39,7 @@ test: ## Run integration tests
 
 verify-spire: ## Verify SPIRE installation
 	@echo "🔍 Verifying SPIRE installation..."
-	@./scripts/03-verify-spire.sh
+	@./scripts/05-verify-spire.sh
 
 status: ## Show status of all components
 	@echo "📊 Component Status"
@@ -63,14 +65,22 @@ cluster: ## Create Kind cluster only
 	@echo "🏗️ Creating Kind cluster..."
 	@./scripts/01-setup-kind-cluster.sh
 
+kubevirt: ## Install KubeVirt and CDI only
+	@echo "🖥️ Installing KubeVirt and CDI..."
+	@./scripts/02-install-kubevirt.sh
+
+kyverno: ## Install Kyverno only
+	@echo "⚖️ Installing Kyverno..."
+	@./scripts/03-install-kyverno.sh
+
 spire: ## Install SPIRE only
 	@echo "🔐 Installing SPIRE..."
-	@./scripts/02-install-spire-helm.sh
+	@./scripts/04-install-spire-helm.sh
 
 bao: ## Deploy OpenBao only
 	@echo "🔒 Deploying OpenBao..."
-	@./scripts/04-deploy-bao.sh
+	@./scripts/06-deploy-bao.sh
 
 nginx: ## Deploy demo nginx only
 	@echo "🌐 Deploying demo nginx..."
-	@./scripts/05-demo-nginx.sh
+	@./scripts/07-demo-nginx.sh

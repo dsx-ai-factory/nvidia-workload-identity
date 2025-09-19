@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 02-install-spire-helm.sh
+# 04-install-spire-helm.sh
 # Installs SPIRE server and agent using Helm charts
 
 set -euo pipefail
