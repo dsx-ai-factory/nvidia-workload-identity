@@ -1,0 +1,81 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: VM_NAME_PLACEHOLDER
+  labels:
+    app: demo-vm
+    kubevirt.io/vm: VM_NAME_PLACEHOLDER
+  annotations:
+    spiffe.nvidia.com/inject-sidecar: "true"
+spec:
+  dataVolumeTemplates:
+  - metadata:
+      name: VM_NAME_PLACEHOLDER-rootdisk
+    spec:
+      source:
+        registry:
+          url: docker://quay.io/containerdisks/ubuntu:22.04
+      storage:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: 8Gi
+        volumeMode: Filesystem
+  runStrategy: Always
+  template:
+    metadata:
+      labels:
+        kubevirt.io/domain: VM_NAME_PLACEHOLDER
+        app: demo-vm
+      annotations:
+        spiffe.nvidia.com/inject-sidecar: "true"
+    spec:
+      domain:
+        cpu:
+          cores: 2
+        devices:
+          disks:
+          - disk:
+              bus: virtio
+            name: rootdisk
+          - disk:
+              bus: virtio
+            name: cloudinit
+          interfaces:
+          - masquerade: {}
+            name: default
+        features:
+          acpi:
+            enabled: true
+        resources:
+          requests:
+            memory: 2Gi
+          limits:
+            memory: 2Gi
+      networks:
+      - name: default
+        pod: {}
+      volumes:
+      - dataVolume:
+          name: VM_NAME_PLACEHOLDER-rootdisk
+        name: rootdisk
+      - cloudInitNoCloud:
+          userData: |
+            #cloud-config
+            users:
+              - name: ubuntu
+                sudo: ALL=(ALL) NOPASSWD:ALL
+                lock_passwd: false
+                plain_text_passwd: ubuntu
+                shell: /bin/bash
+            package_update: true
+            packages:
+              - curl
+              - wget
+              - vim
+              - htop
+            runcmd:
+              - systemctl enable ssh
+              - echo "VM ready!" > /var/log/vm-ready.log
+        name: cloudinit

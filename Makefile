@@ -1,6 +1,6 @@
 # SPIFFE + OpenBao CEL Demo Makefile
 
-.PHONY: help install clean test verify-spire cluster kubevirt kyverno spire nginx bao status
+.PHONY: help install clean test verify-spire cluster kubevirt kyverno spire nginx bao vm status
 
 # Default target
 help: ## Show this help message
@@ -10,7 +10,7 @@ help: ## Show this help message
 	@echo "Available targets:"
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-install: cluster kubevirt kyverno spire verify-spire bao nginx ## Complete setup: Kind cluster + KubeVirt + Kyverno + SPIRE + OpenBao + Demo workload
+install: cluster kubevirt kyverno spire verify-spire bao nginx vm ## Complete setup: Kind cluster + KubeVirt + Kyverno + SPIRE + OpenBao + Demo workload + VM
 	@echo ""
 	@echo "✅ Installation complete!"
 	@echo ""
@@ -21,6 +21,7 @@ install: cluster kubevirt kyverno spire verify-spire bao nginx ## Complete setup
 	@echo "- OpenBao with CEL JWT authentication configured"
 	@echo "- Demo nginx pod with SPIFFE identity"
 	@echo "- JWT tokens automatically fetched by Go sidecar"
+	@echo "- Lightweight Ubuntu VM for testing"
 	@echo ""
 	@echo "Next steps:"
 	@echo "  make test     # Run integration tests"
@@ -84,3 +85,7 @@ bao: ## Deploy OpenBao only
 nginx: ## Deploy demo nginx only
 	@echo "🌐 Deploying demo nginx..."
 	@./scripts/07-demo-nginx.sh
+
+vm: ## Deploy lightweight Ubuntu VM only
+	@echo "🖥️ Deploying Ubuntu VM..."
+	@./scripts/08-deploy-vm.sh
