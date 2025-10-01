@@ -43,6 +43,7 @@ This project demonstrates SPIFFE JWT authentication with OpenBao's CEL (Common E
 - Use specific image tags, avoid `latest` in production-like configs
 - Go applications: Use multi-stage builds with minimal runtime images
 - Include resource limits and requests for all containers
+- KubeVirt VMs: Use containerDisk volumes with `imagePullPolicy: IfNotPresent` for image caching
 
 ### Kubernetes Patterns
 - Use Helm charts with values files instead of raw YAML
@@ -162,6 +163,7 @@ trap "kill $pf_pid 2>/dev/null || true" EXIT
 ## More Rules
 - Keep documentation concise. It should be easy to skim and get all information needed. Do not add unneeded info.
 - Avoid marketing language in documentation (e.g., "Zero-Trust Architecture", "Production-Ready"). Keep it factual and technical.
+- No emojis, excessive exclamation marks, or overly enthusiastic language in code, documentation, scripts, or output messages. Keep tone professional and neutral.
 - Update this cursorrules file as needed when given general directives.
 - ALWAYS update .cursorrules immediately when receiving general directives - do not forget this step.
 - Prefer to keep temporary data in memory rather than as temp files. Temp files can leave leftovers if the scripts exit with error.

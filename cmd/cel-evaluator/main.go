@@ -174,9 +174,9 @@ func main() {
 	ctx := context.Background()
 	pbAuth, err := runCelProgram(ctx, logical.UpdateOperation, role.Name, role.CelProgram, sampleClaims)
 	if err != nil {
-		fmt.Printf("❌ CEL Program Failed: %v\n", err)
+		fmt.Printf("CEL Program Failed: %v\n", err)
 	} else {
-		fmt.Printf("✅ CEL Program Success!\n")
+		fmt.Printf("CEL Program Success\n")
 		fmt.Printf("pb.Auth Result: %+v\n", pbAuth)
 
 		if pbAuth.Policies != nil {

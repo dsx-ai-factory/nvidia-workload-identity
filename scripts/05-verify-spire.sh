@@ -36,11 +36,11 @@ run_test() {
     fi
     
     if [[ "$result" == "$expected_result" ]]; then
-        log_success "✓ $test_name"
+        log_success "$test_name"
         PASSED_TESTS=$((PASSED_TESTS + 1))
         return 0
     else
-        log_error "✗ $test_name"
+        log_error "$test_name"
         FAILED_TESTS=$((FAILED_TESTS + 1))
         return 1
     fi
@@ -99,10 +99,10 @@ check_spire_server() {
         # Wait for server pod to be ready with timeout
         log_info "Waiting for SPIRE server pod to be ready (timeout: 300s)..."
         if kubectl wait --for=condition=ready pod "$server_pod" -n "$SPIRE_SERVER_NAMESPACE" --timeout=300s &>/dev/null; then
-            log_success "✓ SPIRE server pod is ready"
+            log_success "SPIRE server pod is ready"
             PASSED_TESTS=$((PASSED_TESTS + 1))
         else
-            log_error "✗ SPIRE server pod failed to become ready within timeout"
+            log_error "SPIRE server pod failed to become ready within timeout"
             FAILED_TESTS=$((FAILED_TESTS + 1))
         fi
         TOTAL_TESTS=$((TOTAL_TESTS + 1))
@@ -110,10 +110,10 @@ check_spire_server() {
         
         # Check server health
         if kubectl exec -n "$SPIRE_SERVER_NAMESPACE" "$server_pod" -- /opt/spire/bin/spire-server healthcheck &>/dev/null; then
-            log_success "✓ SPIRE server health check passed"
+            log_success "SPIRE server health check passed"
             PASSED_TESTS=$((PASSED_TESTS + 1))
         else
-            log_error "✗ SPIRE server health check failed"
+            log_error "SPIRE server health check failed"
             FAILED_TESTS=$((FAILED_TESTS + 1))
         fi
         TOTAL_TESTS=$((TOTAL_TESTS + 1))
@@ -132,10 +132,10 @@ check_spire_agent() {
     # Wait for agent daemonset to be ready with timeout
     log_info "Waiting for SPIRE agent daemonset to be ready (timeout: 300s)..."
     if kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=agent -n "$NAMESPACE" --timeout=300s &>/dev/null; then
-        log_success "✓ SPIRE agent daemonset is ready"
+        log_success "SPIRE agent daemonset is ready"
         PASSED_TESTS=$((PASSED_TESTS + 1))
     else
-        log_error "✗ SPIRE agent daemonset failed to become ready within timeout"
+        log_error "SPIRE agent daemonset failed to become ready within timeout"
         FAILED_TESTS=$((FAILED_TESTS + 1))
     fi
     TOTAL_TESTS=$((TOTAL_TESTS + 1))
@@ -147,10 +147,10 @@ check_spire_agent() {
     agent_count=$(kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/name=agent --no-headers | grep Running | wc -l)
     
     if [[ "$worker_node_count" == "$agent_count" ]]; then
-        log_success "✓ SPIRE agent running on all $worker_node_count worker nodes"
+        log_success "SPIRE agent running on all $worker_node_count worker nodes"
         PASSED_TESTS=$((PASSED_TESTS + 1))
     else
-        log_error "✗ SPIRE agent count mismatch (worker nodes: $worker_node_count, agents: $agent_count)"
+        log_error "SPIRE agent count mismatch (worker nodes: $worker_node_count, agents: $agent_count)"
         FAILED_TESTS=$((FAILED_TESTS + 1))
     fi
     TOTAL_TESTS=$((TOTAL_TESTS + 1))
@@ -166,10 +166,10 @@ check_spire_agent() {
         # Wait for agent pod to be ready with timeout
         log_info "Waiting for SPIRE agent pod to be ready (timeout: 300s)..."
         if kubectl wait --for=condition=ready pod "$first_agent_pod" -n "$NAMESPACE" --timeout=300s &>/dev/null; then
-            log_success "✓ SPIRE agent pod is ready"
+            log_success "SPIRE agent pod is ready"
             PASSED_TESTS=$((PASSED_TESTS + 1))
         else
-            log_error "✗ SPIRE agent pod failed to become ready within timeout"
+            log_error "SPIRE agent pod failed to become ready within timeout"
             FAILED_TESTS=$((FAILED_TESTS + 1))
         fi
         TOTAL_TESTS=$((TOTAL_TESTS + 1))
@@ -177,10 +177,10 @@ check_spire_agent() {
         
         # Check agent health
         if kubectl exec -n "$NAMESPACE" "$first_agent_pod" -- /opt/spire/bin/spire-agent healthcheck &>/dev/null; then
-            log_success "✓ SPIRE agent health check passed"
+            log_success "SPIRE agent health check passed"
             PASSED_TESTS=$((PASSED_TESTS + 1))
         else
-            log_error "✗ SPIRE agent health check failed"
+            log_error "SPIRE agent health check failed"
             FAILED_TESTS=$((FAILED_TESTS + 1))
         fi
         TOTAL_TESTS=$((TOTAL_TESTS + 1))
@@ -216,10 +216,10 @@ check_agent_server_connectivity() {
         connected_agents=$(kubectl exec -n "$SPIRE_SERVER_NAMESPACE" "$server_pod" -- /opt/spire/bin/spire-server agent list 2>/dev/null | grep -c "SPIFFE ID" || echo "0")
         
         if [[ "$connected_agents" -gt 0 ]]; then
-            log_success "✓ $connected_agents agent(s) connected to server"
+            log_success "$connected_agents agent(s) connected to server"
             PASSED_TESTS=$((PASSED_TESTS + 1))
         else
-            log_error "✗ No agents connected to server"
+            log_error "No agents connected to server"
             FAILED_TESTS=$((FAILED_TESTS + 1))
         fi
         TOTAL_TESTS=$((TOTAL_TESTS + 1))
@@ -260,10 +260,10 @@ check_helm_releases() {
         spire_status=$(helm list -n "$SPIRE_SERVER_NAMESPACE" -o json | jq -r '.[] | select(.name=="spire") | .status' 2>/dev/null || echo "unknown")
         
         if [[ "$spire_status" == "deployed" ]]; then
-            log_success "✓ SPIRE Helm release is deployed"
+            log_success "SPIRE Helm release is deployed"
             PASSED_TESTS=$((PASSED_TESTS + 1))
         else
-            log_error "✗ SPIRE Helm release status: $spire_status"
+            log_error "SPIRE Helm release status: $spire_status"
             FAILED_TESTS=$((FAILED_TESTS + 1))
         fi
         TOTAL_TESTS=$((TOTAL_TESTS + 1))
@@ -288,10 +288,10 @@ check_trust_domain() {
         server_trust_domain=$(kubectl exec -n "$SPIRE_SERVER_NAMESPACE" "$server_pod" -- /opt/spire/bin/spire-server agent list 2>/dev/null | grep "SPIFFE ID" | head -1 | grep -o "spiffe://[^/]*" | sed 's/spiffe:\/\///' || echo "")
         
         if [[ "$server_trust_domain" == "$SPIRE_TRUST_DOMAIN" ]]; then
-            log_success "✓ Server trust domain correctly configured: $server_trust_domain"
+            log_success "Server trust domain correctly configured: $server_trust_domain"
             PASSED_TESTS=$((PASSED_TESTS + 1))
         else
-            log_error "✗ Server trust domain mismatch (expected: $SPIRE_TRUST_DOMAIN, got: $server_trust_domain)"
+            log_error "Server trust domain mismatch (expected: $SPIRE_TRUST_DOMAIN, got: $server_trust_domain)"
             FAILED_TESTS=$((FAILED_TESTS + 1))
         fi
         TOTAL_TESTS=$((TOTAL_TESTS + 1))
@@ -345,15 +345,15 @@ display_test_summary() {
     echo
     
     if [[ "$FAILED_TESTS" -eq 0 ]]; then
-        log_success "🎉 All tests passed! SPIRE installation is healthy."
+        log_success "All tests passed. SPIRE installation is healthy."
         echo
-        echo "Your SPIRE installation is ready for use!"
+        echo "Your SPIRE installation is ready for use"
         echo "Next steps:"
         echo "- Configure your applications to use the SPIFFE workload API"
         echo "- Set up entries for your workloads using spire-server entry create"
         echo "- Configure Bao authentication with SPIFFE JWTs"
     else
-        log_error "❌ Some tests failed. Please review the issues above."
+        log_error "Some tests failed. Please review the issues above."
         echo
         echo "Common troubleshooting steps:"
         echo "- Check pod logs: kubectl logs -n $SPIRE_SERVER_NAMESPACE deployment/spire-server"

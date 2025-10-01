@@ -79,9 +79,9 @@ verify_token_access() {
     # Check if SPIFFE token directory exists
     log_info "Checking SPIFFE token directory..."
     if kubectl exec -n ${NAMESPACE} ${POD_NAME} -c nginx -- test -d /var/run/secrets/nvidia.com/spiffe; then
-        log_success "✓ SPIFFE token directory exists"
+        log_success "SPIFFE token directory exists"
     else
-        log_error "✗ SPIFFE token directory not found"
+        log_error "SPIFFE token directory not found"
         return 1
     fi
     
@@ -91,7 +91,7 @@ verify_token_access() {
     local count=0
     while [[ $count -lt $timeout ]]; do
         if kubectl exec -n ${NAMESPACE} ${POD_NAME} -c nginx -- test -f /var/run/secrets/nvidia.com/spiffe/token 2>/dev/null; then
-            log_success "✓ SPIFFE token file found after ${count} seconds"
+            log_success "SPIFFE token file found after ${count} seconds"
             break
         fi
         sleep 1
@@ -106,21 +106,21 @@ verify_token_access() {
     log_info "Checking for SPIFFE token file..."
     
     if kubectl exec -n ${NAMESPACE} ${POD_NAME} -c nginx -- test -f /var/run/secrets/nvidia.com/spiffe/token 2>/dev/null; then
-        log_success "✓ SPIFFE token file found"
+        log_success "SPIFFE token file found"
         
         # Check if token has content
         local token_size
         token_size=$(kubectl exec -n ${NAMESPACE} ${POD_NAME} -c nginx -- wc -c < /var/run/secrets/nvidia.com/spiffe/token 2>/dev/null || echo "0")
         
         if [[ "$token_size" -gt 0 ]]; then
-            log_success "✓ SPIFFE JWT token has content ($token_size bytes)"
+            log_success "SPIFFE JWT token has content ($token_size bytes)"
             
             # Check if it looks like a JWT token (should start with eyJ)
             local token_start
             token_start=$(kubectl exec -n ${NAMESPACE} ${POD_NAME} -c nginx -- head -c 10 /var/run/secrets/nvidia.com/spiffe/token 2>/dev/null || echo "")
             
             if [[ "$token_start" =~ ^eyJ ]]; then
-                log_success "✓ Token appears to be a valid JWT format"
+                log_success "Token appears to be a valid JWT format"
                 log_info "JWT token preview: ${token_start}..."
             else
                 log_warning "Token doesn't appear to be JWT format, got: ${token_start}..."
@@ -129,7 +129,7 @@ verify_token_access() {
             log_warning "SPIFFE token file is empty"
         fi
     else
-        log_error "✗ SPIFFE token file not found"
+        log_error "SPIFFE token file not found"
         return 1
     fi
     
@@ -139,7 +139,7 @@ verify_token_access() {
     token_path=$(kubectl exec -n ${NAMESPACE} ${POD_NAME} -c nginx -- printenv SPIFFE_TOKEN_PATH 2>/dev/null || echo "")
     
     if [[ "$token_path" == "/var/run/secrets/nvidia.com/spiffe/token" ]]; then
-        log_success "✓ SPIFFE_TOKEN_PATH correctly configured: $token_path"
+        log_success "SPIFFE_TOKEN_PATH correctly configured: $token_path"
     else
         log_warning "SPIFFE_TOKEN_PATH not set or incorrect: '$token_path'"
     fi
@@ -147,12 +147,12 @@ verify_token_access() {
     # Check sidecar status
     log_info "Checking SPIFFE sidecar status..."
     if kubectl exec -n ${NAMESPACE} ${POD_NAME} -c spiffe-sidecar -- ps | grep -q "go\|spiffe-fetcher" 2>/dev/null; then
-        log_success "✓ SPIFFE Go sidecar is active"
+        log_success "SPIFFE Go sidecar is active"
     else
         log_warning "SPIFFE Go sidecar may not be running"
     fi
     
-    log_success "✓ Demo nginx pod has SPIFFE JWT access via sidecar"
+    log_success "Demo nginx pod has SPIFFE JWT access via sidecar"
     log_info "Note: JWT is automatically refreshed by the sidecar at 80% of expiry time"
 }
 

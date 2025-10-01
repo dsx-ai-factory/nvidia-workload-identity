@@ -11,6 +11,8 @@ NAMESPACE="${SPIRE_NAMESPACE:-spire-system}"
 SPIRE_SERVER_NAMESPACE="${SPIRE_SERVER_NAMESPACE:-spire-server}"
 HELM_RELEASE_NAME="${HELM_RELEASE_NAME:-spire}"
 SPIRE_TRUST_DOMAIN="${SPIRE_TRUST_DOMAIN:-sjc-1.k8s2-control.nvidia.com}"
+SPIRE_CRDS_CHART_VERSION="${SPIRE_CRDS_CHART_VERSION:-0.5.0}"
+SPIRE_CHART_VERSION="${SPIRE_CHART_VERSION:-0.26.1}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "${SCRIPT_DIR}")"
 
@@ -88,20 +90,24 @@ install_spire() {
     
     # Step 1: Install SPIRE CRDs first
     log_info "Installing SPIRE CRDs..."
+    log_info "Using SPIRE CRDs chart version: ${SPIRE_CRDS_CHART_VERSION}"
     helm upgrade --install spire-crds spiffe/spire-crds \
         --namespace "${SPIRE_SERVER_NAMESPACE}" \
         --create-namespace \
+        --version "${SPIRE_CRDS_CHART_VERSION}" \
         --timeout 5m \
         --wait
     
     log_success "SPIRE CRDs installed successfully"
     
-    # Step 2: Install SPIRE server and agent together (latest chart approach)
+    # Step 2: Install SPIRE server and agent together
     log_info "Installing SPIRE server and agent..."
+    log_info "Using SPIRE chart version: ${SPIRE_CHART_VERSION}"
     helm upgrade --install spire spiffe/spire \
         --namespace "${SPIRE_SERVER_NAMESPACE}" \
         --create-namespace \
         --values "${PROJECT_ROOT}/config/spire-server-values.yaml" \
+        --version "${SPIRE_CHART_VERSION}" \
         --timeout 10m \
         --wait
     
@@ -149,6 +155,8 @@ display_info() {
     echo
     echo "Installation Summary:"
     echo "===================="
+    echo "SPIRE CRDs Chart Version: ${SPIRE_CRDS_CHART_VERSION}"
+    echo "SPIRE Chart Version: ${SPIRE_CHART_VERSION}"
     echo "Trust Domain: ${SPIRE_TRUST_DOMAIN}"
     echo "SPIRE Server Namespace: ${SPIRE_SERVER_NAMESPACE}"
     echo "SPIRE Agent Namespace: ${NAMESPACE}"

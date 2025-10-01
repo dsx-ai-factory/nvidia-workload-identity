@@ -8,7 +8,7 @@ set -euo pipefail
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KYVERNO_NAMESPACE="${KYVERNO_NAMESPACE:-kyverno}"
-KYVERNO_CHART_VERSION="${KYVERNO_CHART_VERSION:-}"
+KYVERNO_CHART_VERSION="${KYVERNO_CHART_VERSION:-3.5.2}"
 
 # Source common functions
 source "${SCRIPT_DIR}/common.sh"
@@ -58,13 +58,9 @@ install_kyverno() {
     # Prepare helm install command
     local helm_cmd="helm install kyverno kyverno/kyverno --namespace ${KYVERNO_NAMESPACE} --create-namespace"
     
-    # Add version if specified
-    if [[ -n "${KYVERNO_CHART_VERSION}" ]]; then
-        helm_cmd="${helm_cmd} --version ${KYVERNO_CHART_VERSION}"
-        log_info "Using Kyverno chart version: ${KYVERNO_CHART_VERSION}"
-    else
-        log_info "Using latest Kyverno chart version"
-    fi
+    # Add version
+    helm_cmd="${helm_cmd} --version ${KYVERNO_CHART_VERSION}"
+    log_info "Using Kyverno chart version: ${KYVERNO_CHART_VERSION}"
     
     # Install Kyverno
     log_info "Installing Kyverno in namespace '${KYVERNO_NAMESPACE}'..."
@@ -100,6 +96,8 @@ display_status() {
     echo
     echo "Installation Status:"
     echo "==================="
+    echo "Kyverno Chart Version: ${KYVERNO_CHART_VERSION}"
+    echo
     
     # Get Kyverno release info
     echo "Helm Release:"

@@ -39,6 +39,12 @@ check_prerequisites() {
         exit 1
     fi
     
+    if ! command -v bao &> /dev/null; then
+        log_error "bao CLI is not installed. Please install bao CLI first."
+        log_info "Installation: https://openbao.org/docs/install/"
+        exit 1
+    fi
+    
     # Check if docker is running
     if ! docker info &> /dev/null; then
         log_error "Docker is not running. Please start Docker first."

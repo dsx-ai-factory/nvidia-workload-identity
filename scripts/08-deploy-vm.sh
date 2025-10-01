@@ -9,9 +9,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "${SCRIPT_DIR}")"
 VM_TEMPLATE_FILE="${PROJECT_ROOT}/config/vm-template.yaml"
-SPIFFE_POLICY_FILE="${PROJECT_ROOT}/config/spiffe-sidecar-policy.yaml"
 VM_NAME="${VM_NAME:-demo-ubuntu-vm}"
 VM_NAMESPACE="${VM_NAMESPACE:-default}"
+VM_TENANT="${VM_TENANT:-default}"
 
 # Source common functions
 source "${SCRIPT_DIR}/common.sh"
@@ -49,12 +49,6 @@ check_prerequisites() {
         exit 1
     fi
     
-    # Check if SPIFFE policy file exists
-    if [[ ! -f "${SPIFFE_POLICY_FILE}" ]]; then
-        log_error "SPIFFE sidecar policy file not found: ${SPIFFE_POLICY_FILE}"
-        exit 1
-    fi
-    
     log_success "All prerequisites are met"
 }
 
@@ -62,26 +56,46 @@ check_prerequisites() {
 create_vm_config() {
     # Use sed to replace placeholders in the template
     sed -e "s/VM_NAME_PLACEHOLDER/${VM_NAME}/g" \
+        -e "s/TENANT_PLACEHOLDER/${VM_TENANT}/g" \
         "${VM_TEMPLATE_FILE}"
 }
 
-# Deploy SPIFFE sidecar injection policy
-deploy_spiffe_policy() {
-    log_info "Deploying SPIFFE sidecar injection policy..."
+# Label node for VM
+label_node_for_vm() {
+    log_info "Labeling node for VM..."
     
-    # Check if policy already exists
-    if kubectl get clusterpolicy inject-spiffe-jwt-sidecar &> /dev/null; then
-        log_info "SPIFFE sidecar policy already exists, updating..."
-        kubectl apply -f "${SPIFFE_POLICY_FILE}"
-    else
-        log_info "Creating new SPIFFE sidecar policy..."
-        kubectl apply -f "${SPIFFE_POLICY_FILE}"
+    # Get the node where the VM is running
+    local node_name=$(kubectl get pod -n ${VM_NAMESPACE} -l kubevirt.io/domain=${VM_NAME} -o jsonpath='{.items[0].spec.nodeName}' 2>/dev/null || echo "")
+    
+    if [[ -z "${node_name}" ]]; then
+        log_warning "Could not determine node for VM"
+        return 1
     fi
     
-    # Wait for policy to be ready
-    kubectl wait --for=condition=Ready clusterpolicy/inject-spiffe-jwt-sidecar --timeout=60s || true
+    # Label the node
+    log_info "Labeling node ${node_name} with VM tenant labels..."
+    kubectl label node ${node_name} has-kubevirt-vm=true vm-tenant=${VM_TENANT} --overwrite
     
-    log_success "SPIFFE sidecar policy deployed successfully"
+    log_success "Node ${node_name} labeled successfully"
+}
+
+# Unlabel node for VM
+unlabel_node_for_vm() {
+    log_info "Removing VM labels from node..."
+    
+    # Get the node where the VM is/was running
+    local node_name=$(kubectl get pod -n ${VM_NAMESPACE} -l kubevirt.io/domain=${VM_NAME} -o jsonpath='{.items[0].spec.nodeName}' 2>/dev/null || echo "")
+    
+    if [[ -z "${node_name}" ]]; then
+        log_info "No node to unlabel"
+        return 0
+    fi
+    
+    # Remove the labels
+    log_info "Removing labels from node ${node_name}..."
+    kubectl label node ${node_name} has-kubevirt-vm- vm-tenant- 2>/dev/null || true
+    
+    log_success "Node labels removed"
 }
 
 # Deploy VM
@@ -137,10 +151,6 @@ display_status() {
     echo "Virtual Machine Instance:"
     kubectl get vmi ${VM_NAME} -n ${VM_NAMESPACE} 2>/dev/null || echo "  VMI not found"
     
-    # Show DataVolume status
-    echo
-    echo "Data Volume:"
-    kubectl get dv ${VM_NAME}-rootdisk -n ${VM_NAMESPACE} 2>/dev/null || echo "  DataVolume not found"
     
     # Show virt-launcher pod
     echo
@@ -155,17 +165,25 @@ display_status() {
     echo "Username: ubuntu"
     echo "Password: ubuntu"
     
+    # Show node where VM is running
     echo
-    echo "SPIFFE Sidecar Policy:"
-    echo "====================="
-    kubectl get clusterpolicy inject-spiffe-jwt-sidecar 2>/dev/null || echo "  Policy not found"
+    echo "Node Information:"
+    echo "================"
+    NODE_NAME=$(kubectl get pod -n ${VM_NAMESPACE} -l kubevirt.io/domain=${VM_NAME} -o jsonpath='{.items[0].spec.nodeName}' 2>/dev/null || echo "")
+    if [[ -n "${NODE_NAME}" ]]; then
+        echo "VM is running on node: ${NODE_NAME}"
+        echo "Node labels:"
+        kubectl get node ${NODE_NAME} --show-labels 2>/dev/null | grep -o "has-kubevirt-vm=true\|vm-tenant=[^,]*" || echo "  No VM labels found"
+    else
+        echo "VM not yet scheduled to a node"
+    fi
     
     echo
     echo "Next Steps:"
     echo "==========="
     echo "1. Access VM console to verify it's working"
-    echo "2. Check if SPIFFE sidecar was injected: kubectl describe pod -l kubevirt.io/domain=${VM_NAME}"
-    echo "3. Verify sidecar policy is active: kubectl get clusterpolicy inject-spiffe-jwt-sidecar"
+    echo "2. Check VM pod details: kubectl describe pod -l kubevirt.io/domain=${VM_NAME}"
+    echo "3. Verify node labels: kubectl get node ${NODE_NAME} --show-labels"
     echo "4. Run integration tests with 'make test'"
 }
 
@@ -173,23 +191,16 @@ display_status() {
 cleanup_vm() {
     log_info "Cleaning up VM '${VM_NAME}'..."
     
+    # Remove node labels first
+    unlabel_node_for_vm
+    
     # Delete VM (this will also delete VMI and pods)
     if kubectl get vm ${VM_NAME} -n ${VM_NAMESPACE} &> /dev/null; then
         log_info "Deleting VM..."
         kubectl delete vm ${VM_NAME} -n ${VM_NAMESPACE}
     fi
     
-    # Delete DataVolume
-    if kubectl get dv ${VM_NAME}-rootdisk -n ${VM_NAMESPACE} &> /dev/null; then
-        log_info "Deleting DataVolume..."
-        kubectl delete dv ${VM_NAME}-rootdisk -n ${VM_NAMESPACE}
-    fi
     
-    # Optionally clean up SPIFFE policy (commented out to preserve for other VMs)
-    # if kubectl get clusterpolicy inject-spiffe-jwt-sidecar &> /dev/null; then
-    #     log_info "Deleting SPIFFE sidecar policy..."
-    #     kubectl delete clusterpolicy inject-spiffe-jwt-sidecar
-    # fi
     
     log_success "VM cleanup completed!"
 }
@@ -207,6 +218,7 @@ usage() {
     echo "Environment Variables:"
     echo "  VM_NAME       Name of the VM (default: demo-ubuntu-vm)"
     echo "  VM_NAMESPACE  Namespace for the VM (default: default)"
+    echo "  VM_TENANT     Tenant identifier for the VM (default: default)"
     echo ""
     echo "Prerequisites:"
     echo "  - Kubernetes cluster must be running and accessible"
@@ -215,12 +227,11 @@ usage() {
     echo ""
     echo "Files:"
     echo "  - VM template: ${VM_TEMPLATE_FILE}"
-    echo "  - SPIFFE policy: ${SPIFFE_POLICY_FILE}"
     echo ""
     echo "Features:"
-    echo "  - Lightweight Ubuntu 22.04 VM (2 cores, 2GB RAM, 8GB disk)"
+    echo "  - Lightweight Ubuntu 24.04 VM (2 cores, 2GB RAM, 8GB disk)"
     echo "  - Cloud-init configuration with ubuntu user"
-    echo "  - SPIFFE sidecar injection annotation (requires Kyverno policy)"
+    echo "  - Manual node labeling (has-kubevirt-vm, vm-tenant)"
     echo "  - Console and SSH access"
 }
 
@@ -236,9 +247,9 @@ main() {
         "")
             log_info "Starting lightweight VM deployment..."
             check_prerequisites
-            deploy_spiffe_policy
             deploy_vm
             wait_for_vm
+            label_node_for_vm
             display_status
             ;;
         *)

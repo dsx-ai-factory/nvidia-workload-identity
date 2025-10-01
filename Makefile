@@ -12,7 +12,7 @@ help: ## Show this help message
 
 install: cluster kubevirt kyverno spire verify-spire bao nginx vm ## Complete setup: Kind cluster + KubeVirt + Kyverno + SPIRE + OpenBao + Demo workload + VM
 	@echo ""
-	@echo "✅ Installation complete!"
+	@echo "Installation complete"
 	@echo ""
 	@echo "Your cluster is ready with:"
 	@echo "- KubeVirt and CDI for virtual machine management"
@@ -29,63 +29,63 @@ install: cluster kubevirt kyverno spire verify-spire bao nginx vm ## Complete se
 	@echo "  make clean    # Clean up when done"
 
 clean: ## Clean up: Remove Kind cluster and all resources
-	@echo "🧹 Cleaning up SPIFFE + OpenBao demo..."
+	@echo "Cleaning up SPIFFE + OpenBao demo..."
 	@./scripts/01-setup-kind-cluster.sh cleanup
-	@echo "✅ Cleanup complete!"
+	@echo "Cleanup complete"
 
 test: ## Run integration tests
-	@echo "🧪 Running integration tests..."
+	@echo "Running integration tests..."
 	@./test-integration.sh
-	@echo "✅ Tests complete!"
+	@echo "Tests complete"
 
 verify-spire: ## Verify SPIRE installation
-	@echo "🔍 Verifying SPIRE installation..."
+	@echo "Verifying SPIRE installation..."
 	@./scripts/05-verify-spire.sh
 
 status: ## Show status of all components
-	@echo "📊 Component Status"
+	@echo "Component Status"
 	@echo "==================="
 	@echo ""
 	@echo "Kind Cluster:"
-	@kubectl get nodes -o wide 2>/dev/null || echo "❌ Kind cluster not found"
+	@kubectl get nodes -o wide 2>/dev/null || echo "Kind cluster not found"
 	@echo ""
 	@echo "SPIRE Server:"
-	@kubectl get pods -n spire-server -l app.kubernetes.io/name=server 2>/dev/null || echo "❌ SPIRE server not found"
+	@kubectl get pods -n spire-server -l app.kubernetes.io/name=server 2>/dev/null || echo "SPIRE server not found"
 	@echo ""
 	@echo "SPIRE Agent:"
-	@kubectl get pods -n spire-server -l app.kubernetes.io/name=agent 2>/dev/null || echo "❌ SPIRE agent not found"
+	@kubectl get pods -n spire-server -l app.kubernetes.io/name=agent 2>/dev/null || echo "SPIRE agent not found"
 	@echo ""
 	@echo "Demo Nginx:"
-	@kubectl get pod demo-nginx 2>/dev/null || echo "❌ Demo nginx not found"
+	@kubectl get pod demo-nginx 2>/dev/null || echo "Demo nginx not found"
 	@echo ""
 	@echo "OpenBao:"
-	@kubectl get pods -n bao -l app.kubernetes.io/name=openbao 2>/dev/null || echo "❌ OpenBao not found"
+	@kubectl get pods -n bao -l app.kubernetes.io/name=openbao 2>/dev/null || echo "OpenBao not found"
 
 # Individual step targets for development
 cluster: ## Create Kind cluster only
-	@echo "🏗️ Creating Kind cluster..."
+	@echo "Creating Kind cluster..."
 	@./scripts/01-setup-kind-cluster.sh
 
 kubevirt: ## Install KubeVirt and CDI only
-	@echo "🖥️ Installing KubeVirt and CDI..."
+	@echo "Installing KubeVirt and CDI..."
 	@./scripts/02-install-kubevirt.sh
 
 kyverno: ## Install Kyverno only
-	@echo "⚖️ Installing Kyverno..."
+	@echo "Installing Kyverno..."
 	@./scripts/03-install-kyverno.sh
 
 spire: ## Install SPIRE only
-	@echo "🔐 Installing SPIRE..."
+	@echo "Installing SPIRE..."
 	@./scripts/04-install-spire-helm.sh
 
 bao: ## Deploy OpenBao only
-	@echo "🔒 Deploying OpenBao..."
+	@echo "Deploying OpenBao..."
 	@./scripts/06-deploy-bao.sh
 
 nginx: ## Deploy demo nginx only
-	@echo "🌐 Deploying demo nginx..."
+	@echo "Deploying demo nginx..."
 	@./scripts/07-demo-nginx.sh
 
 vm: ## Deploy lightweight Ubuntu VM only
-	@echo "🖥️ Deploying Ubuntu VM..."
+	@echo "Deploying Ubuntu VM..."
 	@./scripts/08-deploy-vm.sh
