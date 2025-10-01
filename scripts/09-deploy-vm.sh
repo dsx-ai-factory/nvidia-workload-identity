@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 08-deploy-vm.sh
+# 09-deploy-vm.sh
 # Deploys a lightweight Ubuntu VM using KubeVirt
 
 set -euo pipefail
@@ -8,7 +8,7 @@ set -euo pipefail
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "${SCRIPT_DIR}")"
-VM_TEMPLATE_FILE="${PROJECT_ROOT}/config/vm-template.yaml"
+VM_TEMPLATE_FILE="${PROJECT_ROOT}/config/vm-template.yaml.tmpl"
 VM_NAME="${VM_NAME:-demo-ubuntu-vm}"
 VM_NAMESPACE="${VM_NAMESPACE:-default}"
 VM_TENANT="${VM_TENANT:-default}"
