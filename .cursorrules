@@ -30,6 +30,8 @@ This project demonstrates SPIFFE JWT authentication with OpenBao's CEL (Common E
 - Use `config/policies/` subdirectory for OpenBao policy files
 - Use `scripts/` directory for numbered step scripts
 - Policy files: Use separate `.hcl` files for each OpenBao policy
+- Template files: Use `.tmpl` extension only for files with placeholder values that require sed/envsubst processing
+- For Helm/kubectl configurations with dynamic values, prefer command-line overrides (e.g., `--set key=value`) over templating
 
 ### Script Requirements
 - **All scripts must be repeatable and idempotent**
@@ -47,7 +49,7 @@ This project demonstrates SPIFFE JWT authentication with OpenBao's CEL (Common E
 
 ### Kubernetes Patterns
 - Use Helm charts with values files instead of raw YAML
-- Configure via `values.yaml` files, not `--set` flags
+- Configure via `values.yaml` files, use `--set` for dynamic values only
 - Use `kubectl wait` with timeouts instead of sleep loops
 
 ### SPIRE Configuration

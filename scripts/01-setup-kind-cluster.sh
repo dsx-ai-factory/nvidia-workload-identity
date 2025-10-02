@@ -45,6 +45,12 @@ check_prerequisites() {
         exit 1
     fi
     
+    if ! command -v helm &> /dev/null; then
+        log_error "helm is not installed. Please install helm first."
+        log_info "Installation: https://helm.sh/docs/intro/install/"
+        exit 1
+    fi
+    
     # Check if docker is running
     if ! docker info &> /dev/null; then
         log_error "Docker is not running. Please start Docker first."
@@ -80,13 +86,61 @@ create_cluster() {
     log_info "Creating new cluster..."
     kind create cluster --config="${KIND_CONFIG_FILE}" --name="${CLUSTER_NAME}"
     
-    # Wait for cluster to be ready
-    log_info "Waiting for cluster to be ready..."
-    kubectl wait --for=condition=Ready nodes --all --timeout=300s
+    # Wait for API server to be available
+    log_info "Waiting for API server to be available..."
+    kubectl wait --for=condition=Ready --timeout=60s -n kube-system pod -l component=kube-apiserver
     
-    log_success "Cluster '${CLUSTER_NAME}' created successfully"
+    log_success "Cluster '${CLUSTER_NAME}' created (CNI installation needed for nodes to be ready)"
 }
 
+# Install OVN-Kubernetes CNI
+install_ovn() {
+    log_info "Installing OVN-Kubernetes CNI..."
+    
+    local ovn_namespace="ovn-kubernetes"
+    local ovn_git_tag="v1.1.0"
+    local ovn_image_tag="release-1.1"
+    local ovn_chart_dir="${PROJECT_ROOT}/third-party/ovn-kubernetes"
+    local ovn_values_file="${ovn_chart_dir}/helm/ovn-kubernetes/values-no-ic.yaml"
+    
+    # Check if OVN-Kubernetes submodule exists
+    if [[ ! -d "${ovn_chart_dir}/helm" ]]; then
+        log_error "OVN-Kubernetes submodule not found at ${ovn_chart_dir}"
+        log_error "Please run: git submodule update --init third-party/ovn-kubernetes"
+        exit 1
+    fi
+    log_info "Using OVN-Kubernetes Helm chart from submodule"
+    
+    # Get Kubernetes API server endpoint
+    log_info "Determining Kubernetes API server endpoint..."
+    local api_server_ip
+    api_server_ip=$(kubectl get pods -n kube-system -l component=kube-apiserver -o jsonpath='{.items[0].status.hostIP}' 2>/dev/null || echo "")
+    if [[ -z "${api_server_ip}" ]]; then
+        log_error "Could not determine Kubernetes API server IP"
+        exit 1
+    fi
+    local k8s_api_server="https://${api_server_ip}:6443"
+    log_info "Kubernetes API server: ${k8s_api_server}"
+    
+    # Get number of control plane nodes for ovnkube-identity replicas
+    local control_plane_count
+    control_plane_count=$(kubectl get node -l node-role.kubernetes.io/control-plane --no-headers | wc -l)
+    
+    # Install OVN-Kubernetes via Helm from submodule chart (per README.md)
+    log_info "Installing OVN-Kubernetes from Helm chart..."
+    helm install ovn-kubernetes "${ovn_chart_dir}/helm/ovn-kubernetes" \
+        -f "${ovn_values_file}" \
+        --set k8sAPIServer="${k8s_api_server}" \
+        --set ovnkube-identity.replicas="${control_plane_count}" \
+        --set global.image.repository="ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu" \
+        --set global.image.tag="${ovn_image_tag}"
+    
+    # Wait for nodes to be ready with network
+    log_info "Waiting for nodes to be ready with OVN networking..."
+    kubectl wait --for=condition=Ready nodes --all --timeout=300s
+    
+    log_success "OVN-Kubernetes CNI installed successfully"
+}
 
 # Display cluster information
 display_cluster_info() {
@@ -147,10 +201,11 @@ main() {
             usage
             ;;
         "")
-            log_info "Starting Kind cluster setup for SPIRE..."
+            log_info "Starting Kind cluster setup with OVN-Kubernetes CNI..."
             check_prerequisites
             check_kind_config
             create_cluster
+            install_ovn
             display_cluster_info
             ;;
         *)
