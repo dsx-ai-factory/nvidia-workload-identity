@@ -198,12 +198,14 @@ configure_spiffe_auth() {
     local oidc_ca_cert=""
     
     # Extract certificate using a temporary pod with openssl
+    # Use full FQDN for cross-namespace DNS resolution
+    log_info "Extracting certificate from OIDC discovery provider..."
     oidc_ca_cert=$(kubectl run cert-extractor --image=alpine:latest --rm -i --restart=Never -- sh -c "
         apk add --no-cache openssl > /dev/null 2>&1
-        echo | openssl s_client -connect spire-spiffe-oidc-discovery-provider.spire-server:443 -showcerts 2>/dev/null | sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p'
-    " 2>/dev/null | grep -v "pod.*deleted" || echo "")
+        echo | openssl s_client -connect spire-spiffe-oidc-discovery-provider.spire-server.svc.cluster.local:443 -showcerts 2>/dev/null | sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p'
+    " 2>&1 | grep -E '^-----BEGIN CERTIFICATE-----$|^[A-Za-z0-9+/=]+$|^-----END CERTIFICATE-----$')
     
-    if [[ -n "$oidc_ca_cert" ]]; then
+    if [[ -n "$oidc_ca_cert" ]] && echo "$oidc_ca_cert" | grep -q "BEGIN CERTIFICATE"; then
         log_success "Successfully extracted OIDC discovery provider certificate"
     else
         log_error "Failed to extract OIDC discovery provider certificate"

@@ -1,6 +1,6 @@
 # SPIFFE + OpenBao CEL Demo Makefile
 
-.PHONY: help install clean test verify-spire cluster kubevirt kyverno spire nginx bao vm status
+.PHONY: help install clean test verify-spire cluster kubevirt kyverno spire nginx bao metadata-service vm status
 
 # Default target
 help: ## Show this help message

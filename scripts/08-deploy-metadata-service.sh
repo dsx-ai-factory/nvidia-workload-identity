@@ -196,7 +196,6 @@ main() {
             log_info "Starting metadata service deployment..."
             check_prerequisites
             deploy_metadata_service
-            wait_for_metadata_service
             display_status
             ;;
         *)
