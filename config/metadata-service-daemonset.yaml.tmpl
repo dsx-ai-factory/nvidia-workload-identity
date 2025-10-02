@@ -16,6 +16,9 @@ spec:
       labels:
         app: metadata-service
         tenant: TENANT_PLACEHOLDER
+        network: tenant-TENANT_PLACEHOLDER-network
+      annotations:
+        k8s.v1.cni.cncf.io/networks: tenant-TENANT_PLACEHOLDER-network
     spec:
       nodeSelector:
         vm-tenant: TENANT_PLACEHOLDER

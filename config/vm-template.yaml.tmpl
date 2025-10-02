@@ -14,6 +14,7 @@ spec:
         kubevirt.io/domain: VM_NAME_PLACEHOLDER
         app: demo-vm
         tenant: TENANT_PLACEHOLDER
+        network: tenant-TENANT_PLACEHOLDER-network
     spec:
       domain:
         cpu:
@@ -27,8 +28,8 @@ spec:
               bus: virtio
             name: cloudinit
           interfaces:
-          - masquerade: {}
-            name: default
+          - bridge: {}
+            name: tenant-network
         features:
           acpi:
             enabled: true
@@ -38,8 +39,9 @@ spec:
           limits:
             memory: 2Gi
       networks:
-      - name: default
-        pod: {}
+      - name: tenant-network
+        multus:
+          networkName: tenant-TENANT_PLACEHOLDER-network
       volumes:
       - containerDisk:
           image: quay.io/containerdisks/ubuntu:24.04

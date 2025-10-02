@@ -132,6 +132,17 @@ install_ovn() {
     source "${PROJECT_ROOT}/third-party/ovn-kubernetes/contrib/kind-common"
     docker_disable_ipv6
     
+    # Install multus-cni and MultiNetworkPolicy CRD BEFORE OVN-Kubernetes for multi-network support
+    # OVN-Kubernetes with multi-network enabled expects these CRDs to exist
+    log_info "Installing multus-cni for multi-network support..."
+    kubectl apply -f https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/master/deployments/multus-daemonset.yml
+    kubectl wait --for=condition=Ready pod -l app=multus -n kube-system --timeout=300s
+    log_success "Multus-CNI installed successfully"
+    
+    log_info "Installing MultiNetworkPolicy CRD..."
+    kubectl apply -f https://raw.githubusercontent.com/k8snetworkplumbingwg/multi-networkpolicy/master/scheme.yml
+    log_success "MultiNetworkPolicy CRD installed successfully"
+    
     # Get number of control plane nodes for ovnkube-identity replicas
     local control_plane_count
     control_plane_count=$(kubectl get node -l node-role.kubernetes.io/control-plane --no-headers | wc -l)
@@ -143,7 +154,9 @@ install_ovn() {
         --set k8sAPIServer="${k8s_api_server}" \
         --set ovnkube-identity.replicas="${control_plane_count}" \
         --set global.image.repository="ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu" \
-        --set global.image.tag="${ovn_image_tag}"
+        --set global.image.tag="${ovn_image_tag}" \
+        --set global.enableMultiNetwork=true \
+        --set global.enableNetworkSegmentation=true
     
     # Wait for OVN-Kubernetes pods to be ready
     log_info "Waiting for OVN-Kubernetes pods to be ready..."

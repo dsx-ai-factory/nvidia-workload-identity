@@ -6,15 +6,16 @@ metadata:
   labels:
     app: metadata-service
     tenant: TENANT_PLACEHOLDER
+    network: tenant-TENANT_PLACEHOLDER-network
 spec:
   type: ClusterIP
-  clusterIP: 10.96.169.254
   internalTrafficPolicy: Local
   selector:
     app: metadata-service
     tenant: TENANT_PLACEHOLDER
+    network: tenant-TENANT_PLACEHOLDER-network
   ports:
-  - port: 8080
+  - port: 80
     targetPort: 80
     protocol: TCP
     name: http

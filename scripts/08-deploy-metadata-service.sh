@@ -9,8 +9,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "${SCRIPT_DIR}")"
 METADATA_DAEMONSET_FILE="${PROJECT_ROOT}/config/metadata-service-daemonset.yaml.tmpl"
 METADATA_SERVICE_FILE="${PROJECT_ROOT}/config/metadata-service.yaml.tmpl"
+TENANT_UDN_FILE="${PROJECT_ROOT}/config/tenant-udn.yaml.tmpl"
 METADATA_TENANT="${METADATA_TENANT:-default}"
 METADATA_NAMESPACE="${METADATA_NAMESPACE:-default}"
+TENANT_SUBNET_OCTET="${TENANT_SUBNET_OCTET:-1}"
 
 # Source common functions
 source "${SCRIPT_DIR}/common.sh"
@@ -41,6 +43,11 @@ check_prerequisites() {
         exit 1
     fi
     
+    if [[ ! -f "${TENANT_UDN_FILE}" ]]; then
+        log_error "Tenant UDN file not found: ${TENANT_UDN_FILE}"
+        exit 1
+    fi
+    
     log_success "All prerequisites are met"
 }
 
@@ -54,6 +61,29 @@ create_metadata_daemonset_config() {
 create_metadata_service_config() {
     sed -e "s/TENANT_PLACEHOLDER/${METADATA_TENANT}/g" \
         "${METADATA_SERVICE_FILE}"
+}
+
+# Create tenant UDN configuration from template
+create_tenant_udn_config() {
+    sed -e "s/TENANT_PLACEHOLDER/${METADATA_TENANT}/g" \
+        -e "s/TENANT_SUBNET_OCTET/${TENANT_SUBNET_OCTET}/g" \
+        "${TENANT_UDN_FILE}"
+}
+
+# Deploy tenant UDN
+deploy_tenant_udn() {
+    log_info "Deploying tenant UDN for '${METADATA_TENANT}'..."
+    
+    # Check if UDN already exists
+    if kubectl get userdefinednetwork tenant-${METADATA_TENANT}-network -n ${METADATA_NAMESPACE} &> /dev/null; then
+        log_info "Tenant UDN already exists, updating..."
+        create_tenant_udn_config | kubectl apply -n ${METADATA_NAMESPACE} -f -
+    else
+        log_info "Creating tenant UDN..."
+        create_tenant_udn_config | kubectl apply -n ${METADATA_NAMESPACE} -f -
+    fi
+    
+    log_success "Tenant UDN deployed"
 }
 
 # Deploy metadata service
@@ -195,6 +225,7 @@ main() {
         "")
             log_info "Starting metadata service deployment..."
             check_prerequisites
+            deploy_tenant_udn
             deploy_metadata_service
             display_status
             ;;
