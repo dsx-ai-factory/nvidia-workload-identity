@@ -125,6 +125,7 @@ func (s *MetadataServer) findPodByIP(ctx context.Context, clientIP string) (*cor
 func (s *MetadataServer) fetchJWTForPod(ctx context.Context, pod *corev1.Pod, audience string) (*jwtsvid.SVID, error) {
 	slog.Debug("Fetching JWT for pod", "namespace", pod.Namespace, "pod", pod.Name, "audience", audience)
 
+	// TODO use the VM's identity, not our service account identity
 	jwt, err := s.jwtSource.FetchJWTSVID(ctx, jwtsvid.Params{
 		Audience: audience,
 	})
