@@ -9,10 +9,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "${SCRIPT_DIR}")"
 METADATA_DAEMONSET_FILE="${PROJECT_ROOT}/config/metadata-service-daemonset.yaml.tmpl"
 METADATA_SERVICE_FILE="${PROJECT_ROOT}/config/metadata-service.yaml.tmpl"
+METADATA_RBAC_FILE="${PROJECT_ROOT}/config/metadata-service-rbac.yaml.tmpl"
 TENANT_UDN_FILE="${PROJECT_ROOT}/config/tenant-udn.yaml.tmpl"
 METADATA_TENANT="${METADATA_TENANT:-default}"
 METADATA_NAMESPACE="${METADATA_NAMESPACE:-default}"
 TENANT_SUBNET_OCTET="${TENANT_SUBNET_OCTET:-1}"
+CLUSTER_NAME="${CLUSTER_NAME:-spire-demo}"
+IMAGE_NAME="metadata-service"
+IMAGE_TAG="latest"
 
 # Source common functions
 source "${SCRIPT_DIR}/common.sh"
@@ -48,7 +52,54 @@ check_prerequisites() {
         exit 1
     fi
     
+    if [[ ! -f "${METADATA_RBAC_FILE}" ]]; then
+        log_error "Metadata service RBAC file not found: ${METADATA_RBAC_FILE}"
+        exit 1
+    fi
+    
+    # Check if Kind cluster exists
+    if ! kind get clusters | grep -q "^${CLUSTER_NAME}$"; then
+        log_error "Kind cluster '${CLUSTER_NAME}' not found. Please run 'make cluster' first."
+        exit 1
+    fi
+    
     log_success "All prerequisites are met"
+}
+
+# Build metadata service Docker image
+build_image() {
+    log_info "Building metadata service Docker image..."
+    
+    cd "${PROJECT_ROOT}"
+    if docker build -t ${IMAGE_NAME}:${IMAGE_TAG} -f Dockerfile.metadata-service .; then
+        log_success "Docker image built successfully"
+    else
+        log_error "Failed to build Docker image"
+        exit 1
+    fi
+}
+
+# Load image into Kind cluster
+load_image() {
+    log_info "Loading metadata service image into Kind cluster..."
+    
+    if kind load docker-image ${IMAGE_NAME}:${IMAGE_TAG} --name "${CLUSTER_NAME}"; then
+        log_success "Image loaded into Kind cluster"
+    else
+        log_error "Failed to load image into Kind cluster"
+        exit 1
+    fi
+}
+
+# Apply RBAC configuration
+apply_rbac() {
+    log_info "Applying RBAC configuration..."
+    
+    # Apply RBAC with namespace substitution
+    sed -e "s/NAMESPACE_PLACEHOLDER/${METADATA_NAMESPACE}/g" \
+        "${METADATA_RBAC_FILE}" | kubectl apply -n "${METADATA_NAMESPACE}" -f -
+    
+    log_success "RBAC configuration applied"
 }
 
 # Create metadata service DaemonSet configuration from template
@@ -76,14 +127,13 @@ deploy_tenant_udn() {
     
     # Check if UDN already exists
     if kubectl get userdefinednetwork tenant-${METADATA_TENANT}-network -n ${METADATA_NAMESPACE} &> /dev/null; then
-        log_info "Tenant UDN already exists, updating..."
-        create_tenant_udn_config | kubectl apply -n ${METADATA_NAMESPACE} -f -
+        log_info "Tenant UDN already exists, skipping..."
     else
         log_info "Creating tenant UDN..."
         create_tenant_udn_config | kubectl apply -n ${METADATA_NAMESPACE} -f -
     fi
     
-    log_success "Tenant UDN deployed"
+    log_success "Tenant UDN ready"
 }
 
 # Deploy metadata service
@@ -225,8 +275,12 @@ main() {
         "")
             log_info "Starting metadata service deployment..."
             check_prerequisites
+            build_image
+            load_image
+            apply_rbac
             deploy_tenant_udn
             deploy_metadata_service
+            wait_for_metadata_service
             display_status
             ;;
         *)
