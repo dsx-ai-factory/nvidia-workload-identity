@@ -16,6 +16,7 @@ import (
 
 	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
+	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -121,11 +122,19 @@ func (s *MetadataServer) findPodByIP(ctx context.Context, clientIP string) (*cor
 	return nil, fmt.Errorf("no pod found with IP address: %s", clientIP)
 }
 
-// fetchJWTForPod fetches a JWT SVID for the identified pod
+// fetchJWTForPod fetches a JWT SVID for the identified pod using its service account token
 func (s *MetadataServer) fetchJWTForPod(ctx context.Context, pod *corev1.Pod, audience string) (*jwtsvid.SVID, error) {
-	slog.Debug("Fetching JWT for pod", "namespace", pod.Namespace, "pod", pod.Name, "audience", audience)
+	slog.Debug("Fetching JWT for pod", "namespace", pod.Namespace, "pod", pod.Name, "audience", audience, "service_account", pod.Spec.ServiceAccountName)
 
-	// TODO use the VM's identity, not our service account identity
+	// Get the pod's service account token
+	token, err := s.getPodServiceAccountToken(ctx, pod)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pod service account token: %w", err)
+	}
+
+	slog.Debug("Retrieved service account token", "namespace", pod.Namespace, "pod", pod.Name, "token_length", len(token))
+
+	// TODO: Use the pod's service account token to authenticate with SPIRE
 	jwt, err := s.jwtSource.FetchJWTSVID(ctx, jwtsvid.Params{
 		Audience: audience,
 	})
@@ -134,6 +143,67 @@ func (s *MetadataServer) fetchJWTForPod(ctx context.Context, pod *corev1.Pod, au
 	}
 
 	return jwt, nil
+}
+
+// getPodServiceAccountToken retrieves the service account token for a pod
+func (s *MetadataServer) getPodServiceAccountToken(ctx context.Context, pod *corev1.Pod) (string, error) {
+	// Get the service account name
+	serviceAccountName := pod.Spec.ServiceAccountName
+	if serviceAccountName == "" {
+		serviceAccountName = "default"
+	}
+
+	slog.Debug("Getting service account token", "namespace", pod.Namespace, "service_account", serviceAccountName)
+
+	// Get the service account
+	sa, err := s.k8sClient.CoreV1().ServiceAccounts(pod.Namespace).Get(ctx, serviceAccountName, metav1.GetOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to get service account: %w", err)
+	}
+
+	// Look for the service account token secret
+	// Note: In Kubernetes 1.24+, tokens are no longer automatically created as secrets
+	// We should use TokenRequest API instead
+	if len(sa.Secrets) == 0 {
+		// Use TokenRequest API for Kubernetes 1.24+
+		return s.requestServiceAccountToken(ctx, pod.Namespace, serviceAccountName)
+	}
+
+	// Legacy path: read from mounted secret
+	for _, secretRef := range sa.Secrets {
+		secret, err := s.k8sClient.CoreV1().Secrets(pod.Namespace).Get(ctx, secretRef.Name, metav1.GetOptions{})
+		if err != nil {
+			continue
+		}
+		if secret.Type == corev1.SecretTypeServiceAccountToken {
+			if token, ok := secret.Data["token"]; ok {
+				return string(token), nil
+			}
+		}
+	}
+
+	// If no secret found, use TokenRequest API
+	return s.requestServiceAccountToken(ctx, pod.Namespace, serviceAccountName)
+}
+
+// requestServiceAccountToken uses the TokenRequest API to get a service account token
+func (s *MetadataServer) requestServiceAccountToken(ctx context.Context, namespace, serviceAccountName string) (string, error) {
+	slog.Debug("Using TokenRequest API", "namespace", namespace, "service_account", serviceAccountName)
+
+	// Request a token with 1 hour expiration
+	expirationSeconds := int64(3600)
+	tokenRequest := &authenticationv1.TokenRequest{
+		Spec: authenticationv1.TokenRequestSpec{
+			ExpirationSeconds: &expirationSeconds,
+		},
+	}
+
+	result, err := s.k8sClient.CoreV1().ServiceAccounts(namespace).CreateToken(ctx, serviceAccountName, tokenRequest, metav1.CreateOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to request token: %w", err)
+	}
+
+	return result.Status.Token, nil
 }
 
 // handleIdentity handles POST requests to /v1/metadata/identity
