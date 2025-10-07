@@ -9,14 +9,12 @@ import (
 	"mime"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
-	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -35,25 +33,6 @@ type IdentityResponse struct {
 
 type MetadataServer struct {
 	k8sClient *kubernetes.Clientset
-	jwtSource *workloadapi.JWTSource
-}
-
-// parseSocketPath validates and parses the socket URL
-func parseSocketPath(socketPath string) (string, error) {
-	u, err := url.Parse(socketPath)
-	if err != nil {
-		return "", fmt.Errorf("invalid socket URL: %w", err)
-	}
-
-	if u.Scheme != "unix" {
-		return "", fmt.Errorf("unsupported scheme '%s', only 'unix' is supported", u.Scheme)
-	}
-
-	if u.Path == "" {
-		return "", fmt.Errorf("socket path cannot be empty")
-	}
-
-	return u.Path, nil
 }
 
 // findPodByIP queries the Kubernetes API to find the pod with the given IP address
@@ -122,88 +101,46 @@ func (s *MetadataServer) findPodByIP(ctx context.Context, clientIP string) (*cor
 	return nil, fmt.Errorf("no pod found with IP address: %s", clientIP)
 }
 
-// fetchJWTForPod fetches a JWT SVID for the identified pod using its service account token
+// fetchJWTForPod fetches a JWT SVID for the identified pod via the bridge socket
 func (s *MetadataServer) fetchJWTForPod(ctx context.Context, pod *corev1.Pod, audience string) (*jwtsvid.SVID, error) {
-	slog.Debug("Fetching JWT for pod", "namespace", pod.Namespace, "pod", pod.Name, "audience", audience, "service_account", pod.Spec.ServiceAccountName)
+	podUID := string(pod.UID)
 
-	// Get the pod's service account token
-	token, err := s.getPodServiceAccountToken(ctx, pod)
+	slog.Debug("Fetching JWT for pod via bridge socket",
+		"namespace", pod.Namespace,
+		"pod", pod.Name,
+		"pod_uid", podUID,
+		"audience", audience)
+
+	// Construct socket path based on pod UID
+	socketPath := fmt.Sprintf("/run/metadata/metadata-bridge-sockets/%s/metadata-bridge-spire-agent.sock", podUID)
+	socketAddr := fmt.Sprintf("unix://%s", socketPath)
+
+	slog.Debug("Connecting to bridge socket", "socket_path", socketPath)
+
+	// Create a temporary JWT source connected to the pod's bridge socket
+	jwtSource, err := workloadapi.NewJWTSource(ctx, workloadapi.WithClientOptions(
+		workloadapi.WithAddr(socketAddr),
+	))
 	if err != nil {
-		return nil, fmt.Errorf("failed to get pod service account token: %w", err)
+		return nil, fmt.Errorf("failed to create JWT source for pod bridge socket: %w", err)
 	}
+	defer jwtSource.Close()
 
-	slog.Debug("Retrieved service account token", "namespace", pod.Namespace, "pod", pod.Name, "token_length", len(token))
-
-	// TODO: Use the pod's service account token to authenticate with SPIRE
-	jwt, err := s.jwtSource.FetchJWTSVID(ctx, jwtsvid.Params{
+	// Fetch JWT SVID from the pod's workload API proxy
+	jwt, err := jwtSource.FetchJWTSVID(ctx, jwtsvid.Params{
 		Audience: audience,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch JWT: %w", err)
+		return nil, fmt.Errorf("failed to fetch JWT from bridge socket: %w", err)
 	}
+
+	slog.Info("Fetched JWT from bridge socket",
+		"namespace", pod.Namespace,
+		"pod", pod.Name,
+		"pod_uid", podUID,
+		"spiffe_id", jwt.ID.String())
 
 	return jwt, nil
-}
-
-// getPodServiceAccountToken retrieves the service account token for a pod
-func (s *MetadataServer) getPodServiceAccountToken(ctx context.Context, pod *corev1.Pod) (string, error) {
-	// Get the service account name
-	serviceAccountName := pod.Spec.ServiceAccountName
-	if serviceAccountName == "" {
-		serviceAccountName = "default"
-	}
-
-	slog.Debug("Getting service account token", "namespace", pod.Namespace, "service_account", serviceAccountName)
-
-	// Get the service account
-	sa, err := s.k8sClient.CoreV1().ServiceAccounts(pod.Namespace).Get(ctx, serviceAccountName, metav1.GetOptions{})
-	if err != nil {
-		return "", fmt.Errorf("failed to get service account: %w", err)
-	}
-
-	// Look for the service account token secret
-	// Note: In Kubernetes 1.24+, tokens are no longer automatically created as secrets
-	// We should use TokenRequest API instead
-	if len(sa.Secrets) == 0 {
-		// Use TokenRequest API for Kubernetes 1.24+
-		return s.requestServiceAccountToken(ctx, pod.Namespace, serviceAccountName)
-	}
-
-	// Legacy path: read from mounted secret
-	for _, secretRef := range sa.Secrets {
-		secret, err := s.k8sClient.CoreV1().Secrets(pod.Namespace).Get(ctx, secretRef.Name, metav1.GetOptions{})
-		if err != nil {
-			continue
-		}
-		if secret.Type == corev1.SecretTypeServiceAccountToken {
-			if token, ok := secret.Data["token"]; ok {
-				return string(token), nil
-			}
-		}
-	}
-
-	// If no secret found, use TokenRequest API
-	return s.requestServiceAccountToken(ctx, pod.Namespace, serviceAccountName)
-}
-
-// requestServiceAccountToken uses the TokenRequest API to get a service account token
-func (s *MetadataServer) requestServiceAccountToken(ctx context.Context, namespace, serviceAccountName string) (string, error) {
-	slog.Debug("Using TokenRequest API", "namespace", namespace, "service_account", serviceAccountName)
-
-	// Request a token with 1 hour expiration
-	expirationSeconds := int64(3600)
-	tokenRequest := &authenticationv1.TokenRequest{
-		Spec: authenticationv1.TokenRequestSpec{
-			ExpirationSeconds: &expirationSeconds,
-		},
-	}
-
-	result, err := s.k8sClient.CoreV1().ServiceAccounts(namespace).CreateToken(ctx, serviceAccountName, tokenRequest, metav1.CreateOptions{})
-	if err != nil {
-		return "", fmt.Errorf("failed to request token: %w", err)
-	}
-
-	return result.Status.Token, nil
 }
 
 // handleIdentity handles POST requests to /v1/metadata/identity
@@ -278,7 +215,6 @@ func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) 
 func main() {
 	var (
 		listenAddr = flag.String("listen", ":8080", "HTTP server listen address")
-		socketPath = flag.String("socket", "unix:///var/run/secrets/spire.io/spire-agent.sock", "Path to SPIRE Workload API socket")
 		logLevel   = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
 	)
 	flag.Parse()
@@ -302,35 +238,7 @@ func main() {
 		Level: level,
 	})))
 
-	slog.Info("Starting SPIFFE Metadata Service", "listen_addr", *listenAddr, "socket_path", *socketPath, "log_level", level.String())
-
-	ctx := context.Background()
-
-	// Parse and validate socket path
-	socketFilePath, err := parseSocketPath(*socketPath)
-	if err != nil {
-		slog.Error("Invalid socket path", "error", err)
-		panic(err)
-	}
-
-	// Wait for SPIRE socket to be available
-	slog.Debug("Waiting for SPIRE agent socket", "socket_path", socketFilePath)
-	for {
-		if _, err := os.Stat(socketFilePath); err == nil {
-			break
-		}
-		time.Sleep(2 * time.Second)
-	}
-
-	slog.Debug("SPIRE agent socket found, connecting")
-
-	// Create JWT source for SPIRE Workload API
-	jwtSource, err := workloadapi.NewJWTSource(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(*socketPath)))
-	if err != nil {
-		slog.Error("Unable to create JWT source", "error", err)
-		panic(err)
-	}
-	defer jwtSource.Close()
+	slog.Info("Starting SPIFFE Metadata Service", "listen_addr", *listenAddr, "log_level", level.String())
 
 	// Create in-cluster Kubernetes client
 	config, err := rest.InClusterConfig()
@@ -348,7 +256,6 @@ func main() {
 	// Create metadata server
 	server := &MetadataServer{
 		k8sClient: k8sClient,
-		jwtSource: jwtSource,
 	}
 
 	// Setup HTTP handlers

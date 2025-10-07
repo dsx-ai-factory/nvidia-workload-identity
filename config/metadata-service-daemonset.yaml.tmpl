@@ -32,7 +32,6 @@ spec:
           name: http
         args:
         - --listen=:8080
-        - --socket=unix:///var/run/secrets/spire.io/spire-agent.sock
         - --log-level=info
         resources:
           requests:
@@ -42,8 +41,8 @@ spec:
             cpu: 200m
             memory: 256Mi
         volumeMounts:
-        - name: spiffe-csi
-          mountPath: /var/run/secrets/spire.io
+        - name: metadata-bridge-sockets
+          mountPath: /run/metadata/metadata-bridge-sockets
           readOnly: true
         startupProbe:
           httpGet:
@@ -62,8 +61,8 @@ spec:
             port: 8080
           periodSeconds: 10
       volumes:
-      - name: spiffe-csi
-        csi:
-          driver: csi.spiffe.io
-          readOnly: true
+      - name: metadata-bridge-sockets
+        hostPath:
+          path: /run/metadata/metadata-bridge-sockets
+          type: Directory
 

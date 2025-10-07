@@ -10,12 +10,15 @@ PROJECT_ROOT="$(dirname "${SCRIPT_DIR}")"
 METADATA_DAEMONSET_FILE="${PROJECT_ROOT}/config/metadata-service-daemonset.yaml.tmpl"
 METADATA_SERVICE_FILE="${PROJECT_ROOT}/config/metadata-service.yaml.tmpl"
 METADATA_RBAC_FILE="${PROJECT_ROOT}/config/metadata-service-rbac.yaml.tmpl"
+METADATA_CSI_FILE="${PROJECT_ROOT}/config/metadata-bridge-csi-daemonset.yaml"
+WORKLOAD_API_PROXY_POLICY="${PROJECT_ROOT}/config/workload-api-proxy-policy.yaml"
 TENANT_UDN_FILE="${PROJECT_ROOT}/config/tenant-udn.yaml.tmpl"
 METADATA_TENANT="${METADATA_TENANT:-default}"
 METADATA_NAMESPACE="${METADATA_NAMESPACE:-default}"
 TENANT_SUBNET_OCTET="${TENANT_SUBNET_OCTET:-1}"
 CLUSTER_NAME="${CLUSTER_NAME:-spire-demo}"
 IMAGE_NAME="metadata-service"
+CSI_IMAGE_NAME="metadata-bridge-csi-driver"
 IMAGE_TAG="latest"
 
 # Source common functions
@@ -57,6 +60,16 @@ check_prerequisites() {
         exit 1
     fi
     
+    if [[ ! -f "${METADATA_CSI_FILE}" ]]; then
+        log_error "Metadata bridge CSI file not found: ${METADATA_CSI_FILE}"
+        exit 1
+    fi
+    
+    if [[ ! -f "${WORKLOAD_API_PROXY_POLICY}" ]]; then
+        log_error "Workload API Proxy Policy file not found: ${WORKLOAD_API_PROXY_POLICY}"
+        exit 1
+    fi
+    
     # Check if Kind cluster exists
     if ! kind get clusters | grep -q "^${CLUSTER_NAME}$"; then
         log_error "Kind cluster '${CLUSTER_NAME}' not found. Please run 'make cluster' first."
@@ -66,27 +79,43 @@ check_prerequisites() {
     log_success "All prerequisites are met"
 }
 
-# Build metadata service Docker image
-build_image() {
+# Build Docker images
+build_images() {
     log_info "Building metadata service Docker image..."
     
     cd "${PROJECT_ROOT}"
     if docker build -t ${IMAGE_NAME}:${IMAGE_TAG} -f Dockerfile.metadata-service .; then
-        log_success "Docker image built successfully"
+        log_success "Metadata service Docker image built successfully"
     else
-        log_error "Failed to build Docker image"
+        log_error "Failed to build metadata service Docker image"
+        exit 1
+    fi
+    
+    log_info "Building metadata bridge CSI driver Docker image..."
+    if docker build -t ${CSI_IMAGE_NAME}:${IMAGE_TAG} -f Dockerfile.metadata-bridge-csi .; then
+        log_success "CSI driver Docker image built successfully"
+    else
+        log_error "Failed to build CSI driver Docker image"
         exit 1
     fi
 }
 
-# Load image into Kind cluster
-load_image() {
+# Load images into Kind cluster
+load_images() {
     log_info "Loading metadata service image into Kind cluster..."
     
     if kind load docker-image ${IMAGE_NAME}:${IMAGE_TAG} --name "${CLUSTER_NAME}"; then
-        log_success "Image loaded into Kind cluster"
+        log_success "Metadata service image loaded into Kind cluster"
     else
-        log_error "Failed to load image into Kind cluster"
+        log_error "Failed to load metadata service image into Kind cluster"
+        exit 1
+    fi
+    
+    log_info "Loading CSI driver image into Kind cluster..."
+    if kind load docker-image ${CSI_IMAGE_NAME}:${IMAGE_TAG} --name "${CLUSTER_NAME}"; then
+        log_success "CSI driver image loaded into Kind cluster"
+    else
+        log_error "Failed to load CSI driver image into Kind cluster"
         exit 1
     fi
 }
@@ -119,6 +148,55 @@ create_tenant_udn_config() {
     sed -e "s/TENANT_PLACEHOLDER/${METADATA_TENANT}/g" \
         -e "s/TENANT_SUBNET_OCTET/${TENANT_SUBNET_OCTET}/g" \
         "${TENANT_UDN_FILE}"
+}
+
+# Deploy metadata bridge CSI driver
+deploy_csi_driver() {
+    log_info "Deploying metadata bridge CSI driver..."
+    
+    # Check if DaemonSet already exists
+    if kubectl get daemonset metadata-bridge-csi-driver -n ${METADATA_NAMESPACE} &> /dev/null; then
+        log_info "CSI driver DaemonSet already exists, updating..."
+        kubectl apply -f "${METADATA_CSI_FILE}" -n ${METADATA_NAMESPACE}
+    else
+        log_info "Creating CSI driver DaemonSet..."
+        kubectl apply -f "${METADATA_CSI_FILE}" -n ${METADATA_NAMESPACE}
+    fi
+    
+    log_success "CSI driver deployed"
+}
+
+# Wait for CSI driver pods
+wait_for_csi_driver() {
+    log_info "Waiting for CSI driver pods to be ready..."
+    
+    local timeout=60
+    local elapsed=0
+    
+    while [ $elapsed -lt $timeout ]; do
+        local ready_pods=$(kubectl get pods -n ${METADATA_NAMESPACE} -l app=metadata-bridge-csi-driver --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
+        
+        if [ "$ready_pods" -gt 0 ]; then
+            log_success "CSI driver pods are ready!"
+            return 0
+        fi
+        
+        log_info "Waiting for CSI driver pods... (${elapsed}s/${timeout}s)"
+        sleep 5
+        elapsed=$((elapsed + 5))
+    done
+    
+    log_warning "CSI driver pods not ready within ${timeout} seconds"
+    return 1
+}
+
+# Deploy Workload API Proxy Policy
+deploy_workload_api_proxy_policy() {
+    log_info "Deploying Workload API Proxy Policy..."
+    
+    kubectl apply -f "${WORKLOAD_API_PROXY_POLICY}"
+    
+    log_success "Workload API Proxy Policy deployed"
 }
 
 # Deploy tenant UDN
@@ -189,6 +267,19 @@ wait_for_metadata_service() {
 display_status() {
     log_success "Metadata service deployment complete!"
     echo
+    echo "Metadata Bridge CSI Driver Status:"
+    echo "===================================="
+    
+    # Show CSI Driver DaemonSet status
+    echo "DaemonSet:"
+    kubectl get daemonset metadata-bridge-csi-driver -n ${METADATA_NAMESPACE} 2>/dev/null || echo "  DaemonSet not found"
+    
+    # Show CSI Driver Pods
+    echo
+    echo "Pods:"
+    kubectl get pods -n ${METADATA_NAMESPACE} -l app=metadata-bridge-csi-driver 2>/dev/null || echo "  No pods found"
+    
+    echo
     echo "Metadata Service Status:"
     echo "========================"
     
@@ -215,8 +306,8 @@ display_status() {
     echo
     echo "Next Steps:"
     echo "==========="
-    echo "1. Check pod logs: kubectl logs -l app=metadata-service,tenant=${METADATA_TENANT} -n ${METADATA_NAMESPACE}"
-    echo "2. Test service: kubectl run -it --rm test-pod --image=curlimages/curl --restart=Never -- curl http://metadata-service-${METADATA_TENANT}"
+    echo "1. Check metadata service logs: kubectl logs -l app=metadata-service,tenant=${METADATA_TENANT} -n ${METADATA_NAMESPACE}"
+    echo "2. Check CSI driver logs: kubectl logs -l app=metadata-bridge-csi-driver -n ${METADATA_NAMESPACE} -c metadata-bridge-csi-driver"
     echo "3. Deploy VM with 'make vm' or 'scripts/09-deploy-vm.sh'"
 }
 
@@ -224,9 +315,9 @@ display_status() {
 cleanup_metadata_service() {
     log_info "Cleaning up metadata service for tenant '${METADATA_TENANT}'..."
     
-    # Delete DaemonSet
+    # Delete metadata service DaemonSet
     if kubectl get daemonset metadata-service-${METADATA_TENANT} -n ${METADATA_NAMESPACE} &> /dev/null; then
-        log_info "Deleting DaemonSet..."
+        log_info "Deleting metadata service DaemonSet..."
         kubectl delete daemonset metadata-service-${METADATA_TENANT} -n ${METADATA_NAMESPACE}
     fi
     
@@ -234,6 +325,12 @@ cleanup_metadata_service() {
     if kubectl get service metadata-service-${METADATA_TENANT} -n ${METADATA_NAMESPACE} &> /dev/null; then
         log_info "Deleting Service..."
         kubectl delete service metadata-service-${METADATA_TENANT} -n ${METADATA_NAMESPACE}
+    fi
+    
+    # Delete CSI driver
+    if kubectl get daemonset metadata-bridge-csi-driver -n ${METADATA_NAMESPACE} &> /dev/null; then
+        log_info "Deleting CSI driver DaemonSet..."
+        kubectl delete -f "${METADATA_CSI_FILE}" -n ${METADATA_NAMESPACE}
     fi
     
     log_success "Metadata service cleanup completed!"
@@ -275,9 +372,12 @@ main() {
         "")
             log_info "Starting metadata service deployment..."
             check_prerequisites
-            build_image
-            load_image
+            build_images
+            load_images
             apply_rbac
+            deploy_csi_driver
+            wait_for_csi_driver
+            deploy_workload_api_proxy_policy
             deploy_tenant_udn
             deploy_metadata_service
             wait_for_metadata_service

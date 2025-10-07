@@ -1,0 +1,53 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: inject-workload-api-proxy
+  annotations:
+    policies.kyverno.io/title: Inject Workload API Proxy Sidecar
+    policies.kyverno.io/category: SPIFFE
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Automatically injects a socat proxy sidecar into pods with the 
+      nvidia.com/inject-workload-api-proxy annotation. The sidecar proxies
+      connections from the metadata bridge socket to the SPIRE Workload API socket.
+spec:
+  background: true
+  rules:
+  - name: add-workload-api-proxy-sidecar
+    match:
+      any:
+      - resources:
+          kinds: [Pod]
+          annotations:
+            nvidia.com/inject-workload-api-proxy: "true"
+    mutate:
+      patchStrategicMerge:
+        spec:
+          containers:
+          - name: workload-api-proxy
+            image: alpine/socat:latest
+            command:
+            - socat
+            - UNIX-LISTEN:/var/run/secrets/nvidia.com/metadata-bridge-spire-agent.sock,fork
+            - UNIX-CONNECT:/var/run/secrets/spire.io/spire-agent.sock
+            resources:
+              requests:
+                cpu: 10m
+                memory: 16Mi
+              limits:
+                cpu: 50m
+                memory: 32Mi
+            volumeMounts:
+            - name: metadata-bridge
+              mountPath: /var/run/secrets/nvidia.com
+            - name: spiffe-csi
+              mountPath: /var/run/secrets/spire.io
+              readOnly: true
+          volumes:
+          - name: metadata-bridge
+            csi:
+              driver: metadata-bridge.csi.nvidia.com
+          - name: spiffe-csi
+            csi:
+              driver: csi.spiffe.io
+              readOnly: true

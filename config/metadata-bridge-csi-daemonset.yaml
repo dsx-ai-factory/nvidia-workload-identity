@@ -1,0 +1,133 @@
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: metadata-bridge.csi.nvidia.com
+spec:
+  podInfoOnMount: true
+  volumeLifecycleModes:
+  - Ephemeral
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: metadata-bridge-csi-driver
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: metadata-bridge-csi-driver
+rules: []
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: metadata-bridge-csi-driver
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: metadata-bridge-csi-driver
+subjects:
+- kind: ServiceAccount
+  name: metadata-bridge-csi-driver
+  namespace: default
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: metadata-bridge-csi-driver
+  namespace: default
+  labels:
+    app: metadata-bridge-csi-driver
+spec:
+  selector:
+    matchLabels:
+      app: metadata-bridge-csi-driver
+  template:
+    metadata:
+      labels:
+        app: metadata-bridge-csi-driver
+    spec:
+      serviceAccountName: metadata-bridge-csi-driver
+      containers:
+      - name: metadata-bridge-csi-driver
+        image: metadata-bridge-csi-driver:latest
+        imagePullPolicy: IfNotPresent
+        args:
+              - --endpoint=unix:///metadata-bridge-csi/csi.sock
+              - --node-id=$(MY_NODE_NAME)
+              - --sockets-dir=/run/metadata/metadata-bridge-sockets
+              - --log-level=info
+        env:
+        - name: MY_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        securityContext:
+          privileged: true
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - all
+        volumeMounts:
+        - name: metadata-bridge-csi-socket-dir
+          mountPath: /metadata-bridge-csi
+        - name: metadata-bridge-sockets-dir
+          mountPath: /run/metadata/metadata-bridge-sockets
+        - name: mountpoint-dir
+          mountPath: /var/lib/kubelet/pods
+          mountPropagation: Bidirectional
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+      - name: node-driver-registrar
+        image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.9.4
+        imagePullPolicy: IfNotPresent
+        args:
+        - --csi-address=/metadata-bridge-csi/csi.sock
+        - --kubelet-registration-path=/var/lib/kubelet/plugins/metadata-bridge.csi.nvidia.com/csi.sock
+        - --health-port=9810
+        ports:
+        - name: healthz
+          containerPort: 9810
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: healthz
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+        volumeMounts:
+        - name: metadata-bridge-csi-socket-dir
+          mountPath: /metadata-bridge-csi
+        - name: kubelet-plugin-registration-dir
+          mountPath: /registration
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+      volumes:
+      - name: metadata-bridge-csi-socket-dir
+        hostPath:
+          path: /var/lib/kubelet/plugins/metadata-bridge.csi.nvidia.com
+          type: DirectoryOrCreate
+      - name: metadata-bridge-sockets-dir
+        hostPath:
+          path: /run/metadata/metadata-bridge-sockets
+          type: DirectoryOrCreate
+      - name: mountpoint-dir
+        hostPath:
+          path: /var/lib/kubelet/pods
+          type: Directory
+      - name: kubelet-plugin-registration-dir
+        hostPath:
+          path: /var/lib/kubelet/plugins_registry
+          type: Directory

@@ -1,0 +1,30 @@
+# Build stage
+FROM golang:1.25 AS builder
+
+WORKDIR /app
+
+# Copy go modules files
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY cmd/metadata-bridge-spiffe-csi/ ./cmd/metadata-bridge-spiffe-csi/
+
+# Build the binary
+RUN go build -o metadata-bridge-csi-driver ./cmd/metadata-bridge-spiffe-csi
+
+# Final stage
+FROM debian:bookworm-slim
+
+# Install ca-certificates for TLS
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /root/
+
+# Copy the binary from builder stage
+COPY --from=builder /app/metadata-bridge-csi-driver .
+
+# Run the CSI driver
+ENTRYPOINT ["/root/metadata-bridge-csi-driver"]
