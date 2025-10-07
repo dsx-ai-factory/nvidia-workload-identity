@@ -1,6 +1,6 @@
 # SPIFFE + OpenBao CEL Demo Makefile
 
-.PHONY: help install clean test verify-spire cluster kubevirt kyverno spire nginx bao metadata-service vm status
+.PHONY: help install clean test verify-spire verify-vm cluster kubevirt kyverno spire nginx bao metadata-service vm status
 
 # Default target
 help: ## Show this help message
@@ -25,9 +25,10 @@ install: cluster kubevirt kyverno spire verify-spire bao nginx metadata-service 
 	@echo "- Lightweight Ubuntu VM for testing"
 	@echo ""
 	@echo "Next steps:"
-	@echo "  make test     # Run integration tests"
-	@echo "  make status   # Check component status"
-	@echo "  make clean    # Clean up when done"
+	@echo "  make verify-vm # Verify VM metadata service"
+	@echo "  make test      # Run integration tests"
+	@echo "  make status    # Check component status"
+	@echo "  make clean     # Clean up when done"
 
 clean: ## Clean up: Remove Kind cluster and all resources
 	@echo "Cleaning up SPIFFE + OpenBao demo..."
@@ -42,6 +43,10 @@ test: ## Run integration tests
 verify-spire: ## Verify SPIRE installation
 	@echo "Verifying SPIRE installation..."
 	@./scripts/05-verify-spire.sh
+
+verify-vm: ## Verify VM metadata service
+	@echo "Verifying VM metadata service..."
+	@./scripts/10-verify-vm.sh
 
 status: ## Show status of all components
 	@echo "Component Status"

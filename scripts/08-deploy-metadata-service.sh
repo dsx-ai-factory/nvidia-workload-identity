@@ -380,7 +380,7 @@ main() {
             deploy_workload_api_proxy_policy
             deploy_tenant_udn
             deploy_metadata_service
-            wait_for_metadata_service
+            log_info "Metadata service DaemonSet created (pods will start when VM nodes are tagged)"
             display_status
             ;;
         *)

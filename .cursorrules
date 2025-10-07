@@ -169,6 +169,7 @@ trap "kill $pf_pid 2>/dev/null || true" EXIT
 - Update this cursorrules file as needed when given general directives.
 - ALWAYS update .cursorrules immediately when receiving general directives - do not forget this step.
 - Prefer to keep temporary data in memory rather than as temp files. Temp files can leave leftovers if the scripts exit with error.
+- Batch multiple tool calls together when possible. Chain commands with `&&` to reduce back-and-forth. Read multiple files in parallel when needed.
 
 ## File Movement and Reference Validation
 - When moving, renaming, or deleting files, ALWAYS validate that all references are updated:

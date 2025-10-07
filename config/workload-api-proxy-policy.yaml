@@ -25,9 +25,10 @@ spec:
         spec:
           containers:
           - name: workload-api-proxy
-            image: alpine/socat:latest
+            image: alpine/socat:1.8.0.3
             command:
             - socat
+            - -dd # noisy, but -d gives us nothing.
             - UNIX-LISTEN:/var/run/secrets/nvidia.com/metadata-bridge-spire-agent.sock,fork,unlink-early
             - UNIX-CONNECT:/var/run/secrets/spire.io/spire-agent.sock
             resources:

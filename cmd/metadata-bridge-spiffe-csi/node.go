@@ -65,6 +65,11 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 		return nil, status.Errorf(codes.Internal, "failed to create volume directory: %v", err)
 	}
 
+	// Explicitly set permissions to 0777 (os.MkdirAll respects umask)
+	if err := os.Chmod(volumeDir, 0777); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to set directory permissions: %v", err)
+	}
+
 	// Create target directory (required by CSI interface)
 	if err := os.Mkdir(targetPath, 0755); err != nil && !os.IsExist(err) {
 		return nil, status.Errorf(codes.Internal, "unable to create target path %q: %v", targetPath, err)
