@@ -24,7 +24,7 @@ spire-server:
     identities:
       clusterSPIFFEIDs:
         # Override the default template to use namespace/pod pattern
-        default:
+        default: # https://github.com/spiffe/spire-controller-manager/blob/main/docs/clusterspiffeid-crd.md#templates
           spiffeIDTemplate: spiffe://{{ .TrustDomain }}/{{ .PodMeta.Namespace }}/pod/{{ .PodMeta.Name }}
   
   # Image configuration

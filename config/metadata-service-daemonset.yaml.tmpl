@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: metadata-service-TENANT_PLACEHOLDER
+  namespace: default
+  labels:
+    app: metadata-service
+    tenant: TENANT_PLACEHOLDER
+spec:
+  selector:
+    matchLabels:
+      app: metadata-service
+      tenant: TENANT_PLACEHOLDER
+  template:
+    metadata:
+      labels:
+        app: metadata-service
+        tenant: TENANT_PLACEHOLDER
+        network: tenant-TENANT_PLACEHOLDER-network
+      annotations:
+        k8s.v1.cni.cncf.io/networks: tenant-TENANT_PLACEHOLDER-network
+    spec:
+      nodeSelector:
+        vm-tenant: TENANT_PLACEHOLDER
+      serviceAccountName: metadata-service
+      containers:
+      - name: metadata-service
+        image: metadata-service:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          name: http
+        args:
+        - --listen=:8080
+        - --log-level=info
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        volumeMounts:
+        - name: metadata-bridge-sockets
+          mountPath: /run/metadata/metadata-bridge-sockets
+          readOnly: true
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          periodSeconds: 1
+          failureThreshold: 30
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          periodSeconds: 10
+      volumes:
+      - name: metadata-bridge-sockets
+        hostPath:
+          path: /run/metadata/metadata-bridge-sockets
+          type: Directory
+

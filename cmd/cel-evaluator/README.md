@@ -30,7 +30,7 @@ go build -o cel-evaluator ./cmd/cel-evaluator
 Evaluating CEL Role: spiffe-example-role
 Expression: pb.Auth{policies: is_spiffe ? ['spiffe-authenticated', 'region-' + region, 'product-' + product] : ['example']}
 Variables: 4
-✓ CEL program validation passed
+CEL program validation passed
 
 === Sample Claims ===
 {
@@ -44,11 +44,11 @@ Variables: 4
 === Evaluating Variables ===
 Variable 1: subject_parts
   Expression: jwt.claims.sub.split('/')
-  ❌ Error: no such overload
+  Error: no such overload
 
 Variable 2: is_spiffe  
   Expression: size(jwt.claims.sub) > 0 && jwt.claims.sub.startsWith('spiffe://')
-  ✓ Result: true (type: bool)
+  Result: true (type: bool)
 ...
 ```
 

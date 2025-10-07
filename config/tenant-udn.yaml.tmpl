@@ -1,0 +1,12 @@
+apiVersion: k8s.ovn.org/v1
+kind: UserDefinedNetwork
+metadata:
+  name: tenant-TENANT_PLACEHOLDER-network
+  namespace: default
+spec:
+  topology: Layer2
+  layer2:
+    role: Secondary
+    subnets:
+    - "10.100.TENANT_SUBNET_OCTET.0/24"
+

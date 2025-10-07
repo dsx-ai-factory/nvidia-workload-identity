@@ -65,7 +65,7 @@ test_spiffe_auth() {
     
     # Check if we got a client token back
     if echo "$auth_result" | grep -q '"client_token"'; then
-        log_success "✓ SPIFFE JWT authentication to Bao successful!"
+        log_success "SPIFFE JWT authentication to Bao successful"
         log_info "Authentication Response:"
         echo "$auth_result" | jq . 2>/dev/null || echo "$auth_result"
     else
@@ -86,7 +86,7 @@ test_spiffe_auth() {
             http://openbao.bao:8200/v1/secret/data/nginx 2>/dev/null || echo "failed")
         
         if echo "$secret_result" | grep -q '"username"'; then
-            log_success "✓ Secret access successful!"
+            log_success "Secret access successful"
             log_info "Secret Response:"
             echo "$secret_result" | jq . 2>/dev/null || echo "$secret_result"
         else
@@ -104,7 +104,7 @@ main() {
     test_spiffe_auth
     
     echo
-    log_success "Integration test completed!"
+    log_success "Integration test completed"
 }
 
 # Run main function

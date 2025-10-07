@@ -34,6 +34,23 @@ check_prerequisites() {
         exit 1
     fi
     
+    if ! command -v curl &> /dev/null; then
+        log_error "curl is not installed. Please install curl first."
+        exit 1
+    fi
+    
+    if ! command -v bao &> /dev/null; then
+        log_error "bao CLI is not installed. Please install bao CLI first."
+        log_info "Installation: https://openbao.org/docs/install/"
+        exit 1
+    fi
+    
+    if ! command -v helm &> /dev/null; then
+        log_error "helm is not installed. Please install helm first."
+        log_info "Installation: https://helm.sh/docs/intro/install/"
+        exit 1
+    fi
+    
     # Check if docker is running
     if ! docker info &> /dev/null; then
         log_error "Docker is not running. Please start Docker first."
@@ -69,13 +86,125 @@ create_cluster() {
     log_info "Creating new cluster..."
     kind create cluster --config="${KIND_CONFIG_FILE}" --name="${CLUSTER_NAME}"
     
-    # Wait for cluster to be ready
-    log_info "Waiting for cluster to be ready..."
-    kubectl wait --for=condition=Ready nodes --all --timeout=300s
+    # Wait for API server to be available
+    log_info "Waiting for API server to be available..."
+    kubectl wait --for=condition=Ready --timeout=60s -n kube-system pod -l component=kube-apiserver
     
-    log_success "Cluster '${CLUSTER_NAME}' created successfully"
+    log_success "Cluster '${CLUSTER_NAME}' created (CNI installation needed for nodes to be ready)"
 }
 
+# Install OVN-Kubernetes CNI
+install_ovn() {
+    log_info "Installing OVN-Kubernetes CNI..."
+    
+    local ovn_namespace="ovn-kubernetes"
+    local ovn_git_tag="v1.1.0"
+    local ovn_image_tag="release-1.1"
+    local ovn_chart_dir="${PROJECT_ROOT}/third-party/ovn-kubernetes"
+    local ovn_values_file="${ovn_chart_dir}/helm/ovn-kubernetes/values-no-ic.yaml"
+    
+    # Check if OVN-Kubernetes submodule exists
+    if [[ ! -d "${ovn_chart_dir}/helm" ]]; then
+        log_error "OVN-Kubernetes submodule not found at ${ovn_chart_dir}"
+        log_error "Please run: git submodule update --init third-party/ovn-kubernetes"
+        exit 1
+    fi
+    log_info "Using OVN-Kubernetes Helm chart from submodule"
+    
+    # Get Kubernetes API server endpoint
+    log_info "Determining Kubernetes API server endpoint..."
+    local api_server_ip
+    api_server_ip=$(kubectl get pods -n kube-system -l component=kube-apiserver -o jsonpath='{.items[0].status.hostIP}' 2>/dev/null || echo "")
+    if [[ -z "${api_server_ip}" ]]; then
+        log_error "Could not determine Kubernetes API server IP"
+        exit 1
+    fi
+    local k8s_api_server="https://${api_server_ip}:6443"
+    log_info "Kubernetes API server: ${k8s_api_server}"
+    
+    # Enable IPv6 in Kind nodes for OVN compatibility BEFORE installing OVN
+    # This is required even for IPv4-only deployments
+    # Must be done before OVN installation per kind-helm.sh
+    log_info "Configuring IPv6 in Kind nodes for OVN compatibility..."
+    export IP_FAMILY="ipv4"
+    export OCI_BIN="docker"
+    export KIND_CLUSTER_NAME="${CLUSTER_NAME}"
+    source "${PROJECT_ROOT}/third-party/ovn-kubernetes/contrib/kind-common"
+    docker_disable_ipv6
+    
+    # Install multus-cni and MultiNetworkPolicy CRD BEFORE OVN-Kubernetes for multi-network support
+    # OVN-Kubernetes with multi-network enabled expects these CRDs to exist
+    log_info "Installing multus-cni for multi-network support..."
+    kubectl apply -f https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/master/deployments/multus-daemonset.yml
+    kubectl wait --for=condition=Ready pod -l app=multus -n kube-system --timeout=300s
+    log_success "Multus-CNI installed successfully"
+    
+    log_info "Installing MultiNetworkPolicy CRD..."
+    kubectl apply -f https://raw.githubusercontent.com/k8snetworkplumbingwg/multi-networkpolicy/master/scheme.yml
+    log_success "MultiNetworkPolicy CRD installed successfully"
+    
+    # Get number of control plane nodes for ovnkube-identity replicas
+    local control_plane_count
+    control_plane_count=$(kubectl get node -l node-role.kubernetes.io/control-plane --no-headers | wc -l)
+    
+    # Install OVN-Kubernetes via Helm from submodule chart (per README.md)
+    log_info "Installing OVN-Kubernetes from Helm chart..."
+    helm install ovn-kubernetes "${ovn_chart_dir}/helm/ovn-kubernetes" \
+        -f "${ovn_values_file}" \
+        --set k8sAPIServer="${k8s_api_server}" \
+        --set ovnkube-identity.replicas="${control_plane_count}" \
+        --set global.image.repository="ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu" \
+        --set global.image.tag="${ovn_image_tag}" \
+        --set global.enableMultiNetwork=true \
+        --set global.enableNetworkSegmentation=true
+    
+    # Wait for OVN-Kubernetes pods to be ready
+    log_info "Waiting for OVN-Kubernetes pods to be ready..."
+    kubectl wait --for=condition=Ready pod -l app=ovnkube-node -n ovn-kubernetes --timeout=300s
+    kubectl wait --for=condition=Ready pod -l name=ovnkube-master -n ovn-kubernetes --timeout=300s
+    kubectl wait --for=condition=Ready pod -l name=ovnkube-db -n ovn-kubernetes --timeout=300s
+    
+    # Wait for nodes to be ready with network
+    log_info "Waiting for nodes to be ready with OVN networking..."
+    kubectl wait --for=condition=Ready nodes --all --timeout=300s
+    
+    # Patch CoreDNS configuration now that OVN is installed and nodes are ready
+    log_info "Patching CoreDNS configuration for OVN-Kubernetes..."
+    
+    # Apply standard coredns_patch from OVN (adds "net" domain, replaces forward with 8.8.8.8)
+    coredns_patch
+    
+    # Replace 8.8.8.8 with actual upstream DNS server (routable from pods)
+    # Get the first DNS server from systemd-resolved
+    local dns_server
+    dns_server=$(resolvectl status 2>/dev/null | grep "DNS Servers" | head -1 | awk '{print $3}')
+    if [[ -z "${dns_server}" ]]; then
+        log_error "Could not determine upstream DNS server"
+        exit 1
+    fi
+    log_info "Updating CoreDNS to use upstream DNS server: ${dns_server}"
+    kubectl get configmap coredns -n kube-system -o yaml | \
+        sed "s|forward \. 8\.8\.8\.8|forward . ${dns_server}|" | \
+        kubectl apply -f -
+    
+    # Restart CoreDNS to apply the new configuration
+    log_info "Restarting CoreDNS to apply configuration..."
+    kubectl rollout restart deployment coredns -n kube-system
+    kubectl rollout status deployment coredns -n kube-system --timeout=60s
+    
+    # Validate DNS resolution is working
+    log_info "Validating DNS resolution..."
+    local dns_test_output
+    if dns_test_output=$(kubectl run dns-test --image=busybox:1.36 --rm -i --restart=Never --timeout=30s -- nslookup google.com 2>&1); then
+        log_success "DNS resolution validated successfully"
+    else
+        log_error "DNS resolution validation failed"
+        echo "${dns_test_output}"
+        exit 1
+    fi
+    
+    log_success "OVN-Kubernetes CNI installed successfully"
+}
 
 # Display cluster information
 display_cluster_info() {
@@ -136,10 +265,11 @@ main() {
             usage
             ;;
         "")
-            log_info "Starting Kind cluster setup for SPIRE..."
+            log_info "Starting Kind cluster setup with OVN-Kubernetes CNI..."
             check_prerequisites
             check_kind_config
             create_cluster
+            install_ovn
             display_cluster_info
             ;;
         *)
