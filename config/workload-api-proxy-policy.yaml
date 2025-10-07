@@ -28,7 +28,7 @@ spec:
             image: alpine/socat:latest
             command:
             - socat
-            - UNIX-LISTEN:/var/run/secrets/nvidia.com/metadata-bridge-spire-agent.sock,fork
+            - UNIX-LISTEN:/var/run/secrets/nvidia.com/metadata-bridge-spire-agent.sock,fork,unlink-early
             - UNIX-CONNECT:/var/run/secrets/spire.io/spire-agent.sock
             resources:
               requests:
@@ -47,6 +47,7 @@ spec:
           - name: metadata-bridge
             csi:
               driver: metadata-bridge.csi.nvidia.com
+              readOnly: false
           - name: spiffe-csi
             csi:
               driver: csi.spiffe.io

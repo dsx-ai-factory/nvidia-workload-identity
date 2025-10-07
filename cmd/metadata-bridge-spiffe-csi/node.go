@@ -58,19 +58,35 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 		"pod_uid", podUID,
 		"target_path", targetPath)
 
-	// Create volume directory using pod UID with world-writable permissions
-	// This allows unprivileged containers to create socket files
+	// Create volume directory using pod UID
 	volumeDir := filepath.Join(d.socketsDir, podUID)
-	if err := os.MkdirAll(volumeDir, 0777); err != nil {
+	if err := os.MkdirAll(volumeDir, 0755); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create volume directory: %v", err)
 	}
 
+	// Pre-create the socket file with permissions that allow the container to recreate it
+	// socat will unlink and recreate this file when it starts
+	socketPath := filepath.Join(volumeDir, "metadata-bridge-spire-agent.sock")
+	socketFile, err := os.Create(socketPath)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to create socket file: %v", err)
+	}
+	socketFile.Close()
+
+	// Set socket file permissions to allow container user to unlink/recreate it
+	if err := os.Chmod(socketPath, 0666); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to set socket file permissions: %v", err)
+	}
+
+	slog.Debug("Pre-created socket file", "path", socketPath)
+
 	// Create target directory (required by CSI interface)
-	if err := os.Mkdir(targetPath, 0777); err != nil && !os.IsExist(err) {
+	if err := os.Mkdir(targetPath, 0755); err != nil && !os.IsExist(err) {
 		return nil, status.Errorf(codes.Internal, "unable to create target path %q: %v", targetPath, err)
 	}
 
-	// Bind mount the volume directory to target path with read-write
+	// Bind mount the volume directory to target path as read-write
+	// The container needs write access to unlink/recreate the socket
 	if err := bindMountRW(volumeDir, targetPath); err != nil {
 		return nil, status.Errorf(codes.Internal, "unable to mount %q: %v", targetPath, err)
 	}
