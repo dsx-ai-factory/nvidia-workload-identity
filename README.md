@@ -54,7 +54,7 @@ flowchart TD
                     SpireCSI["SPIRE CSI Socket"]
                     SharedSocket["Per-Pod Socket<br/>(Metadata Bridge CSI)"]
                 end
-                MetadataServiceA["Metadata Service A<br/>(DaemonSet Pod)"]
+                MetadataServiceA["Metadata Service<br/>(DaemonSet Pod)"]
                 SpireAgentA["SPIRE Agent<br/>(DaemonSet)"]
                 ServiceA["K8s Service<br/>169.254.169.254<br/>Local Traffic Policy"]
             end
