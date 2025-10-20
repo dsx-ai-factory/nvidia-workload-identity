@@ -41,44 +41,43 @@ VMI pods include a `socat` sidecar that proxies the SPIRE Workload API socket to
 
 ### Architecture
 
-```mermaid
-flowchart TD
-    subgraph Cluster["Kubernetes Cluster"]
-        subgraph TenantA["Tenant UDN"]
-            subgraph NodeA["Kubernetes Node"]
-                subgraph VMIA["VMI Pod"]
-                    subgraph VMA["KubeVirt VM"]
-                        CustomerAppA["Customer Application"]
-                    end
-                    Sidecar["Workload API Proxy Sidecar</br>(socat)"]
-                    SpireCSI["SPIRE CSI Socket"]
-                    SharedSocket["Per-Pod Socket<br/>(Metadata Bridge CSI)"]
-                end
-                MetadataServiceA["Metadata Service<br/>(DaemonSet Pod)"]
-                SpireAgentA["SPIRE Agent<br/>(DaemonSet)"]
-                ServiceA["K8s Service<br/>169.254.169.254<br/>Local Traffic Policy"]
-            end
-        end
-        
-        K8sAPI["Kubernetes API Server"]
-        SpireServer["SPIRE Server"]
-    end
-    
-    CustomerAppA -->|"1. POST /v1/metadata/identity<br/>Source IP: VMI IP"| ServiceA
-    ServiceA --> MetadataServiceA
-    MetadataServiceA -->|"2. IP → Pod Lookup"| K8sAPI
-    MetadataServiceA -->|"3. Request SVID"| SharedSocket
-    SharedSocket --> Sidecar
-    Sidecar -->|"4. FetchJWTSVID"| SpireCSI
-    SpireCSI --> SpireAgentA
-    SpireAgentA -->|"5. K8s Workload Attestation"| SpireServer
-    SpireServer -->|"6. JWT SVID"| SpireAgentA
-    SpireAgentA --> SpireCSI
-    SpireCSI --> Sidecar
-    Sidecar -->|"7. Return SVID"| SharedSocket
-    SharedSocket --> MetadataServiceA
-    MetadataServiceA -->|"8. JWT Response"| ServiceA
-    ServiceA --> CustomerAppA
+```plantuml
+@startuml SPIFFE_JWT_Metadata_Service_Architecture
+
+package "Kubernetes Cluster" as Cluster {
+  package "Tenant UDN" as TenantA {
+    package "Kubernetes Node" as NodeA {
+      package "VMI Pod" as VMIA {
+        package "KubeVirt VM" as VMA {
+          component "Customer Application" as CustomerAppA
+        }
+        component "Workload API Proxy Sidecar\n(socat)" as Sidecar
+        component "SPIRE CSI Socket" as SpireCSI
+        component "Per-Pod Socket\n(Metadata Bridge CSI)" as SharedSocket
+      }
+      component "Metadata Service\n(DaemonSet Pod)" as MetadataServiceA
+      component "SPIRE Agent\n(DaemonSet)" as SpireAgentA
+      component "K8s Service\n169.254.169.254\nLocal Traffic Policy" as ServiceA
+    }
+  }
+  
+  component "Kubernetes API Server" as K8sAPI
+  component "SPIRE Server" as SpireServer
+}
+
+CustomerAppA --> ServiceA : 1. POST /v1/metadata/identity\nSource IP: VMI IP
+ServiceA --> MetadataServiceA
+MetadataServiceA --> K8sAPI : 2. IP to Pod Lookup
+MetadataServiceA --> SharedSocket : 3. Fetch JWT SVID
+SharedSocket --> Sidecar : 4. Fetch JWT SVID (passthrough)
+Sidecar --> SpireCSI : 5. Fetch JWT SVID (passthrough)
+SpireAgentA --> SpireServer : 6. K8s Workload Attestation
+SpireServer --> SpireAgentA : 7. JWT SVID
+SpireCSI --> SpireAgentA
+SharedSocket --> MetadataServiceA
+MetadataServiceA --> ServiceA : 8. JWT Response
+
+@enduml
 ```
 
 ### Components
@@ -145,54 +144,54 @@ curl -X POST http://169.254.169.254:8080/v1/metadata/identity \
 
 ### Architecture
 
-```mermaid
-flowchart TD
-    %% Kubernetes Infrastructure
-    subgraph K8s["Kubernetes Kind Cluster"]
-        direction TB
-        subgraph SPIRE["SPIRE Server"]
-            SPIRE_Server["SPIRE Server<br/>(Helm Chart)"]
-            OIDC["OIDC Discovery<br/>Provider"]
-        end
-        
-        subgraph OpenBao["OpenBao Server"]
-            BAO["Bao API"]
-            subgraph CEL["CEL Program Logic"]
-                direction LR
-                Parse["Parse SPIFFE ID<br/>spiffe://region.tenant.product.nvidia.com/resource-type/resource-id<br/>↓<br/>sjc-1.k8s2-control.default.nvidia.com/pod/demo-nginx"]
-                Policies["Assign Policies<br/>spiffe-authenticated<br/>region-sjc-1<br/>tenant-k8s2-control<br/>product-default<br/>resource-type-pod<br/>resource-id-demo-nginx"]
-                Parse --> Policies
-            end
-        end
-        
-        subgraph Worker["Worker Node"]
-            SPIRE_Agent["SPIRE Agent<br/>(DaemonSet)"]
-            
-            subgraph Pod["Demo Nginx Pod"]
-                Nginx["Nginx Container"]
-                Sidecar["Go Sidecar<br/>(JWT Fetcher)"]
-                Volume["Shared Volume<br/>/var/run/secrets/nvidia.com/spiffe/token"]
-            end
-        end
-    end
+```plantuml
+@startuml OpenBao_CEL_Integration_Architecture
+
+package "Kubernetes Kind Cluster" as K8s {
+  package "SPIRE Server" as SPIRE {
+    component "SPIRE Server\n(Helm Chart)" as SPIRE_Server
+    component "OIDC Discovery\nProvider" as OIDC
+  }
+  
+  package "OpenBao Server" as OpenBao {
+    component "Bao API" as BAO
+    package "CEL Program Logic" as CEL {
+      component "Parse SPIFFE ID\nspiffe://region.tenant.product.nvidia.com/resource-type/resource-id\n(sjc-1.k8s2-control.default.nvidia.com/pod/demo-nginx)" as Parse
+      component "Assign Policies\nspiffe-authenticated\nregion-sjc-1\ntenant-k8s2-control\nproduct-default\nresource-type-pod\nresource-id-demo-nginx" as Policies
+    }
+  }
+  
+  package "Worker Node" as Worker {
+    component "SPIRE Agent\n(DaemonSet)" as SPIRE_Agent
     
-    %% Authentication Flow
-    SPIRE_Agent -->|"K8s PSAT<br/>Attestation"| SPIRE_Server
-    SPIRE_Server -->|"Workload<br/>Registration"| SPIRE_Agent
-    SPIRE_Server --> OIDC
-    BAO -->|"Pull OIDC Config<br/>& JWKS"| OIDC
-    
-    %% JWT Flow
-    Sidecar -->|"Workload API<br/>Request"| SPIRE_Agent
-    SPIRE_Agent -->|"SPIFFE JWT<br/>spiffe://sjc-1.k8s2-control.nvidia.com/controlplane/pod/demo-nginx"| Sidecar
-    Sidecar -->|"Write JWT<br/>(80% refresh)"| Volume
-    
-    %% OpenBao Authentication
-    Nginx -->|"Read JWT from Volume"| Volume
-    Nginx -->|"JWT Authentication<br/>/v1/auth/jwt/cel/login"| BAO
-    BAO --> CEL
-    CEL -->|"Bao Token"| Nginx
-    Nginx -->|"Access Secrets<br/>secret/*"| BAO
+    package "Demo Nginx Pod" as Pod {
+      component "Nginx Container" as Nginx
+      component "Go Sidecar\n(JWT Fetcher)" as Sidecar
+      component "Shared Volume\n/var/run/secrets/nvidia.com/spiffe/token" as Volume
+    }
+  }
+}
+
+' Authentication Flow
+SPIRE_Agent --> SPIRE_Server : K8s PSAT\nAttestation
+SPIRE_Server --> SPIRE_Agent : Workload\nRegistration
+SPIRE_Server --> OIDC
+BAO --> OIDC : Pull OIDC Config\n& JWKS
+
+' JWT Flow
+Sidecar --> SPIRE_Agent : Workload API\nRequest
+SPIRE_Agent --> Sidecar : SPIFFE JWT\nspiffe://sjc-1.k8s2-control.nvidia.com/controlplane/pod/demo-nginx
+Sidecar --> Volume : Write JWT\n(80% refresh)
+
+' OpenBao Authentication
+Nginx --> Volume : Read JWT from Volume
+Nginx --> BAO : JWT Authentication\n/v1/auth/jwt/cel/login
+BAO --> CEL
+Parse --> Policies
+CEL --> Nginx : Bao Token
+Nginx --> BAO : Access Secrets\nsecret/*
+
+@enduml
 ```
 
 ### Key Features
