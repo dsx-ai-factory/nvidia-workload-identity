@@ -147,18 +147,18 @@ curl -X POST http://169.254.169.254:8080/v1/metadata/identity \
 ```plantuml
 @startuml OpenBao_CEL_Integration_Architecture
 
-package "Kubernetes Kind Cluster" as K8s {
+package "OpenBao Server (globally hosted)" as OpenBao {
+  component "Bao API" as BAO
+  package "CEL Program Logic" as CEL {
+    component "Parse SPIFFE ID\nspiffe://region.tenant.product.nvidia.com/resource-type/resource-id\n(sjc-1.k8s2-control.default.nvidia.com/pod/demo-nginx)" as Parse
+    component "Assign Policies\nspiffe-authenticated\nregion-sjc-1\ntenant-k8s2-control\nproduct-default\nresource-type-pod\nresource-id-demo-nginx" as Policies
+  }
+}
+
+package "Kubernetes Cluster" as K8s {
   package "SPIRE Server" as SPIRE {
     component "SPIRE Server\n(Helm Chart)" as SPIRE_Server
     component "OIDC Discovery\nProvider" as OIDC
-  }
-  
-  package "OpenBao Server" as OpenBao {
-    component "Bao API" as BAO
-    package "CEL Program Logic" as CEL {
-      component "Parse SPIFFE ID\nspiffe://region.tenant.product.nvidia.com/resource-type/resource-id\n(sjc-1.k8s2-control.default.nvidia.com/pod/demo-nginx)" as Parse
-      component "Assign Policies\nspiffe-authenticated\nregion-sjc-1\ntenant-k8s2-control\nproduct-default\nresource-type-pod\nresource-id-demo-nginx" as Policies
-    }
   }
   
   package "Worker Node" as Worker {
