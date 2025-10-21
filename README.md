@@ -135,7 +135,7 @@ Bao --> CustomerApp : KV Secrets
 
 #### Workload API Proxy Sidecar
 
-- Injected into VMI pods via Kyverno policy (matches annotation `nvidia.com/inject-workload-api-proxy: "true"`)
+- Injected into VMI pods via Kyverno policy (matches annotation `spiffe.nvidia.com/inject-workload-api-proxy: "true"`)
 - Proxies the SPIRE Workload API socket to the Metadata Workload API Bridge CSI socket using `socat`
 - Command: `socat -dd UNIX-LISTEN:/var/run/secrets/nvidia.com/metadata-bridge-spire-agent.sock,fork,unlink-early UNIX-CONNECT:/var/run/secrets/spire.io/spire-agent.sock`
 - Inherits VMI pod's SPIFFE identity via SPIRE's Kubernetes workload attestation, allowing metadata service to fetch JWTs as the VM pod
