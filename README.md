@@ -41,7 +41,7 @@ VMI pods include a `socat` sidecar that proxies the SPIRE Workload API socket to
 
 ### Architecture
 
-Block Diagram
+#### Block Diagram
 
 ```plantuml
 @startuml SPIFFE_JWT_Metadata_Service_Architecture
@@ -82,7 +82,7 @@ MetadataService --> Service : 8. JWT Response
 @enduml
 ```
 
-Sequence Diagram
+#### Sequence Diagram
 
 ```plantuml
 @startuml SPIFFE_JWT_Metadata_Service_Sequence
