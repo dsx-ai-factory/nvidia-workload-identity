@@ -41,6 +41,8 @@ VMI pods include a `socat` sidecar that proxies the SPIRE Workload API socket to
 
 ### Architecture
 
+Block Diagram
+
 ```plantuml
 @startuml SPIFFE_JWT_Metadata_Service_Architecture
 
@@ -49,15 +51,15 @@ package "Kubernetes Cluster" as Cluster {
     package "Kubernetes Node" as NodeA {
       package "VMI Pod" as VMIA {
         package "KubeVirt VM" as VMA {
-          component "Customer Application" as CustomerAppA
+          component "Customer Application" as CustomerApp
         }
         component "Workload API Proxy Sidecar\n(socat)" as Sidecar
         component "SPIRE CSI Socket" as SpireCSI
         component "Per-Pod Socket\n(Metadata Bridge CSI)" as SharedSocket
       }
-      component "Metadata Service\n(DaemonSet Pod)" as MetadataServiceA
-      component "SPIRE Agent\n(DaemonSet)" as SpireAgentA
-      component "K8s Service\n169.254.169.254\nLocal Traffic Policy" as ServiceA
+      component "Metadata Service\n(DaemonSet Pod)" as MetadataService
+      component "SPIRE Agent\n(DaemonSet)" as SpireAgent
+      component "K8s Service\n169.254.169.254\nLocal Traffic Policy" as Service
     }
   }
   
@@ -65,18 +67,59 @@ package "Kubernetes Cluster" as Cluster {
   component "SPIRE Server" as SpireServer
 }
 
-CustomerAppA --> ServiceA : 1. POST /v1/metadata/identity\nSource IP: VMI IP
-ServiceA --> MetadataServiceA
-MetadataServiceA --> K8sAPI : 2. IP to Pod Lookup
-MetadataServiceA --> SharedSocket : 3. Fetch JWT SVID
+CustomerApp --> Service : 1. POST /v1/metadata/identity\nSource IP: VMI IP
+Service --> MetadataService
+MetadataService --> K8sAPI : 2. IP to Pod Lookup
+MetadataService --> SharedSocket : 3. Fetch JWT SVID
 SharedSocket --> Sidecar : 4. Fetch JWT SVID (passthrough)
 Sidecar --> SpireCSI : 5. Fetch JWT SVID (passthrough)
-SpireAgentA --> SpireServer : 6. K8s Workload Attestation
-SpireServer --> SpireAgentA : 7. JWT SVID
-SpireCSI --> SpireAgentA
-SharedSocket --> MetadataServiceA
-MetadataServiceA --> ServiceA : 8. JWT Response
+SpireAgent --> SpireServer : 6. K8s Workload Attestation
+SpireServer --> SpireAgent : 7. JWT SVID
+SpireCSI --> SpireAgent
+SharedSocket --> MetadataService
+MetadataService --> Service : 8. JWT Response
 
+@enduml
+```
+
+Sequence Diagram
+
+```plantuml
+@startuml SPIFFE_JWT_Metadata_Service_Sequence
+participant "Customer Application" as CustomerApp
+participant "K8s Service\n169.254.169.254\nLocal Traffic Policy" as Service  
+participant "Metadata Service\n(DaemonSet Pod)" as MetadataService
+participant "Kubernetes API Server" as K8sAPI
+participant "Per-Pod Socket\n(Metadata Bridge CSI)" as SharedSocket 
+participant "Workload API Proxy Sidecar\n(socat)" as Sidecar
+participant "SPIRE CSI Socket" as SpireCSI
+participant "SPIRE Agent\n(DaemonSet)" as SpireAgent
+participant "SPIRE Server" as SpireServer
+participant "OpenBao Server" as Bao
+
+CustomerApp -> Service : POST /v1/metadata/identity\nSource IP: VMI IP
+Service -> MetadataService : passthrough
+MetadataService -> K8sAPI : IP to Pod Lookup
+K8sAPI --> MetadataService : Pod Info\n(for finding socket name)
+MetadataService -> SharedSocket : Workload API Request\n(Fetch JWT SVID)
+SharedSocket -> Sidecar : passthrough
+Sidecar -> SpireCSI : passthrough
+SpireCSI -> SpireAgent : passthrough
+SpireAgent -> SpireServer : K8s Workload Attestation
+SpireServer --> SpireAgent : Attestation Result
+SpireAgent --> SpireCSI : Workload API Response\n(JWT SVID)
+SpireCSI --> Sidecar : passthrough
+Sidecar --> SharedSocket : passthrough
+SharedSocket --> MetadataService : passthrough
+MetadataService --> Service : Identity Response
+Service --> CustomerApp : passthrough
+
+CustomerApp -> Bao : JWT Login
+Bao -> SpireServer : Fetch Public Keyset\n(cached)
+Bao --> Bao : CEL Policy
+Bao --> CustomerApp : Bao Token
+CustomerApp -> Bao : KV Secrets Request
+Bao --> CustomerApp : KV Secrets
 @enduml
 ```
 
@@ -117,6 +160,7 @@ MetadataServiceA --> ServiceA : 8. JWT Response
 ### HTTP API
 
 **Request**:
+
 ```bash
 curl -X POST http://169.254.169.254:8080/v1/metadata/identity \
   -H "Content-Type: application/json" \
@@ -124,6 +168,7 @@ curl -X POST http://169.254.169.254:8080/v1/metadata/identity \
 ```
 
 **Response**:
+
 ```json
 {
   "token": "eyJhbGciOiJSUzI1NiIs...",
