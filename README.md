@@ -247,7 +247,7 @@ Nginx --> BAO : Access Secrets\nsecret/*
 
 ## SPIRE Multi-Cluster Key Management
 
-SPIRE servers in k2 clusters use shared private keys from k1:
+SPIRE servers in k2 clusters use [intermediate signing keys](https://github.com/spiffe/spire/blob/v1.12.5/doc/plugin_server_upstreamauthority_spire.md) from k1:
 
 - **Single JWKS Endpoint**: Only k1 serves public JWKS externally
 - **Single Key Domain**: New k2 clusters use existing keyset
