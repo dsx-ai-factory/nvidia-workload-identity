@@ -35,8 +35,8 @@ CEL program validation passed
 === Sample Claims ===
 {
   "claims": {
-    "sub": "spiffe://sjc-1.k8s2-control.nvidia.com/controlplane/vm/12345678-1234-5678-9abc-123456789abc",
-    "aud": ["spiffe://sjc-1.k8s2-control.ncp.com/controlplane/vm/fluentd", "ssa://SSA_service_id"],
+    "sub": "spiffe://default.sjc-1.k8s2-control.nvidia.com/pod/demo-nginx",
+    "aud": ["spiffe://sjc-1.k8s2-control.nvidia.com", "ssa://SSA_service_id"],
     ...
   }
 }
@@ -66,8 +66,8 @@ The program uses the OpenBao CEL helper package which provides:
 
 The evaluator includes sample JWT claims that match the SPIFFE JWT format:
 
-- **US Region**: `spiffe://sjc-1.k8s2-control.nvidia.com/controlplane/vm/...`
-- **China Region**: `spiffe://bjs-1.k8s3-control.nvidia.cn/vmaas/vm/...`
+- **US Region**: `spiffe://default.sjc-1.k8s2-control.nvidia.com/pod/...`
+- **China Region**: `spiffe://default.bjs-1.k8s3-control.nvidia.cn/pod/...`
 - **Custom Claims**: service_type, deployment, capabilities, etc.
 
 This allows you to test how your CEL expressions handle different SPIFFE ID formats and custom claims before deploying to OpenBao.
