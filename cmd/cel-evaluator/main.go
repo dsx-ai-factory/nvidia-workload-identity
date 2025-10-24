@@ -144,9 +144,9 @@ func main() {
 
 	// Create sample JWT claims data for testing (matching OpenBao's format)
 	sampleClaims := map[string]interface{}{
-		"sub": "spiffe://default.sjc-1.k8s2-control.nvidia.com/pod/demo-nginx",
+		"sub": "spiffe://sjc-1.k8s2-control.nvidia.com/controlplane/vm/12345678-1234-5678-9abc-123456789abc",
 		"aud": []string{
-			"spiffe://default.sjc-1.k8s2-control.ncp.com/pod/fluentd",
+			"spiffe://sjc-1.k8s2-control.ncp.com/controlplane/vm/fluentd",
 			"ssa://SSA_service_id",
 			"sf://Starfleet_service_id",
 		},

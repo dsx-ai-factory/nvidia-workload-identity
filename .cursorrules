@@ -12,8 +12,8 @@ This project demonstrates SPIFFE JWT authentication with OpenBao's CEL (Common E
 
 ### SPIFFE Identity Pattern
 - Trust domain: `sjc-1.k8s2-control.nvidia.com`
-- SPIFFE ID template: `spiffe://{{ .PodMeta.Namespace }}.{{ .TrustDomain }}/pod/{{ .PodMeta.Name }}`
-- Use namespace/pod pattern with namespace as domain prefix, not service account identities
+- SPIFFE ID template: `spiffe://{{ .TrustDomain }}/{{ .PodMeta.Namespace }}/pod/{{ .PodMeta.Name }}`
+- Use namespace/pod pattern, not service account identities
 - JWT issuer: `oidc-discovery.sjc-1.k8s2-control.nvidia.com`
 
 ### OpenBao CEL Integration

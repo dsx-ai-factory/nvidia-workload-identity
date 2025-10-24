@@ -239,8 +239,7 @@ configure_spiffe_auth() {
     local policies_dir="$PROJECT_ROOT/config/policies"
     
     bao policy write region-sjc-1 "$policies_dir/region-sjc-1-policy.hcl" >/dev/null
-    bao policy write tenant-default "$policies_dir/tenant-default-policy.hcl" >/dev/null
-    bao policy write product-k8s2-control "$policies_dir/product-k8s2-control-policy.hcl" >/dev/null
+    bao policy write tenant-k8s2-control "$policies_dir/tenant-k8s2-control-policy.hcl" >/dev/null
     bao policy write product-default "$policies_dir/product-default-policy.hcl" >/dev/null
     bao policy write resource-type-pod "$policies_dir/resource-type-pod-policy.hcl" >/dev/null
     bao policy write resource-id-demo-nginx "$policies_dir/resource-id-demo-nginx-policy.hcl" >/dev/null

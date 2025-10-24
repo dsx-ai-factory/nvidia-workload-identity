@@ -173,7 +173,7 @@ curl -X POST http://169.254.169.254:8080/v1/metadata/identity \
 {
   "token": "eyJhbGciOiJSUzI1NiIs...",
   "expires_at": "2025-09-18T15:30:00Z",
-  "spiffe_id": "spiffe://default.sjc-1.k8s2-control.nvidia.com/pod/virt-launcher-demo-ubuntu-vm-9n5ln"
+  "spiffe_id": "spiffe://sjc-1.k8s2-control.nvidia.com/default/pod/virt-launcher-demo-ubuntu-vm-9n5ln"
 }
 ```
 
@@ -195,8 +195,8 @@ curl -X POST http://169.254.169.254:8080/v1/metadata/identity \
 package "OpenBao Server (globally hosted)" as OpenBao {
   component "Bao API" as BAO
   package "CEL Program Logic" as CEL {
-    component "Parse SPIFFE ID\nspiffe://tenant.region.product.nvidia.com/resource-type/resource-id\n(default.sjc-1.k8s2-control.nvidia.com/pod/demo-nginx)" as Parse
-    component "Assign Policies\nspiffe-authenticated\ntenant-default\nregion-sjc-1\nproduct-k8s2-control\nresource-type-pod\nresource-id-demo-nginx" as Policies
+    component "Parse SPIFFE ID\nspiffe://region.tenant.product.nvidia.com/resource-type/resource-id\n(sjc-1.k8s2-control.default.nvidia.com/pod/demo-nginx)" as Parse
+    component "Assign Policies\nspiffe-authenticated\nregion-sjc-1\ntenant-k8s2-control\nproduct-default\nresource-type-pod\nresource-id-demo-nginx" as Policies
   }
 }
 
@@ -225,7 +225,7 @@ BAO --> OIDC : Pull OIDC Config\n& JWKS
 
 ' JWT Flow
 Sidecar --> SPIRE_Agent : Workload API\nRequest
-SPIRE_Agent --> Sidecar : SPIFFE JWT\nspiffe://default.sjc-1.k8s2-control.nvidia.com/pod/demo-nginx
+SPIRE_Agent --> Sidecar : SPIFFE JWT\nspiffe://sjc-1.k8s2-control.nvidia.com/controlplane/pod/demo-nginx
 Sidecar --> Volume : Write JWT\n(80% refresh)
 
 ' OpenBao Authentication
@@ -242,7 +242,7 @@ Nginx --> BAO : Access Secrets\nsecret/*
 ### Key Features
 
 - **SPIFFE Identity**: Workloads get cryptographically verifiable identities
-- **Dynamic Policy Assignment**: CEL program parses SPIFFE ID components (`tenant`, `region`, `product`, `resource-type`, `resource-id`) from pattern `spiffe://tenant.region.product.nvidia.com/resource-type/resource-id` and assigns policies dynamically
+- **Dynamic Policy Assignment**: CEL program parses SPIFFE ID components (`region`, `tenant`, `product`, `resource-type`, `resource-id`) from pattern `spiffe://region.tenant.nvidia.com/product/resource-type/resource-id` and assigns policies dynamically
 - **Automatic JWT Refresh**: Go sidecar refreshes tokens at 80% expiry with retry logic
 
 ## SPIRE Multi-Cluster Key Management
