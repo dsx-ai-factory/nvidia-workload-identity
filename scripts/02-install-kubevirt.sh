@@ -41,12 +41,13 @@ install_kubevirt() {
     # Get the latest KubeVirt release version
     log_info "Fetching latest KubeVirt release version..."
     local kubevirt_version
-    kubevirt_version=$(curl -s https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt)
+    kubevirt_version=$(curl -s https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt || true)
     if [[ -z "${kubevirt_version}" ]]; then
-        log_error "Failed to fetch KubeVirt version"
-        return 1
+        kubevirt_version="v1.7.0"
+        log_warning "Failed to fetch KubeVirt version, using fallback version: ${kubevirt_version}"
+    else
+        log_info "Latest KubeVirt version: ${kubevirt_version}"
     fi
-    log_info "Using KubeVirt version: ${kubevirt_version}"
     
     # Deploy the KubeVirt operator
     log_info "Deploying KubeVirt operator..."
@@ -74,12 +75,13 @@ install_cdi() {
     # Get the latest CDI release version
     log_info "Fetching latest CDI release version..."
     local cdi_version
-    cdi_version=$(curl -s https://api.github.com/repos/kubevirt/containerized-data-importer/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    cdi_version=$(curl -s https://api.github.com/repos/kubevirt/containerized-data-importer/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' || true)
     if [[ -z "${cdi_version}" ]]; then
-        log_error "Failed to fetch CDI version"
-        return 1
+        cdi_version="v1.63.1"
+        log_warning "GitHub API rate limited, using fallback version: ${cdi_version}"
+    else
+        log_info "Latest CDI version: ${cdi_version}"
     fi
-    log_info "Using CDI version: ${cdi_version}"
     
     # Deploy the CDI operator
     log_info "Deploying CDI operator..."
