@@ -26,7 +26,6 @@ spec:
         args:
         - --listen=:8080
         - --socket=unix:///var/run/secrets/spire.io/spire-agent.sock
-        - --jwt-ttl=1h
         - --log-level=info
         resources:
           requests:

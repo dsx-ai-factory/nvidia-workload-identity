@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -13,6 +16,18 @@ import (
 	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 )
+
+// ExchangeRequest represents a request to the exchange service.
+type ExchangeRequest struct {
+	JWT string `json:"jwt"`
+}
+
+// ExchangeResponse represents a response from the exchange service.
+type ExchangeResponse struct {
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expires_at"`
+	SpiffeID  string    `json:"spiffe_id"`
+}
 
 // parseSocketPath validates and parses the socket URL
 func parseSocketPath(socketPath string) (string, error) {
@@ -69,16 +84,56 @@ func fetchJWTWithRetry(ctx context.Context, jwtSource *workloadapi.JWTSource, au
 	return nil, fmt.Errorf("failed to fetch JWT after %d attempts: %w", maxRetries, lastErr)
 }
 
+// exchangeJWT exchanges a JWT via the exchange service.
+func exchangeJWT(ctx context.Context, httpClient *http.Client, exchangeServiceURL, token string) (*ExchangeResponse, error) {
+	reqBody := ExchangeRequest{
+		JWT: token,
+	}
+
+	reqBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal exchange request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, exchangeServiceURL+"/v1/exchange", bytes.NewReader(reqBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create exchange request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call exchange service: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("exchange service returned status %d", resp.StatusCode)
+	}
+
+	var exchangeResp ExchangeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&exchangeResp); err != nil {
+		return nil, fmt.Errorf("failed to decode exchange response: %w", err)
+	}
+
+	return &exchangeResp, nil
+}
+
 func main() {
 	var (
-		socketPath     = flag.String("socket", "unix:///var/run/secrets/spire.io/spire-agent.sock", "Path to SPIRE Workload API socket")
-		audience       = flag.String("audience", "spiffe://example.org", "JWT audience")
-		outputPath     = flag.String("output", "/var/run/secrets/nvidia.com/spiffe/token", "Output file path for JWT token")
-		maxRetries     = flag.Int("retries", 3, "Maximum number of retry attempts")
-		verbose        = flag.Bool("verbose", true, "Enable verbose logging")
-		exitAfterFetch = flag.Bool("exit-after-fetch", false, "Exit after fetching the initial JWT (for init container use)")
+		socketPath         = flag.String("socket", "unix:///var/run/secrets/spire.io/spire-agent.sock", "Path to SPIRE Workload API socket")
+		audience           = flag.String("audience", "spiffe://example.org", "JWT audience")
+		outputPath         = flag.String("output", "/var/run/secrets/nvidia.com/spiffe/token", "Output file path for JWT token")
+		maxRetries         = flag.Int("retries", 3, "Maximum number of retry attempts")
+		verbose            = flag.Bool("verbose", true, "Enable verbose logging")
+		exitAfterFetch     = flag.Bool("exit-after-fetch", false, "Exit after fetching the initial JWT (for init container use)")
+		exchangeServiceURL = flag.String("exchange-service-url", "", "URL of the SPIFFE exchange service")
 	)
 	flag.Parse()
+
+	if *exchangeServiceURL == "" {
+		log.Fatal("--exchange-service-url is required")
+	}
 
 	if *verbose {
 		log.Printf("Starting SPIFFE JWT token fetcher")
@@ -87,6 +142,11 @@ func main() {
 		log.Printf("Output: %s", *outputPath)
 		log.Printf("Max retries: %d", *maxRetries)
 		log.Printf("Exit after fetch: %t", *exitAfterFetch)
+		log.Printf("Exchange service URL: %s", *exchangeServiceURL)
+	}
+
+	httpClient := &http.Client{
+		Timeout: 30 * time.Second,
 	}
 
 	ctx := context.Background()
@@ -135,16 +195,31 @@ func main() {
 			log.Fatalf("Unable to fetch JWT SVID after %d attempts: %v", *maxRetries, err)
 		}
 
+		// Exchange JWT via the exchange service
+		if *verbose {
+			log.Printf("Exchanging JWT via %s", *exchangeServiceURL)
+		}
+
+		exchangeResp, err := exchangeJWT(ctx, httpClient, *exchangeServiceURL, jwt.Marshal())
+		if err != nil {
+			log.Fatalf("Failed to exchange JWT: %v", err)
+		}
+
+		tokenData := exchangeResp.Token
+		expiryTime := exchangeResp.ExpiresAt
+
+		if *verbose {
+			log.Printf("Exchanged JWT for identity: %s -> %s", jwt.ID, exchangeResp.SpiffeID)
+		}
+
 		// Write JWT to file
-		jwtData := jwt.Marshal()
-		err = os.WriteFile(*outputPath, []byte(jwtData), 0644)
+		err = os.WriteFile(*outputPath, []byte(tokenData), 0644)
 		if err != nil {
 			log.Fatalf("Failed to write JWT: %v", err)
 		}
 
 		if *verbose {
-			log.Printf("SPIFFE JWT updated for identity: %s", jwt.ID)
-			log.Printf("JWT length: %d characters", len(jwtData))
+			log.Printf("JWT written to %s (%d characters)", *outputPath, len(tokenData))
 		}
 
 		// Exit after initial fetch if running as init container
@@ -154,9 +229,6 @@ func main() {
 			}
 			return
 		}
-
-		// Use the JWT's built-in Expiry method
-		expiryTime := jwt.Expiry
 
 		// Calculate refresh time (80% of JWT lifetime)
 		issuedAt := time.Now()

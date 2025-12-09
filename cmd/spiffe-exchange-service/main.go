@@ -29,9 +29,9 @@ type ExchangeRequest struct {
 
 // ExchangeResponse represents the response from a JWT exchange.
 type ExchangeResponse struct {
-	Token     string `json:"token"`
-	ExpiresAt string `json:"expires_at"`
-	SpiffeID  string `json:"spiffe_id"`
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expires_at"`
+	SpiffeID  string    `json:"spiffe_id"`
 }
 
 // ExchangeServer handles SPIFFE JWT exchange operations.
@@ -225,7 +225,7 @@ func (s *ExchangeServer) handleExchange(w http.ResponseWriter, r *http.Request) 
 
 	resp := ExchangeResponse{
 		Token:     token,
-		ExpiresAt: validatedSVID.Expiry.Format(time.RFC3339),
+		ExpiresAt: validatedSVID.Expiry,
 		SpiffeID:  newID.String(),
 	}
 

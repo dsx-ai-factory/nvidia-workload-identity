@@ -17,7 +17,8 @@ spec:
     - "-output=/var/run/secrets/nvidia.com/spiffe/token"
     - "-retries=3"
     - "-verbose=true"
-    - "-exit-after-fetch=true"  # Exit after initial token fetch
+    - "-exit-after-fetch=true"
+    - "-exchange-service-url=http://spiffe-exchange-service.default.svc.cluster.local:8080"
     resources:
       requests:
         cpu: 50m
@@ -59,6 +60,7 @@ spec:
     - "-output=/var/run/secrets/nvidia.com/spiffe/token"
     - "-retries=3"
     - "-verbose=true"
+    - "-exchange-service-url=http://spiffe-exchange-service.default.svc.cluster.local:8080"
     resources:
       requests:
         cpu: 50m

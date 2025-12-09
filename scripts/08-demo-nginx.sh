@@ -54,6 +54,12 @@ create_nginx_pod() {
         return 1
     fi
     
+    # Delete pod if it exists
+    if kubectl get pod "${POD_NAME}" -n "${NAMESPACE}" &>/dev/null; then
+        log_info "Deleting existing pod ${POD_NAME} in namespace ${NAMESPACE}..."
+        kubectl delete pod "${POD_NAME}" -n "${NAMESPACE}" --ignore-not-found
+    fi
+
     # Apply the configuration
     kubectl apply -f "$config_file"
     

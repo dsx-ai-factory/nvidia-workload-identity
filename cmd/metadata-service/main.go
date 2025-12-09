@@ -27,9 +27,9 @@ type IdentityRequest struct {
 }
 
 type IdentityResponse struct {
-	Token     string `json:"token"`
-	ExpiresAt string `json:"expires_at"`
-	SpiffeID  string `json:"spiffe_id"`
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expires_at"`
+	SpiffeID  string    `json:"spiffe_id"`
 }
 
 type MetadataServer struct {
@@ -45,9 +45,9 @@ type ExchangeRequest struct {
 
 // ExchangeResponse represents a response from the exchange service.
 type ExchangeResponse struct {
-	Token     string `json:"token"`
-	ExpiresAt string `json:"expires_at"`
-	SpiffeID  string `json:"spiffe_id"`
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expires_at"`
+	SpiffeID  string    `json:"spiffe_id"`
 }
 
 // findPodByIP queries the Kubernetes API to find the pod with the given IP address
