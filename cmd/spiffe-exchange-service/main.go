@@ -114,6 +114,7 @@ func transformSpiffeID(originalID spiffeid.ID) (spiffeid.ID, error) {
 // resignJWT re-signs a JWT with a new subject, preserving all other claims.
 func (s *ExchangeServer) resignJWT(originalClaims map[string]any, newSubject spiffeid.ID) (string, error) {
 	trustDomain := newSubject.TrustDomain().Name()
+	slog.Info("resigning JWT", "trustDomain", trustDomain, "newSubject", newSubject)
 
 	key, keyID, alg, err := s.keyStore.GetOrCreateKey(trustDomain)
 	if err != nil {
@@ -132,10 +133,11 @@ func (s *ExchangeServer) resignJWT(originalClaims map[string]any, newSubject spi
 		return "", fmt.Errorf("failed to create signer: %w", err)
 	}
 
-	// Copy claims and update subject
+	// Copy claims and update subject and issuer
 	newClaims := make(map[string]any, len(originalClaims))
 	maps.Copy(newClaims, originalClaims)
 	newClaims["sub"] = newSubject.String()
+	newClaims["iss"] = trustDomain
 
 	token, err := jwt.Signed(signer).Claims(newClaims).Serialize()
 	if err != nil {
@@ -253,11 +255,11 @@ func (s *ExchangeServer) handleOIDCConfig(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	issuer := "spiffe://" + trustDomain
+	issuer := trustDomain
 	jwksURI := (&url.URL{
 		Scheme: "https",
 		Host:   r.Host,
-		Path:   "/keys",
+		Path:   "/.well-known/jwks.json",
 	}).String()
 
 	w.Header().Set("Content-Type", "application/json")
@@ -270,7 +272,7 @@ func (s *ExchangeServer) handleOIDCConfig(w http.ResponseWriter, r *http.Request
 	}
 }
 
-// handleJWKS handles GET requests to /keys.
+// handleJWKS handles GET requests to /.well-known/jwks.json.
 // Trust domain is determined from the Host header.
 func (s *ExchangeServer) handleJWKS(w http.ResponseWriter, r *http.Request) {
 	trustDomain := extractTrustDomain(r.Host)
@@ -352,7 +354,7 @@ func main() {
 
 	http.HandleFunc("POST /v1/exchange", server.handleExchange)
 	http.HandleFunc("GET /.well-known/openid-configuration", server.handleOIDCConfig)
-	http.HandleFunc("GET /keys", server.handleJWKS)
+	http.HandleFunc("GET /.well-known/jwks.json", server.handleJWKS)
 	http.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, "OK")

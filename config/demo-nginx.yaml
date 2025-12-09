@@ -13,7 +13,7 @@ spec:
     imagePullPolicy: Never  # Use local image
     args:
     - "-socket=unix:///var/run/secrets/spire.io/spire-agent.sock"
-    - "-audience=spiffe://sjc-1.k8s2-control.nvidia.com"
+    - "-audience=spiffe://tenant1.sjc-1.k8s2-control.nvidia.com"
     - "-output=/var/run/secrets/nvidia.com/spiffe/token"
     - "-retries=3"
     - "-verbose=true"
@@ -56,7 +56,7 @@ spec:
     imagePullPolicy: Never  # Use local image
     args:
     - "-socket=unix:///var/run/secrets/spire.io/spire-agent.sock"
-    - "-audience=spiffe://sjc-1.k8s2-control.nvidia.com"
+    - "-audience=spiffe://tenant1.sjc-1.k8s2-control.nvidia.com"
     - "-output=/var/run/secrets/nvidia.com/spiffe/token"
     - "-retries=3"
     - "-verbose=true"
