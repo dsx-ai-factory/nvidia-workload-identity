@@ -33,6 +33,7 @@ spec:
         args:
         - --listen=:8080
         - --log-level=info
+        - --exchange-service-url=http://spiffe-exchange-service.default.svc.cluster.local:8080
         resources:
           requests:
             cpu: 100m

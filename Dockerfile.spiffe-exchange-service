@@ -1,0 +1,31 @@
+# Build stage
+FROM golang:1.25 AS builder
+
+WORKDIR /app
+
+# Copy go modules files
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY cmd/spiffe-exchange-service/ ./cmd/spiffe-exchange-service/
+
+# Build the binary
+RUN go build -o spiffe-exchange-service ./cmd/spiffe-exchange-service
+
+# Final stage
+FROM debian:bookworm-slim
+
+# Install ca-certificates for TLS
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /root/
+
+# Copy the binary from builder stage
+COPY --from=builder /app/spiffe-exchange-service .
+
+# Run the exchange service
+ENTRYPOINT ["/root/spiffe-exchange-service"]
+

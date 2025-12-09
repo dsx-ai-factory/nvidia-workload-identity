@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spiffe-exchange-service
+  namespace: default
+  labels:
+    app: spiffe-exchange-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spiffe-exchange-service
+  template:
+    metadata:
+      labels:
+        app: spiffe-exchange-service
+    spec:
+      serviceAccountName: spiffe-exchange-service
+      containers:
+      - name: spiffe-exchange-service
+        image: spiffe-exchange-service:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          name: http
+        args:
+        - --listen=:8080
+        - --socket=unix:///var/run/secrets/spire.io/spire-agent.sock
+        - --jwt-ttl=1h
+        - --log-level=info
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        volumeMounts:
+        - name: spiffe-csi
+          mountPath: /var/run/secrets/spire.io
+          readOnly: true
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          periodSeconds: 1
+          failureThreshold: 30
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          periodSeconds: 10
+      volumes:
+      - name: spiffe-csi
+        csi:
+          driver: csi.spiffe.io
+          readOnly: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spiffe-exchange-service
+  namespace: default
+  labels:
+    app: spiffe-exchange-service
+spec:
+  selector:
+    app: spiffe-exchange-service
+  ports:
+  - port: 8080
+    targetPort: 8080
+    name: http
+  type: ClusterIP
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spiffe-exchange-service
+  namespace: default
+

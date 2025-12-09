@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 09-deploy-vm.sh
+# 10-deploy-vm.sh
 # Deploys a lightweight Ubuntu VM using KubeVirt
 
 set -euo pipefail

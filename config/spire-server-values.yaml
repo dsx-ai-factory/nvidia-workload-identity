@@ -23,9 +23,10 @@ spire-server:
     enabled: true
     identities:
       clusterSPIFFEIDs:
-        # Override the default template to use namespace/pod pattern
+        # Override the default template to include optional domain for exchange
+        # If pod has label spiffe.nvidia.com/domain, includes /domain/{value}/ in path
         default: # https://github.com/spiffe/spire-controller-manager/blob/main/docs/clusterspiffeid-crd.md#templates
-          spiffeIDTemplate: spiffe://{{ .TrustDomain }}/{{ .PodMeta.Namespace }}/pod/{{ .PodMeta.Name }}
+          spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/{{ if index .PodMeta.Labels \"spiffe.nvidia.com/domain\" }}domain/{{ index .PodMeta.Labels \"spiffe.nvidia.com/domain\" }}/{{ end }}{{ .PodMeta.Namespace }}/pod/{{ .PodMeta.Name }}"
   
   # Image configuration
   image:

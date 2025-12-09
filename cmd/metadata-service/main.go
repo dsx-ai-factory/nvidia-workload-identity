@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -32,7 +33,21 @@ type IdentityResponse struct {
 }
 
 type MetadataServer struct {
-	k8sClient *kubernetes.Clientset
+	k8sClient          *kubernetes.Clientset
+	exchangeServiceURL string
+	httpClient         *http.Client
+}
+
+// ExchangeRequest represents a request to the exchange service.
+type ExchangeRequest struct {
+	JWT string `json:"jwt"`
+}
+
+// ExchangeResponse represents a response from the exchange service.
+type ExchangeResponse struct {
+	Token     string `json:"token"`
+	ExpiresAt string `json:"expires_at"`
+	SpiffeID  string `json:"spiffe_id"`
 }
 
 // findPodByIP queries the Kubernetes API to find the pod with the given IP address
@@ -143,6 +158,42 @@ func (s *MetadataServer) fetchJWTForPod(ctx context.Context, pod *corev1.Pod, au
 	return jwt, nil
 }
 
+// exchangeJWT exchanges a JWT for a new one via the exchange service.
+// The target domain is extracted from the SPIFFE ID path by the exchange service.
+func (s *MetadataServer) exchangeJWT(ctx context.Context, token string) (*ExchangeResponse, error) {
+	reqBody := ExchangeRequest{
+		JWT: token,
+	}
+
+	reqBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal exchange request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.exchangeServiceURL+"/v1/exchange", bytes.NewReader(reqBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create exchange request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call exchange service: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("exchange service returned status %d", resp.StatusCode)
+	}
+
+	var exchangeResp ExchangeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&exchangeResp); err != nil {
+		return nil, fmt.Errorf("failed to decode exchange response: %w", err)
+	}
+
+	return &exchangeResp, nil
+}
+
 // handleIdentity handles POST requests to /v1/metadata/identity
 func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) {
 	body := http.MaxBytesReader(w, r.Body, 1024*1024)
@@ -194,14 +245,25 @@ func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Prepare response
-	resp := IdentityResponse{
-		Token:     jwt.Marshal(),
-		ExpiresAt: jwt.Expiry.Format(time.RFC3339),
-		SpiffeID:  jwt.ID.String(),
+	// Exchange JWT via the exchange service (target domain is in SPIFFE ID path)
+	exchangeResp, err := s.exchangeJWT(ctx, jwt.Marshal())
+	if err != nil {
+		slog.Error("Failed to exchange JWT", "namespace", pod.Namespace, "pod", pod.Name, "error", err)
+		http.Error(w, fmt.Sprintf("Failed to exchange JWT: %v", err), http.StatusInternalServerError)
+		return
 	}
 
-	slog.Info("Successfully issued JWT", "namespace", pod.Namespace, "pod", pod.Name, "spiffe_id", jwt.ID.String())
+	resp := IdentityResponse{
+		Token:     exchangeResp.Token,
+		ExpiresAt: exchangeResp.ExpiresAt,
+		SpiffeID:  exchangeResp.SpiffeID,
+	}
+
+	slog.Info("Successfully exchanged JWT",
+		"namespace", pod.Namespace,
+		"pod", pod.Name,
+		"original_spiffe_id", jwt.ID.String(),
+		"new_spiffe_id", exchangeResp.SpiffeID)
 
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
@@ -214,10 +276,16 @@ func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) 
 
 func main() {
 	var (
-		listenAddr = flag.String("listen", ":8080", "HTTP server listen address")
-		logLevel   = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
+		listenAddr         = flag.String("listen", ":8080", "HTTP server listen address")
+		logLevel           = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
+		exchangeServiceURL = flag.String("exchange-service-url", "", "URL of the SPIFFE exchange service")
 	)
 	flag.Parse()
+
+	if *exchangeServiceURL == "" {
+		fmt.Fprintln(os.Stderr, "error: --exchange-service-url is required")
+		os.Exit(1)
+	}
 
 	// Setup structured logging
 	var level slog.Level
@@ -238,7 +306,10 @@ func main() {
 		Level: level,
 	})))
 
-	slog.Info("Starting SPIFFE Metadata Service", "listen_addr", *listenAddr, "log_level", level.String())
+	slog.Info("Starting SPIFFE Metadata Service",
+		"listen_addr", *listenAddr,
+		"log_level", level.String(),
+		"exchange_service_url", *exchangeServiceURL)
 
 	// Create in-cluster Kubernetes client
 	config, err := rest.InClusterConfig()
@@ -255,7 +326,11 @@ func main() {
 
 	// Create metadata server
 	server := &MetadataServer{
-		k8sClient: k8sClient,
+		k8sClient:          k8sClient,
+		exchangeServiceURL: *exchangeServiceURL,
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
 	}
 
 	// Setup HTTP handlers

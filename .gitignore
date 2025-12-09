@@ -6,6 +6,9 @@
 *.dylib
 /cel-evaluator
 /spiffe-token-fetcher
+/metadata-service
+/metadata-bridge-csi-driver
+/spiffe-exchange-service
 
 # Test binary, built with `go test -c`
 *.test

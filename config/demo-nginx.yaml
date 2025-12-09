@@ -5,6 +5,7 @@ metadata:
   namespace: default
   labels:
     app: demo-nginx
+    spiffe.nvidia.com/domain: tenant1
 spec:
   initContainers:
   - name: spiffe-init

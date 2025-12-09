@@ -1,5 +1,5 @@
 #!/bin/bash
-# 08-deploy-metadata-service.sh
+# 09-deploy-metadata-service.sh
 # Deploys SPIFFE metadata service DaemonSet for tenant isolation
 
 set -euo pipefail
@@ -308,7 +308,7 @@ display_status() {
     echo "==========="
     echo "1. Check metadata service logs: kubectl logs -l app=metadata-service,tenant=${METADATA_TENANT} -n ${METADATA_NAMESPACE}"
     echo "2. Check CSI driver logs: kubectl logs -l app=metadata-bridge-csi-driver -n ${METADATA_NAMESPACE} -c metadata-bridge-csi-driver"
-    echo "3. Deploy VM with 'make vm' or 'scripts/09-deploy-vm.sh'"
+    echo "3. Deploy VM with 'make vm' or 'scripts/10-deploy-vm.sh'"
 }
 
 # Cleanup function
