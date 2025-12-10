@@ -23,11 +23,48 @@ make help        # Show all available targets
 - **SPIFFE CSI driver** for Workload API socket mounting
 - **KubeVirt + CDI** for virtual machine management
 - **Kyverno** for policy-based sidecar injection
-- **Demo nginx pod** with Go sidecar that fetches/refreshes JWT tokens
+- **SPIFFE Exchange Service** for JWT transformation to tenant-specific trust domains
+- **Demo nginx pod** with Go sidecar that fetches/refreshes JWT tokens via exchange service
 - **OpenBao** with CEL-based JWT authentication and dynamic policy assignment
 - **SPIFFE JWT Metadata Service** at 169.254.169.254 for VMs
 - **Metadata Workload API Bridge CSI** for per-pod socket bridging
 - **Ubuntu VM** with automatic SPIFFE JWT access via metadata service
+
+## SPIFFE Exchange Service
+
+### Overview
+
+The SPIFFE Exchange Service transforms SPIFFE JWTs from the cluster's base trust domain into tenant-specific trust domains. Workloads with a `spiffe.nvidia.com/domain` label get SPIFFE IDs containing a `/domain/{tenant}/` path component, which the exchange service uses to create new JWTs under the tenant's trust domain.
+
+### JWT Transformation
+
+**Input SPIFFE ID** (from SPIRE):
+```
+spiffe://sjc-1.k8s2-control.nvidia.com/domain/tenant1/default/pod/demo-nginx
+```
+
+**Output SPIFFE ID** (from Exchange Service):
+```
+spiffe://tenant1.sjc-1.k8s2-control.nvidia.com/default/pod/demo-nginx
+```
+
+The exchange service:
+1. Validates the incoming JWT against SPIRE's trust bundle
+2. Extracts the tenant prefix from the `/domain/{tenant}/` path component
+3. Constructs a new trust domain: `{tenant}.{base-domain}`
+4. Re-signs the JWT with a tenant-specific key, updating `sub` and `iss` claims
+5. Returns the new JWT with the transformed SPIFFE ID
+
+### JWKS Endpoint
+
+The exchange service serves a JWKS endpoint at `/.well-known/jwks.json` for each tenant domain. CoreDNS is configured with a wildcard rewrite rule so that `*.sjc-1.k8s2-control.nvidia.com` resolves to the exchange service, enabling host-based routing.
+
+OpenBao fetches the JWKS from `http://tenant1.sjc-1.k8s2-control.nvidia.com:8080/.well-known/jwks.json` to validate exchanged JWTs.
+
+### Configuration
+
+- `--base-domain`: Base trust domain (e.g., `sjc-1.k8s2-control.nvidia.com`)
+- `--socket`: SPIFFE Workload API socket path for validating incoming JWTs
 
 ## SPIFFE JWT Metadata Service
 
@@ -63,6 +100,7 @@ package "Kubernetes Cluster" as Cluster {
     }
   }
   
+  component "SPIFFE Exchange Service" as ExchangeService
   component "Kubernetes API Server" as K8sAPI
   component "SPIRE Server" as SpireServer
 }
@@ -77,7 +115,9 @@ SpireAgent --> SpireServer : 6. K8s Workload Attestation
 SpireServer --> SpireAgent : 7. JWT SVID
 SpireCSI --> SpireAgent
 SharedSocket --> MetadataService
-MetadataService --> Service : 8. JWT Response
+MetadataService --> ExchangeService : 8. Exchange JWT
+ExchangeService --> MetadataService : 9. Exchanged JWT
+MetadataService --> Service : 10. JWT Response
 
 @enduml
 ```
@@ -89,6 +129,7 @@ MetadataService --> Service : 8. JWT Response
 participant "Customer Application" as CustomerApp
 participant "K8s Service\n169.254.169.254\nLocal Traffic Policy" as Service  
 participant "Metadata Service\n(DaemonSet Pod)" as MetadataService
+participant "SPIFFE Exchange Service" as ExchangeService
 participant "Kubernetes API Server" as K8sAPI
 participant "Per-Pod Socket\n(Metadata Bridge CSI)" as SharedSocket 
 participant "Workload API Proxy Sidecar\n(socat)" as Sidecar
@@ -111,11 +152,13 @@ SpireAgent --> SpireCSI : Workload API Response\n(JWT SVID)
 SpireCSI --> Sidecar : passthrough
 Sidecar --> SharedSocket : passthrough
 SharedSocket --> MetadataService : passthrough
+MetadataService -> ExchangeService : Exchange JWT\n(transform to tenant domain)
+ExchangeService --> MetadataService : Exchanged JWT
 MetadataService --> Service : Identity Response
 Service --> CustomerApp : passthrough
 
 CustomerApp -> Bao : JWT Login
-Bao -> SpireServer : Fetch Public Keyset\n(cached)
+Bao -> ExchangeService : Fetch Public Keyset (tenant domain)\n(cached)
 Bao --> Bao : CEL Policy
 Bao --> CustomerApp : Bao Token
 CustomerApp -> Bao : KV Secrets Request
@@ -164,16 +207,16 @@ Bao --> CustomerApp : KV Secrets
 ```bash
 curl -X POST http://169.254.169.254:8080/v1/metadata/identity \
   -H "Content-Type: application/json" \
-  -d '{"audience": "spiffe://sjc-1.k8s2-control.nvidia.com"}'
+  -d '{"audience": "spiffe://tenant1.sjc-1.k8s2-control.nvidia.com"}'
 ```
 
 **Response**:
 
 ```json
 {
-  "token": "eyJhbGciOiJSUzI1NiIs...",
+  "token": "eyJhbGciOiJFUzI1NiIs...",
   "expires_at": "2025-09-18T15:30:00Z",
-  "spiffe_id": "spiffe://sjc-1.k8s2-control.nvidia.com/default/pod/virt-launcher-demo-ubuntu-vm-9n5ln"
+  "spiffe_id": "spiffe://tenant1.sjc-1.k8s2-control.nvidia.com/default/pod/virt-launcher-demo-ubuntu-vm-9n5ln"
 }
 ```
 
@@ -203,8 +246,9 @@ package "OpenBao Server (globally hosted)" as OpenBao {
 package "Kubernetes Cluster" as K8s {
   package "SPIRE Server" as SPIRE {
     component "SPIRE Server\n(Helm Chart)" as SPIRE_Server
-    component "OIDC Discovery\nProvider" as OIDC
   }
+  
+  component "SPIFFE Exchange Service" as ExchangeService
   
   package "Worker Node" as Worker {
     component "SPIRE Agent\n(DaemonSet)" as SPIRE_Agent
@@ -220,12 +264,13 @@ package "Kubernetes Cluster" as K8s {
 ' Authentication Flow
 SPIRE_Agent --> SPIRE_Server : K8s PSAT\nAttestation
 SPIRE_Server --> SPIRE_Agent : Workload\nRegistration
-SPIRE_Server --> OIDC
-BAO --> OIDC : Pull OIDC Config\n& JWKS
+BAO --> ExchangeService : Pull JWKS\n(tenant domain)
 
 ' JWT Flow
 Sidecar --> SPIRE_Agent : Workload API\nRequest
-SPIRE_Agent --> Sidecar : SPIFFE JWT\nspiffe://sjc-1.k8s2-control.nvidia.com/controlplane/pod/demo-nginx
+SPIRE_Agent --> Sidecar : SPIFFE JWT\nspiffe://sjc-1.k8s2-control.nvidia.com/domain/tenant1/default/pod/demo-nginx
+Sidecar --> ExchangeService : Exchange JWT
+ExchangeService --> Sidecar : Exchanged JWT\nspiffe://tenant1.sjc-1.k8s2-control.nvidia.com/default/pod/demo-nginx
 Sidecar --> Volume : Write JWT\n(80% refresh)
 
 ' OpenBao Authentication
@@ -242,7 +287,8 @@ Nginx --> BAO : Access Secrets\nsecret/*
 ### Key Features
 
 - **SPIFFE Identity**: Workloads get cryptographically verifiable identities
-- **Dynamic Policy Assignment**: CEL program parses SPIFFE ID components (`region`, `tenant`, `product`, `resource-type`, `resource-id`) from pattern `spiffe://region.tenant.nvidia.com/product/resource-type/resource-id` and assigns policies dynamically
+- **Tenant-Specific Trust Domains**: Exchange service transforms JWTs to tenant-specific trust domains (e.g., `tenant1.sjc-1.k8s2-control.nvidia.com`)
+- **Dynamic Policy Assignment**: CEL program parses SPIFFE ID components (`region`, `tenant`, `product`, `resource-type`, `resource-id`) and assigns policies dynamically
 - **Automatic JWT Refresh**: Go sidecar refreshes tokens at 80% expiry with retry logic
 
 ## SPIRE Multi-Cluster Key Management
@@ -262,6 +308,7 @@ make kubevirt           # Install KubeVirt and CDI
 make kyverno            # Install Kyverno
 make spire              # Install SPIRE
 make verify-spire       # Verify SPIRE installation
+make exchange-service   # Deploy SPIFFE exchange service
 make bao                # Deploy OpenBao with SPIFFE auth
 make nginx              # Deploy demo workload
 make metadata-service   # Deploy metadata service
@@ -272,7 +319,8 @@ make verify-vm          # Verify VM metadata service
 ## Configuration Files
 
 - `config/kind-config.yaml` - Cluster settings
-- `config/spire-server-values.yaml` - SPIRE Helm values
+- `config/spire-server-values.yaml` - SPIRE Helm values (includes domain label in SPIFFE ID template)
+- `config/spiffe-exchange-service.yaml` - Exchange service deployment
 - `config/demo-nginx.yaml` - Demo workload with Go sidecar
 - `config/bao-values.yaml` - OpenBao Helm values
 - `config/metadata-service-daemonset.yaml.tmpl` - Metadata service deployment
@@ -283,7 +331,7 @@ make verify-vm          # Verify VM metadata service
 
 ## Troubleshooting
 
-### SPIRE and Metadata Service
+### SPIRE, Exchange Service, and Metadata Service
 
 ```bash
 make verify-spire       # Run SPIRE verification
@@ -291,9 +339,16 @@ make verify-vm          # Verify VM metadata service
 
 # Manual checks
 kubectl get pods -n spire-server
+kubectl logs -l app=spiffe-exchange-service --tail=50
 kubectl logs demo-nginx -c spiffe-sidecar
 kubectl logs -l app=metadata-service --tail=50
 kubectl logs -l kubevirt.io=virt-launcher -c workload-api-proxy --tail=50
+
+# Test exchange service directly
+kubectl run test --rm -it --image=curlimages/curl -- \
+  curl -X POST http://spiffe-exchange-service:8080/v1/exchange \
+  -H "Content-Type: application/json" \
+  -d '{"jwt": "<spiffe-jwt-from-spire>"}'
 ```
 
 ### OpenBao
@@ -312,7 +367,7 @@ virtctl console demo-ubuntu-vm -n default
 # Inside VM, test metadata service
 curl -X POST http://169.254.169.254:8080/v1/metadata/identity \
   -H "Content-Type: application/json" \
-  -d '{"audience": "spiffe://sjc-1.k8s2-control.nvidia.com"}'
+  -d '{"audience": "spiffe://tenant1.sjc-1.k8s2-control.nvidia.com"}'
 ```
 
 ## Implementation Notes
