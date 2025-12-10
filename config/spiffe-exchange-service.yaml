@@ -26,6 +26,7 @@ spec:
         args:
         - --listen=:8080
         - --socket=unix:///var/run/secrets/spire.io/spire-agent.sock
+        - --base-domain=sjc-1.k8s2-control.nvidia.com
         - --log-level=info
         resources:
           requests:

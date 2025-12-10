@@ -18,6 +18,7 @@ install: cluster kubevirt kyverno spire verify-spire exchange-service bao nginx 
 	@echo "- KubeVirt and CDI for virtual machine management"
 	@echo "- Kyverno policy engine for Kubernetes governance"
 	@echo "- SPIRE server and agent running"
+	@echo "- SPIFFE Exchange Service for JWT transformation"
 	@echo "- OpenBao with CEL JWT authentication configured"
 	@echo "- Demo nginx pod with SPIFFE identity"
 	@echo "- JWT tokens automatically fetched by Go sidecar"
@@ -46,7 +47,7 @@ verify-spire: ## Verify SPIRE installation
 
 verify-vm: ## Verify VM metadata service
 	@echo "Verifying VM metadata service..."
-	@./scripts/10-verify-vm.sh
+	@./scripts/11-verify-vm.sh
 
 status: ## Show status of all components
 	@echo "Component Status"
@@ -61,17 +62,17 @@ status: ## Show status of all components
 	@echo "SPIRE Agent:"
 	@kubectl get pods -n spire-server -l app.kubernetes.io/name=agent 2>/dev/null || echo "SPIRE agent not found"
 	@echo ""
-	@echo "Demo Nginx:"
-	@kubectl get pod demo-nginx 2>/dev/null || echo "Demo nginx not found"
+	@echo "Exchange Service:"
+	@kubectl get deployment spiffe-exchange-service 2>/dev/null || echo "Exchange service not found"
 	@echo ""
 	@echo "OpenBao:"
 	@kubectl get pods -n bao -l app.kubernetes.io/name=openbao 2>/dev/null || echo "OpenBao not found"
 	@echo ""
+	@echo "Demo Nginx:"
+	@kubectl get pod demo-nginx 2>/dev/null || echo "Demo nginx not found"
+	@echo ""
 	@echo "Metadata Service:"
 	@kubectl get daemonset -l app=metadata-service 2>/dev/null || echo "Metadata service not found"
-	@echo ""
-	@echo "Exchange Service:"
-	@kubectl get deployment spiffe-exchange-service 2>/dev/null || echo "Exchange service not found"
 	@echo ""
 	@echo "VM:"
 	@kubectl get vm 2>/dev/null || echo "VM not found"

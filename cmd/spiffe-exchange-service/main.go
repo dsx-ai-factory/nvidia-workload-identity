@@ -9,12 +9,10 @@ import (
 	"maps"
 	"mime"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
@@ -36,12 +34,13 @@ type ExchangeResponse struct {
 
 // ExchangeServer handles SPIFFE JWT exchange operations.
 type ExchangeServer struct {
-	keyStore  KeyStore
-	jwtSource *workloadapi.JWTSource
+	keyStore   KeyStore
+	jwtSource  *workloadapi.JWTSource
+	baseDomain string
 }
 
 // NewExchangeServer creates a new exchange server using the SPIFFE Workload API.
-func NewExchangeServer(ctx context.Context, keyStore KeyStore, socketPath string) (*ExchangeServer, error) {
+func NewExchangeServer(ctx context.Context, keyStore KeyStore, socketPath, baseDomain string) (*ExchangeServer, error) {
 	opts := []workloadapi.JWTSourceOption{}
 	if socketPath != "" {
 		opts = append(opts, workloadapi.WithClientOptions(workloadapi.WithAddr(socketPath)))
@@ -53,8 +52,9 @@ func NewExchangeServer(ctx context.Context, keyStore KeyStore, socketPath string
 	}
 
 	return &ExchangeServer{
-		keyStore:  keyStore,
-		jwtSource: jwtSource,
+		keyStore:   keyStore,
+		jwtSource:  jwtSource,
+		baseDomain: baseDomain,
 	}, nil
 }
 
@@ -239,48 +239,16 @@ func (s *ExchangeServer) handleExchange(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// handleOIDCConfig handles GET requests to /.well-known/openid-configuration.
-// Trust domain is determined from the Host header.
-func (s *ExchangeServer) handleOIDCConfig(w http.ResponseWriter, r *http.Request) {
-	trustDomain := extractTrustDomain(r.Host)
-	if trustDomain == "" {
-		http.Error(w, "Host header required", http.StatusBadRequest)
-		return
-	}
-
-	_, _, alg, err := s.keyStore.GetOrCreateKey(trustDomain)
-	if err != nil {
-		slog.Error("Failed to get key for domain", "domain", trustDomain, "error", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	issuer := trustDomain
-	jwksURI := (&url.URL{
-		Scheme: "https",
-		Host:   r.Host,
-		Path:   "/.well-known/jwks.json",
-	}).String()
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(oidc.ProviderConfig{
-		IssuerURL:  issuer,
-		JWKSURL:    jwksURI,
-		Algorithms: []string{string(alg)},
-	}); err != nil {
-		slog.Error("Failed to encode OIDC config", "error", err)
-	}
-}
-
 // handleJWKS handles GET requests to /.well-known/jwks.json.
-// Trust domain is determined from the Host header.
+// Tenant prefix is extracted from Host header and combined with base domain.
 func (s *ExchangeServer) handleJWKS(w http.ResponseWriter, r *http.Request) {
-	trustDomain := extractTrustDomain(r.Host)
-	if trustDomain == "" {
+	tenantPrefix := extractTenantPrefix(r.Host)
+	if tenantPrefix == "" {
 		http.Error(w, "Host header required", http.StatusBadRequest)
 		return
 	}
 
+	trustDomain := tenantPrefix + "." + s.baseDomain
 	signer, keyID, alg, err := s.keyStore.GetOrCreateKey(trustDomain)
 	if err != nil {
 		slog.Error("Failed to get key for domain", "domain", trustDomain, "error", err)
@@ -303,9 +271,10 @@ func (s *ExchangeServer) handleJWKS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// extractTrustDomain extracts the trust domain from the Host header, stripping any port.
-func extractTrustDomain(host string) string {
-	if idx := strings.Index(host, ":"); idx != -1 {
+// extractTenantPrefix extracts the tenant prefix from the Host header.
+// Host format: {tenant}.default.svc.cluster.local
+func extractTenantPrefix(host string) string {
+	if idx := strings.Index(host, "."); idx != -1 {
 		return host[:idx]
 	}
 	return host
@@ -315,9 +284,15 @@ func main() {
 	var (
 		listenAddr = flag.String("listen", ":8080", "HTTP server listen address")
 		socketPath = flag.String("socket", "", "SPIFFE Workload API socket path (uses default if empty)")
+		baseDomain = flag.String("base-domain", "", "Base trust domain (e.g., sjc-1.k8s2-control.nvidia.com)")
 		logLevel   = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
 	)
 	flag.Parse()
+
+	if *baseDomain == "" {
+		fmt.Fprintln(os.Stderr, "error: --base-domain is required")
+		os.Exit(1)
+	}
 
 	var level slog.Level
 	switch *logLevel {
@@ -340,12 +315,13 @@ func main() {
 	slog.Info("Starting SPIFFE Exchange Service",
 		"listen_addr", *listenAddr,
 		"socket_path", *socketPath,
+		"base_domain", *baseDomain,
 		"log_level", level.String())
 
 	ctx := context.Background()
 	keyStore := NewInMemoryKeyStore(ES256KeyGenerator{})
 
-	server, err := NewExchangeServer(ctx, keyStore, *socketPath)
+	server, err := NewExchangeServer(ctx, keyStore, *socketPath, *baseDomain)
 	if err != nil {
 		slog.Error("Failed to create exchange server", "error", err)
 		os.Exit(1)
@@ -353,7 +329,6 @@ func main() {
 	defer server.Close()
 
 	http.HandleFunc("POST /v1/exchange", server.handleExchange)
-	http.HandleFunc("GET /.well-known/openid-configuration", server.handleOIDCConfig)
 	http.HandleFunc("GET /.well-known/jwks.json", server.handleJWKS)
 	http.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

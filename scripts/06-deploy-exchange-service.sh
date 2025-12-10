@@ -12,6 +12,8 @@ EXCHANGE_IMAGE_NAME="spiffe-exchange-service"
 IMAGE_TAG="latest"
 NAMESPACE="${NAMESPACE:-default}"
 CLUSTER_NAME="${CLUSTER_NAME:-spire-demo}"
+TENANT_PREFIX="${TENANT_PREFIX:-tenant1}"
+BASE_DOMAIN="${BASE_DOMAIN:-sjc-1.k8s2-control.nvidia.com}"
 
 # Source common functions
 source "${SCRIPT_DIR}/common.sh"
@@ -77,6 +79,42 @@ deploy_exchange_service() {
     log_success "Exchange service deployed"
 }
 
+# Configure CoreDNS for wildcard tenant domain routing
+configure_tenant_dns() {
+    log_info "Configuring CoreDNS for wildcard tenant domain..."
+    
+    local escaped_domain="${BASE_DOMAIN//./\\.}"
+    local service_fqdn="spiffe-exchange-service.${NAMESPACE}.svc.cluster.local"
+    
+    # Check if already configured (idempotent)
+    if kubectl get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}' | grep -qF "rewrite name regex .*\.${escaped_domain}"; then
+        log_info "CoreDNS already configured for *.${BASE_DOMAIN}"
+        return 0
+    fi
+    
+    log_info "Adding wildcard DNS rewrite: *.${BASE_DOMAIN} -> ${service_fqdn}"
+    
+    # Get current Corefile
+    local corefile
+    corefile=$(kubectl get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}')
+    
+    # Build rewrite rule - rewrites *.BASE_DOMAIN to exchange service FQDN
+    local rewrite_rule="rewrite name regex .*\\.${escaped_domain} ${service_fqdn}"
+    
+    # Insert rewrite rule before "kubernetes cluster.local"
+    local new_corefile
+    new_corefile=$(echo "$corefile" | awk -v rule="    $rewrite_rule" '/kubernetes cluster.local/{print rule}1')
+    
+    # Create new configmap YAML and apply
+    kubectl create configmap coredns -n kube-system --from-literal=Corefile="$new_corefile" --dry-run=client -o yaml | kubectl apply -f -
+    
+    # Restart CoreDNS to pick up changes
+    kubectl rollout restart deployment coredns -n kube-system
+    kubectl rollout status deployment coredns -n kube-system --timeout=60s
+    
+    log_success "CoreDNS configured for *.${BASE_DOMAIN}"
+}
+
 # Wait for exchange service
 wait_for_exchange_service() {
     log_info "Waiting for exchange service to be ready..."
@@ -117,10 +155,7 @@ display_status() {
 cleanup_exchange_service() {
     log_info "Cleaning up exchange service..."
     
-    if kubectl get deployment spiffe-exchange-service -n ${NAMESPACE} &> /dev/null; then
-        log_info "Deleting exchange service..."
-        kubectl delete -f "${EXCHANGE_SERVICE_FILE}" -n ${NAMESPACE} --ignore-not-found=true
-    fi
+    kubectl delete -f "${EXCHANGE_SERVICE_FILE}" -n ${NAMESPACE} --ignore-not-found=true
     
     log_success "Exchange service cleanup completed!"
 }
@@ -156,6 +191,7 @@ main() {
             load_image
             deploy_exchange_service
             wait_for_exchange_service
+            configure_tenant_dns
             display_status
             ;;
         *)

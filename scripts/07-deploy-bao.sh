@@ -193,34 +193,15 @@ configure_spiffe_auth() {
         bao auth enable jwt >/dev/null
     fi
     
-    # Extract the TLS certificate from the OIDC discovery provider
-    log_info "Extracting TLS certificate from OIDC discovery provider..."
-    local oidc_ca_cert=""
+    # Configure JWT auth with the SPIFFE exchange service
+    log_info "Configuring JWT authentication with SPIFFE exchange service..."
     
-    # Extract certificate using a temporary pod with openssl
-    # Use full FQDN for cross-namespace DNS resolution
-    log_info "Extracting certificate from OIDC discovery provider..."
-    oidc_ca_cert=$(kubectl run cert-extractor --image=alpine:latest --rm -i --restart=Never -- sh -c "
-        apk add --no-cache openssl > /dev/null 2>&1
-        echo | openssl s_client -connect spire-spiffe-oidc-discovery-provider.spire-server.svc.cluster.local:443 -showcerts 2>/dev/null | sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p'
-    " 2>&1 | grep -E '^-----BEGIN CERTIFICATE-----$|^[A-Za-z0-9+/=]+$|^-----END CERTIFICATE-----$')
+    local tenant_domain="tenant1.sjc-1.k8s2-control.nvidia.com"
     
-    if [[ -n "$oidc_ca_cert" ]] && echo "$oidc_ca_cert" | grep -q "BEGIN CERTIFICATE"; then
-        log_success "Successfully extracted OIDC discovery provider certificate"
-    else
-        log_error "Failed to extract OIDC discovery provider certificate"
-        cleanup_port_forward
-        trap - EXIT
-        return 1
-    fi
-    
-    # Configure JWT auth with OIDC Discovery URL using bao CLI
-    log_info "Configuring JWT authentication with OIDC Discovery URL..."
-    
-    # Configure JWT auth with certificate via stdin
+    # Use JWKS URL via CoreDNS entry (configured by exchange service)
     bao write auth/jwt/config \
-        oidc_discovery_url="https://spire-spiffe-oidc-discovery-provider.spire-server" \
-        oidc_discovery_ca_pem="$oidc_ca_cert" >/dev/null
+        jwks_url="http://${tenant_domain}:8080/.well-known/jwks.json" \
+        bound_issuer="${tenant_domain}" >/dev/null
     
     # Create policies for SPIFFE authenticated users  
     local policy_file="$PROJECT_ROOT/config/policies/spiffe-policy.hcl"
@@ -253,15 +234,17 @@ configure_spiffe_auth() {
         return 1
     fi
     
-    # Update the cel-role.json bound_audiences for our trust domain and create the role
+    # Update the cel-role.json bound_audiences to match the tenant domain
     local updated_cel_role
-    updated_cel_role=$(jq '.bound_audiences = ["spiffe://sjc-1.k8s2-control.nvidia.com"]' "$cel_role_file")
+    updated_cel_role=$(jq --arg aud "spiffe://${tenant_domain}" '.bound_audiences = [$aud]' "$cel_role_file")
     echo "$updated_cel_role" | bao write auth/jwt/cel/role/basic-spiffe - >/dev/null
     
     log_success "SPIFFE JWT authentication configured"
     
-    # Enable KV secrets engine using bao CLI
-    bao secrets enable -path=secret kv-v2 >/dev/null
+    # Enable KV secrets engine if not already enabled
+    if ! bao secrets list | grep -q "^secret/"; then
+        bao secrets enable -path=secret kv-v2 >/dev/null
+    fi
     
     # Store a test secret using bao CLI
     bao kv put secret/nginx username=admin password=secret123 >/dev/null
