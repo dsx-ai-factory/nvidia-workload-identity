@@ -4,7 +4,7 @@ global:
   spire:
     trustDomain: "sjc-1.k8s2-control.nvidia.com"
     clusterName: "spire-demo"
-    jwtIssuer: "oidc-discovery.sjc-1.k8s2-control.nvidia.com"
+    jwtIssuer: "spiffe://sjc-1.k8s2-control.nvidia.com"
     caSubject:
       country: "US"
       organization: "SPIFFE"
@@ -26,7 +26,15 @@ spire-server:
         # Override the default template to include optional domain for exchange
         # If pod has label spiffe.nvidia.com/domain, includes /domain/{value}/ in path
         default: # https://github.com/spiffe/spire-controller-manager/blob/main/docs/clusterspiffeid-crd.md#templates
-          spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/{{ if index .PodMeta.Labels \"spiffe.nvidia.com/domain\" }}domain/{{ index .PodMeta.Labels \"spiffe.nvidia.com/domain\" }}/{{ end }}{{ .PodMeta.Namespace }}/pod/{{ .PodMeta.Name }}"
+          spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/{{ if index .PodMeta.Labels \"spiffe.nvidia.com/domain\" }}domain/{{ index .PodMeta.Labels \"spiffe.nvidia.com/domain\" }}/{{ end }}{{ .PodMeta.Namespace }}/pod/{{ .PodMeta.UID }}"
+        # VM-specific template using annotation to identify VMs
+        # Matches virt-launcher pods and uses VM UID in path
+        vm-workloads:
+          enabled: true
+          podSelector:
+            matchLabels:
+              kubevirt.io: virt-launcher
+          spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/{{ if index .PodMeta.Labels \"spiffe.nvidia.com/domain\" }}domain/{{ index .PodMeta.Labels \"spiffe.nvidia.com/domain\" }}/{{ end }}vmaas/vm/{{ .PodMeta.UID }}"
   
   # Image configuration
   image:

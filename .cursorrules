@@ -11,15 +11,21 @@ This project demonstrates SPIFFE JWT authentication with OpenBao's CEL (Common E
 ## Core Architecture Principles
 
 ### SPIFFE Identity Pattern
-- Trust domain: `sjc-1.k8s2-control.nvidia.com`
-- SPIFFE ID template: `spiffe://{{ .TrustDomain }}/{{ .PodMeta.Namespace }}/pod/{{ .PodMeta.Name }}`
-- Use namespace/pod pattern, not service account identities
+- Base trust domain: `sjc-1.k8s2-control.nvidia.com`
+- Pattern: `spiffe://<tenant>.<region>.<domain.com>/<product_name>/<resource_type>/<resource_id(uuid)>`
+- Examples:
+  - Pod: `spiffe://tenant1.sjc-1.k8s2-control.nvidia.com/default/pod/<uuid>`
+  - VM: `spiffe://tenant1.sjc-1.k8s2-control.nvidia.com/vmaas/vm/<uuid>`
+- Components from trust domain: tenant, region, domain
+- Components from path: product_name, resource_type, resource_id
 - JWT issuer: `oidc-discovery.sjc-1.k8s2-control.nvidia.com`
 
 ### OpenBao CEL Integration
 - Use JWT CEL authentication (`/v1/auth/jwt/cel/login`), not static JWT auth
 - CEL program parses SPIFFE ID components for dynamic policy assignment
-- Policies: `spiffe-authenticated`, `region-*`, `tenant-*`, `product-*`, `resource-type-*`, `resource-id-*`
+- Trust domain format after exchange: `{tenant}.{region}.{product}.{base-domain}`
+- Policies: `spiffe-authenticated`, `region-*`, `tenant-*`, `product-*`, `resource-type-*`
+- Supports both pod and VM workload types
 - Use OIDC Discovery Provider with TLS certificate extraction
 
 ## Development Guidelines

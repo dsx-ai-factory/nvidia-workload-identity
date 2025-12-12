@@ -38,15 +38,23 @@ The SPIFFE Exchange Service transforms SPIFFE JWTs from the cluster's base trust
 
 ### JWT Transformation
 
+SPIFFE ID Pattern: `spiffe://<tenant>.<region>.<domain.com>/<product_name>/<resource_type>/<resource_id>`
+
 **Input SPIFFE ID** (from SPIRE):
 ```
-spiffe://sjc-1.k8s2-control.nvidia.com/domain/tenant1/default/pod/demo-nginx
+spiffe://sjc-1.k8s2-control.nvidia.com/domain/tenant1/default/pod/{uuid}
 ```
 
 **Output SPIFFE ID** (from Exchange Service):
 ```
-spiffe://tenant1.sjc-1.k8s2-control.nvidia.com/default/pod/demo-nginx
+spiffe://tenant1.sjc-1.k8s2-control.nvidia.com/default/pod/{uuid}
 ```
+
+**VM Example**:
+- Input: `spiffe://sjc-1.k8s2-control.nvidia.com/domain/tenant1/vmaas/vm/{uuid}`
+- Output: `spiffe://tenant1.sjc-1.k8s2-control.nvidia.com/vmaas/vm/{uuid}`
+
+Where `{uuid}` is the workload's UID.
 
 The exchange service:
 1. Validates the incoming JWT against SPIRE's trust bundle
@@ -59,7 +67,7 @@ The exchange service:
 
 The exchange service serves a JWKS endpoint at `/.well-known/jwks.json` for each tenant domain. CoreDNS is configured with a wildcard rewrite rule so that `*.sjc-1.k8s2-control.nvidia.com` resolves to the exchange service, enabling host-based routing.
 
-OpenBao fetches the JWKS from `http://tenant1.sjc-1.k8s2-control.nvidia.com:8080/.well-known/jwks.json` to validate exchanged JWTs.
+OpenBao validates JWTs with issuer `spiffe://tenant1.sjc-1.k8s2-control.nvidia.com` by fetching JWKS from `http://tenant1.sjc-1.k8s2-control.nvidia.com:8080/.well-known/jwks.json`.
 
 ### Configuration
 
@@ -238,8 +246,8 @@ curl -X POST http://169.254.169.254:8080/v1/metadata/identity \
 package "OpenBao Server (globally hosted)" as OpenBao {
   component "Bao API" as BAO
   package "CEL Program Logic" as CEL {
-    component "Parse SPIFFE ID\nspiffe://region.tenant.product.nvidia.com/resource-type/resource-id\n(sjc-1.k8s2-control.default.nvidia.com/pod/demo-nginx)" as Parse
-    component "Assign Policies\nspiffe-authenticated\nregion-sjc-1\ntenant-k8s2-control\nproduct-default\nresource-type-pod\nresource-id-demo-nginx" as Policies
+    component "Parse SPIFFE ID\nspiffe://<tenant>.<region>.<domain>/<product>/<resource_type>/<resource_id>\n(tenant1.sjc-1.k8s2-control.nvidia.com/default/pod/uuid)\n(tenant1.sjc-1.k8s2-control.nvidia.com/vmaas/vm/uuid)" as Parse
+    component "Assign Policies\nspiffe-authenticated\nregion-sjc-1\ntenant-tenant1\nproduct-default\nresource-type-pod" as Policies
   }
 }
 
@@ -268,9 +276,9 @@ BAO --> ExchangeService : Pull JWKS\n(tenant domain)
 
 ' JWT Flow
 Sidecar --> SPIRE_Agent : Workload API\nRequest
-SPIRE_Agent --> Sidecar : SPIFFE JWT\nspiffe://sjc-1.k8s2-control.nvidia.com/domain/tenant1/default/pod/demo-nginx
+SPIRE_Agent --> Sidecar : SPIFFE JWT\nspiffe://sjc-1.k8s2-control.nvidia.com/domain/tenant1/default/pod/uuid
 Sidecar --> ExchangeService : Exchange JWT
-ExchangeService --> Sidecar : Exchanged JWT\nspiffe://tenant1.sjc-1.k8s2-control.nvidia.com/default/pod/demo-nginx
+ExchangeService --> Sidecar : Exchanged JWT\nspiffe://tenant1.sjc-1.k8s2-control.nvidia.com/default/pod/uuid
 Sidecar --> Volume : Write JWT\n(80% refresh)
 
 ' OpenBao Authentication
@@ -286,9 +294,10 @@ Nginx --> BAO : Access Secrets\nsecret/*
 
 ### Key Features
 
-- **SPIFFE Identity**: Workloads get cryptographically verifiable identities
-- **Tenant-Specific Trust Domains**: Exchange service transforms JWTs to tenant-specific trust domains (e.g., `tenant1.sjc-1.k8s2-control.nvidia.com`)
-- **Dynamic Policy Assignment**: CEL program parses SPIFFE ID components (`region`, `tenant`, `product`, `resource-type`, `resource-id`) and assigns policies dynamically
+- **SPIFFE Identity**: Pattern `spiffe://<tenant>.<region>.<domain>/<product>/<resource_type>/<resource_id>`
+- **Tenant-Specific Trust Domains**: Exchange service transforms JWTs to tenant-specific trust domains
+- **Dynamic Policy Assignment**: CEL parses trust domain (tenant, region) and path (product, resource_type, resource_id) for policy assignment
+- **Multi-Workload Support**: Handles pods and VMs with same pattern structure
 - **Automatic JWT Refresh**: Go sidecar refreshes tokens at 80% expiry with retry logic
 
 ## SPIRE Multi-Cluster Key Management

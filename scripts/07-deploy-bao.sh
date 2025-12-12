@@ -201,7 +201,7 @@ configure_spiffe_auth() {
     # Use JWKS URL via CoreDNS entry (configured by exchange service)
     bao write auth/jwt/config \
         jwks_url="http://${tenant_domain}:8080/.well-known/jwks.json" \
-        bound_issuer="${tenant_domain}" >/dev/null
+        bound_issuer="spiffe://${tenant_domain}" >/dev/null
     
     # Create policies for SPIFFE authenticated users  
     local policy_file="$PROJECT_ROOT/config/policies/spiffe-policy.hcl"
@@ -223,7 +223,6 @@ configure_spiffe_auth() {
     bao policy write tenant-k8s2-control "$policies_dir/tenant-k8s2-control-policy.hcl" >/dev/null
     bao policy write product-default "$policies_dir/product-default-policy.hcl" >/dev/null
     bao policy write resource-type-pod "$policies_dir/resource-type-pod-policy.hcl" >/dev/null
-    bao policy write resource-id-demo-nginx "$policies_dir/resource-id-demo-nginx-policy.hcl" >/dev/null
     
     # Create CEL role using the cel-role.json file but updated for our trust domain
     local cel_role_file="$PROJECT_ROOT/config/cel-role.json"

@@ -143,36 +143,54 @@ func main() {
 	fmt.Printf("Variables: %d\n", len(role.CelProgram.Variables))
 
 	// Create sample JWT claims data for testing (matching OpenBao's format)
-	sampleClaims := map[string]interface{}{
-		"sub": "spiffe://sjc-1.k8s2-control.nvidia.com/controlplane/vm/12345678-1234-5678-9abc-123456789abc",
-		"aud": []string{
-			"spiffe://sjc-1.k8s2-control.ncp.com/controlplane/vm/fluentd",
-			"ssa://SSA_service_id",
-			"sf://Starfleet_service_id",
-		},
-		"iss": "spiffe://sjc-1.k8s2-control.ncp.com/spire/server",
+	// Example 1: Pod SPIFFE ID
+	podClaims := map[string]interface{}{
+		"sub": "spiffe://tenant1.sjc-1.k8s2-control.nvidia.com/default/pod/12345678-1234-5678-9abc-123456789abc",
+		"aud": []string{"spiffe://tenant1.sjc-1.k8s2-control.nvidia.com"},
+		"iss": "spiffe://tenant1.sjc-1.k8s2-control.nvidia.com",
 		"exp": 1678886400,
 		"iat": 1678882800,
-		"claims": map[string]interface{}{
-			"region":       "SJC-1",
-			"tenant":       "k8s2-control",
-			"product":      "controlplane",
-			"vm_uuid":      "12345678-1234-5678-9abc-123456789abc",
-			"deployment":   "production",
-			"service_type": "logging",
-			"role":         "log-forwarder",
-		},
 	}
 
-	fmt.Println("\n=== Sample Claims ===")
-	claimsJSON, _ := json.MarshalIndent(sampleClaims, "", "  ")
-	fmt.Println(string(claimsJSON))
+	// Example 2: VM SPIFFE ID
+	vmClaims := map[string]interface{}{
+		"sub": "spiffe://tenant1.sjc-1.k8s2-control.nvidia.com/vmaas/vm/87654321-4321-8765-cba9-987654321098",
+		"aud": []string{"spiffe://tenant1.sjc-1.k8s2-control.nvidia.com"},
+		"iss": "spiffe://tenant1.sjc-1.k8s2-control.nvidia.com",
+		"exp": 1678886400,
+		"iat": 1678882800,
+	}
 
-	fmt.Println("\n=== Evaluating CEL Program ===")
+	fmt.Println("\n=== Sample Claims (Pod) ===")
+	podClaimsJSON, _ := json.MarshalIndent(podClaims, "", "  ")
+	fmt.Println(string(podClaimsJSON))
+
+	fmt.Println("\n=== Sample Claims (VM) ===")
+	vmClaimsJSON, _ := json.MarshalIndent(vmClaims, "", "  ")
+	fmt.Println(string(vmClaimsJSON))
+
+	fmt.Println("\n=== Evaluating CEL Program (Pod) ===")
 
 	// Use the OpenBao-style evaluation with runCelProgram
 	ctx := context.Background()
-	pbAuth, err := runCelProgram(ctx, logical.UpdateOperation, role.Name, role.CelProgram, sampleClaims)
+	pbAuth, err := runCelProgram(ctx, logical.UpdateOperation, role.Name, role.CelProgram, podClaims)
+	if err != nil {
+		fmt.Printf("CEL Program Failed: %v\n", err)
+	} else {
+		fmt.Printf("CEL Program Success\n")
+		fmt.Printf("pb.Auth Result: %+v\n", pbAuth)
+
+		if pbAuth.Policies != nil {
+			fmt.Printf("Assigned Policies: %v\n", pbAuth.Policies)
+		}
+		if pbAuth.LeaseOptions != nil {
+			fmt.Printf("Lease Duration: %d seconds\n", pbAuth.LeaseOptions.TTL)
+			fmt.Printf("Renewable: %v\n", pbAuth.LeaseOptions.Renewable)
+		}
+	}
+
+	fmt.Println("\n=== Evaluating CEL Program (VM) ===")
+	pbAuth, err = runCelProgram(ctx, logical.UpdateOperation, role.Name, role.CelProgram, vmClaims)
 	if err != nil {
 		fmt.Printf("CEL Program Failed: %v\n", err)
 	} else {

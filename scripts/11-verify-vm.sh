@@ -8,7 +8,7 @@ source "${SCRIPT_DIR}/common.sh"
 VM_NAME="${VM_NAME:-demo-ubuntu-vm}"
 VM_NAMESPACE="${VM_NAMESPACE:-default}"
 METADATA_SERVICE_TENANT="${METADATA_SERVICE_TENANT:-default}"
-TEST_AUDIENCE="${TEST_AUDIENCE:-spiffe://sjc-1.k8s2-control.nvidia.com}"
+TEST_AUDIENCE="${TEST_AUDIENCE:-spiffe://tenant1.sjc-1.k8s2-control.nvidia.com}"
 
 # Get metadata service UDN IP
 get_metadata_service_udn_ip() {
@@ -48,6 +48,83 @@ exec_in_vm() {
     return $?
 }
 
+# Decode JWT payload (base64url decode)
+decode_jwt_payload() {
+    local jwt="$1"
+    
+    # Extract payload (second part between dots)
+    local payload=$(echo "$jwt" | cut -d'.' -f2)
+    
+    if [ -z "$payload" ]; then
+        return 1
+    fi
+    
+    # Base64url decode: replace - with +, _ with /, add padding
+    local base64_payload=$(echo "$payload" | tr '_-' '/+')
+    
+    # Add padding if needed
+    case $((${#base64_payload} % 4)) in
+        2) base64_payload="${base64_payload}==" ;;
+        3) base64_payload="${base64_payload}=" ;;
+    esac
+    
+    # Decode and pretty print JSON
+    echo "$base64_payload" | base64 -d 2>/dev/null | jq . 2>/dev/null || {
+        # Fallback if jq not available
+        echo "$base64_payload" | base64 -d 2>/dev/null
+    }
+}
+
+# Parse and display JWT response
+parse_jwt_response() {
+    local response="$1"
+    
+    # Extract JSON from response (handle curl verbose output)
+    local json_response
+    json_response=$(echo "$response" | grep -o '{.*}' | tail -1)
+    
+    if [ -z "$json_response" ]; then
+        log_error "Could not extract JSON from response"
+        return 1
+    fi
+    
+    # Parse JSON fields
+    local token
+    local expires_at
+    local spiffe_id
+    
+    token=$(echo "$json_response" | jq -r '.token // empty' 2>/dev/null)
+    expires_at=$(echo "$json_response" | jq -r '.expires_at // empty' 2>/dev/null)
+    spiffe_id=$(echo "$json_response" | jq -r '.spiffe_id // empty' 2>/dev/null)
+    
+    if [ -z "$token" ]; then
+        log_error "Token not found in response"
+        return 1
+    fi
+    
+    # Display response fields
+    log_success "Successfully retrieved JWT response"
+    echo ""
+    log_info "Response Fields:"
+    echo "  Token: ${token}"
+    if [ -n "$expires_at" ]; then
+        echo "  Expires At: ${expires_at}"
+    fi
+    if [ -n "$spiffe_id" ]; then
+        echo "  SPIFFE ID: ${spiffe_id}"
+    fi
+    echo ""
+    
+    # Decode and display JWT payload
+    log_info "JWT Payload (decoded):"
+    if ! decode_jwt_payload "$token"; then
+        log_warning "Failed to decode JWT payload"
+        return 1
+    fi
+    
+    return 0
+}
+
 # Test metadata service JWT endpoint
 test_jwt_endpoint() {
     local metadata_ip="$1"
@@ -60,15 +137,13 @@ test_jwt_endpoint() {
     if response=$(exec_in_vm "$curl_cmd" 60); then
         # Check if response contains a token
         if echo "$response" | grep -q '"token"'; then
-            log_success "Successfully retrieved JWT response"
-            echo "$response" | grep -A1 '"token"' | head -20
-            
-            # Extract and display SPIFFE ID if present
-            if echo "$response" | grep -q '"spiffe_id"'; then
-                local spiffe_id=$(echo "$response" | grep -o '"spiffe_id":"[^"]*"' | cut -d'"' -f4)
-                log_info "SPIFFE ID: ${spiffe_id}"
+            if parse_jwt_response "$response"; then
+                return 0
+            else
+                log_error "Failed to parse JWT response"
+                echo "$response"
+                return 1
             fi
-            return 0
         else
             log_error "Response did not contain a token"
             echo "$response"

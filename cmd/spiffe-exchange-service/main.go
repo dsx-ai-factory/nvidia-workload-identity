@@ -137,7 +137,7 @@ func (s *ExchangeServer) resignJWT(originalClaims map[string]any, newSubject spi
 	newClaims := make(map[string]any, len(originalClaims))
 	maps.Copy(newClaims, originalClaims)
 	newClaims["sub"] = newSubject.String()
-	newClaims["iss"] = trustDomain
+	newClaims["iss"] = newSubject.TrustDomain().IDString()
 
 	token, err := jwt.Signed(signer).Claims(newClaims).Serialize()
 	if err != nil {

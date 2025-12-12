@@ -64,10 +64,23 @@ The program uses the OpenBao CEL helper package which provides:
 
 ## Test Data
 
-The evaluator includes sample JWT claims that match the SPIFFE JWT format:
+The evaluator includes sample JWT claims matching the pattern:
+```
+spiffe://<tenant>.<region>.<domain>/<product>/<resource_type>/<resource_id>
+```
 
-- **US Region**: `spiffe://sjc-1.k8s2-control.nvidia.com/controlplane/vm/...`
-- **China Region**: `spiffe://bjs-1.k8s3-control.nvidia.cn/vmaas/vm/...`
-- **Custom Claims**: service_type, deployment, capabilities, etc.
+**Pod Example**:
+```
+spiffe://tenant1.sjc-1.k8s2-control.nvidia.com/default/pod/abc123-def456
+```
+- Trust domain: `tenant1.sjc-1.k8s2-control.nvidia.com` → tenant=tenant1, region=sjc-1
+- Path: `/default/pod/abc123-def456` → product=default, resource_type=pod, resource_id=abc123-def456
 
-This allows you to test how your CEL expressions handle different SPIFFE ID formats and custom claims before deploying to OpenBao.
+**VM Example**:
+```
+spiffe://tenant1.sjc-1.k8s2-control.nvidia.com/vmaas/vm/123abc-456def
+```
+- Trust domain: `tenant1.sjc-1.k8s2-control.nvidia.com` → tenant=tenant1, region=sjc-1
+- Path: `/vmaas/vm/123abc-456def` → product=vmaas, resource_type=vm, resource_id=123abc-456def
+
+This validates CEL expressions parse the pattern correctly before deploying to OpenBao.
