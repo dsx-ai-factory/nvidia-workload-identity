@@ -119,6 +119,27 @@ func exchangeJWT(ctx context.Context, httpClient *http.Client, exchangeServiceUR
 	return &exchangeResp, nil
 }
 
+// exchangeJWTWithRetry exchanges a JWT via the exchange service with retry logic.
+func exchangeJWTWithRetry(ctx context.Context, httpClient *http.Client, exchangeServiceURL, token string, maxRetries int) (*ExchangeResponse, error) {
+	var lastErr error
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		resp, err := exchangeJWT(ctx, httpClient, exchangeServiceURL, token)
+		if err == nil {
+			return resp, nil
+		}
+
+		lastErr = err
+		if attempt < maxRetries {
+			backoff := time.Duration(attempt) * time.Second
+			log.Printf("Exchange attempt %d failed: %v. Retrying in %v...", attempt, err, backoff)
+			time.Sleep(backoff)
+		}
+	}
+
+	return nil, fmt.Errorf("failed to exchange JWT after %d attempts: %w", maxRetries, lastErr)
+}
+
 func main() {
 	var (
 		socketPath         = flag.String("socket", "unix:///var/run/secrets/spire.io/spire-agent.sock", "Path to SPIRE Workload API socket")
@@ -200,7 +221,7 @@ func main() {
 			log.Printf("Exchanging JWT via %s", *exchangeServiceURL)
 		}
 
-		exchangeResp, err := exchangeJWT(ctx, httpClient, *exchangeServiceURL, jwt.Marshal())
+		exchangeResp, err := exchangeJWTWithRetry(ctx, httpClient, *exchangeServiceURL, jwt.Marshal(), *maxRetries)
 		if err != nil {
 			log.Fatalf("Failed to exchange JWT: %v", err)
 		}

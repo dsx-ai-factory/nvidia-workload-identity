@@ -1,115 +1,165 @@
-# SPIFFE + OpenBao CEL Demo Makefile
+# SPIFFE + OpenBao CEL Multi-Cluster Demo Makefile
 
-.PHONY: help install clean test verify-spire verify-vm cluster kubevirt kyverno spire nginx bao metadata-service exchange-service vm status
+.PHONY: help install clean test verify-spire verify-nginx verify-vm cluster metallb gateway spire nginx bao metadata-service exchange-service vm status k1 k2 k2-cluster k2-gateway kubevirt kyverno k2-spire configure-dns cert-manager-k2 sync-federation-ca
 
 # Default target
 help: ## Show this help message
-	@echo "SPIFFE + OpenBao CEL Demo"
-	@echo "========================="
+	@echo "SPIFFE + OpenBao CEL Multi-Cluster Demo"
+	@echo "========================================"
 	@echo ""
 	@echo "Available targets:"
-	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-install: cluster kubevirt kyverno spire verify-spire exchange-service bao nginx metadata-service vm ## Complete setup: Kind cluster + KubeVirt + Kyverno + SPIRE + Exchange Service + OpenBao + Demo workload + Metadata Service + VM
+install: k1 k2 ## Complete setup: k1 + k2 + SPIRE federation
 	@echo ""
 	@echo "Installation complete"
 	@echo ""
-	@echo "Your cluster is ready with:"
-	@echo "- KubeVirt and CDI for virtual machine management"
-	@echo "- Kyverno policy engine for Kubernetes governance"
-	@echo "- SPIRE server and agent running"
-	@echo "- SPIFFE Exchange Service for JWT transformation"
-	@echo "- OpenBao with CEL JWT authentication configured"
-	@echo "- Demo nginx pod with SPIFFE identity"
-	@echo "- JWT tokens automatically fetched by Go sidecar"
-	@echo "- SPIFFE metadata service DaemonSet"
-	@echo "- Lightweight Ubuntu VM for testing"
+	@echo "Multi-cluster setup ready:"
+	@echo "  k1: Root SPIRE (sjc-1.k8s2-control.nvidia.com), OpenBao, Exchange Service"
+	@echo "  k2: Child SPIRE (nested under k1), KubeVirt, workloads"
 	@echo ""
 	@echo "Next steps:"
-	@echo "  make verify-vm # Verify VM metadata service"
-	@echo "  make test      # Run integration tests"
-	@echo "  make status    # Check component status"
-	@echo "  make clean     # Clean up when done"
+	@echo "  make verify-nginx  # Verify nginx SPIFFE auth"
+	@echo "  make verify-vm     # Verify VM metadata service"
+	@echo "  make test          # Run all integration tests"
+	@echo "  make status        # Check component status"
+	@echo "  make clean         # Clean up when done"
 
-clean: ## Clean up: Remove Kind cluster and all resources
-	@echo "Cleaning up SPIFFE + OpenBao demo..."
-	@./scripts/01-setup-kind-cluster.sh cleanup
+configure-dns: gateway k2-gateway ## Configure cross-cluster DNS for both gateways
+	@echo "Configuring cross-cluster DNS..."
+	@./scripts/configure-dns.sh
+
+# k1 cluster setup (primary: SPIRE root, Bao, Exchange, Gateway)
+k1: cluster gateway spire exchange-service bao ## Setup k1 cluster with SPIRE root, OpenBao, Exchange, Gateway
+	@echo ""
+	@echo "k1 cluster ready"
+
+# k2 cluster setup (secondary: workloads with nested SPIRE)
+k2: k2-cluster kubevirt kyverno k2-spire nginx metadata-service vm ## Setup k2 cluster with workloads
+	@echo ""
+	@echo "k2 cluster ready"
+
+
+clean: ## Clean up: Remove both Kind clusters
+	@echo "Cleaning up multi-cluster demo..."
+	@./scripts/k1/cluster/setup-cluster.sh cleanup 2>/dev/null || true
+	@./scripts/k2/cluster/create-cluster.sh cleanup 2>/dev/null || true
 	@echo "Cleanup complete"
 
-test: ## Run integration tests
-	@echo "Running integration tests..."
-	@./test-integration.sh
+test: verify-clusters verify-nginx verify-vm ## Run integration tests
 	@echo "Tests complete"
 
-verify-spire: ## Verify SPIRE installation
-	@echo "Verifying SPIRE installation..."
-	@./scripts/05-verify-spire.sh
+verify-clusters: ## Verify cluster components (SPIRE, OpenBao, etc.)
+	@echo "Verifying cluster components..."
+	@./scripts/verify.sh
+
+verify-nginx: ## Verify nginx SPIFFE authentication
+	@echo "Verifying nginx SPIFFE auth..."
+	@./scripts/k2/nginx/verify-nginx.sh
 
 verify-vm: ## Verify VM metadata service
 	@echo "Verifying VM metadata service..."
-	@./scripts/11-verify-vm.sh
+	@./scripts/k2/vm/verify-vm.sh
 
 status: ## Show status of all components
-	@echo "Component Status"
-	@echo "==================="
+	@echo "Multi-Cluster Status (Nested SPIRE)"
+	@echo "===================================="
 	@echo ""
-	@echo "Kind Cluster:"
-	@kubectl get nodes -o wide 2>/dev/null || echo "Kind cluster not found"
+	@echo "=== k1 Cluster (Root - sjc-1.k8s2-control.nvidia.com) ==="
+	@echo "Nodes:"
+	@kubectl get nodes --context kind-k1 2>/dev/null || echo "k1 cluster not found"
 	@echo ""
-	@echo "SPIRE Server:"
-	@kubectl get pods -n spire-server -l app.kubernetes.io/name=server 2>/dev/null || echo "SPIRE server not found"
-	@echo ""
-	@echo "SPIRE Agent:"
-	@kubectl get pods -n spire-server -l app.kubernetes.io/name=agent 2>/dev/null || echo "SPIRE agent not found"
+	@echo "External SPIRE Server:"
+	@kubectl get pods -n spire-mgmt -l app.kubernetes.io/name=external-server --context kind-k1 2>/dev/null || echo "Not found"
 	@echo ""
 	@echo "Exchange Service:"
-	@kubectl get deployment spiffe-exchange-service 2>/dev/null || echo "Exchange service not found"
+	@kubectl get deployment spiffe-exchange-service --context kind-k1 2>/dev/null || echo "Not found"
 	@echo ""
 	@echo "OpenBao:"
-	@kubectl get pods -n bao -l app.kubernetes.io/name=openbao 2>/dev/null || echo "OpenBao not found"
+	@kubectl get pods -n bao -l app.kubernetes.io/name=openbao --context kind-k1 2>/dev/null || echo "Not found"
 	@echo ""
+	@echo "Gateway IP:"
+	@kubectl get gateway k1-gateway -n envoy-gateway-system -o jsonpath='{.status.addresses[0].value}' --context kind-k1 2>/dev/null || echo "Not configured"
+	@echo ""
+	@echo ""
+	@echo "=== k2 Cluster (Child - nested under k1) ==="
+	@echo "Nodes:"
+	@kubectl get nodes --context kind-k2 2>/dev/null || echo "k2 cluster not found"
+	@echo ""
+	@echo "Upstream Agent (connects to k1):"
+	@kubectl get pods -n spire-system -l app.kubernetes.io/name=agent-upstream --context kind-k2 2>/dev/null || echo "Not found"
+	@echo ""
+	@echo "Internal Server:"
+	@kubectl get pods -n spire-server -l app.kubernetes.io/name=internal-server --context kind-k2 2>/dev/null || echo "Not found"
+	@echo ""
+	@echo "Downstream Agent:"
+	@kubectl get pods -n spire-system -l app.kubernetes.io/name=agent-downstream --context kind-k2 2>/dev/null || echo "Not found"
+	@echo ""
+	@echo "=== Workloads ==="
 	@echo "Demo Nginx:"
-	@kubectl get pod demo-nginx 2>/dev/null || echo "Demo nginx not found"
-	@echo ""
-	@echo "Metadata Service:"
-	@kubectl get daemonset -l app=metadata-service 2>/dev/null || echo "Metadata service not found"
+	@kubectl get pod demo-nginx --context kind-k2 2>/dev/null || echo "Not found"
 	@echo ""
 	@echo "VM:"
-	@kubectl get vm 2>/dev/null || echo "VM not found"
+	@kubectl get vm --context kind-k2 2>/dev/null || echo "Not found"
 
-# Individual step targets for development
-cluster: ## Create Kind cluster only
-	@echo "Creating Kind cluster..."
-	@./scripts/01-setup-kind-cluster.sh
+# k1 individual targets (with dependencies)
+cluster: ## Create k1 Kind cluster
+	@echo "Creating k1 cluster..."
+	@./scripts/k1/cluster/setup-cluster.sh
 
-kubevirt: ## Install KubeVirt and CDI only
-	@echo "Installing KubeVirt and CDI..."
-	@./scripts/02-install-kubevirt.sh
+gateway: cluster ## Install MetalLB and Envoy Gateway on k1
+	@./scripts/install-metallb.sh k1
+	@./scripts/install-envoy-gw.sh k1
+	@./scripts/k1/gateway/apply-gateway.sh
 
-kyverno: ## Install Kyverno only
-	@echo "Installing Kyverno..."
-	@./scripts/03-install-kyverno.sh
+sync-federation-ca: cert-manager-k2 cluster ## Sync k2's CA to k1 for federation
+	@./scripts/sync-federation-ca.sh
 
-spire: ## Install SPIRE only
-	@echo "Installing SPIRE..."
-	@./scripts/04-install-spire-helm.sh
+spire: gateway sync-federation-ca ## Install SPIRE root on k1 (with k2 federation CA)
+	@echo "Installing SPIRE root on k1..."
+	@./scripts/k1/spire/deploy-spire.sh
 
-exchange-service: ## Deploy SPIFFE exchange service only
-	@echo "Deploying exchange service..."
-	@./scripts/06-deploy-exchange-service.sh
+exchange-service: cluster spire gateway ## Deploy SPIFFE exchange service on k1
+	@echo "Deploying exchange service on k1..."
+	@./scripts/k1/exchange/deploy-exchange.sh
 
-bao: ## Deploy OpenBao only
-	@echo "Deploying OpenBao..."
-	@./scripts/07-deploy-bao.sh
+bao: cluster spire gateway exchange-service ## Deploy OpenBao on k1 (requires exchange-service for JWT)
+	@echo "Deploying OpenBao on k1..."
+	@./scripts/k1/bao/deploy-bao.sh
 
-nginx: ## Deploy demo nginx only
-	@echo "Deploying demo nginx..."
-	@./scripts/08-demo-nginx.sh
+# k2 individual targets (with dependencies)
+k2-cluster: ## Create k2 Kind cluster with OVN
+	@echo "Creating k2 cluster..."
+	@./scripts/k2/cluster/create-cluster.sh
 
-metadata-service: ## Deploy SPIFFE metadata service DaemonSet only
-	@echo "Deploying metadata service..."
-	@./scripts/09-deploy-metadata-service.sh
+cert-manager-k2: k2-cluster ## Install cert-manager on k2
+	@./scripts/install-cert-manager.sh k2
 
-vm: ## Deploy lightweight Ubuntu VM only
-	@echo "Deploying Ubuntu VM..."
-	@./scripts/10-deploy-vm.sh
+k2-gateway: k2-cluster ## Install MetalLB and Envoy Gateway on k2
+	@./scripts/install-metallb.sh k2 220 230
+	@./scripts/install-envoy-gw.sh k2
+	@./scripts/k2/gateway/apply-gateway.sh
+
+kubevirt: k2-cluster ## Install KubeVirt and CDI on k2
+	@echo "Installing KubeVirt on k2..."
+	@./scripts/k2/kubevirt/install-kubevirt.sh
+
+kyverno: k2-cluster ## Install Kyverno on k2
+	@echo "Installing Kyverno on k2..."
+	@./scripts/k2/kyverno/install-kyverno.sh
+
+k2-spire: k2-cluster k2-gateway cert-manager-k2 ## Install SPIRE on k2 (with cert-manager TLS for federation)
+	@echo "Installing SPIRE on k2..."
+	@./scripts/k2/spire/deploy-spire.sh
+
+nginx: k2-cluster k2-spire configure-dns exchange-service ## Deploy demo nginx on k2
+	@echo "Deploying demo nginx on k2..."
+	@./scripts/k2/nginx/deploy-nginx.sh
+
+metadata-service: k2-cluster k2-spire configure-dns exchange-service ## Deploy SPIFFE metadata service on k2
+	@echo "Deploying metadata service on k2..."
+	@./scripts/k2/metadata/deploy-metadata.sh
+
+vm: k2-cluster k2-spire kubevirt kyverno metadata-service ## Deploy Ubuntu VM on k2
+	@echo "Deploying Ubuntu VM on k2..."
+	@./scripts/k2/vm/deploy-vm.sh

@@ -1,0 +1,16 @@
+# TLSRoute for SPIRE bundle endpoint (for federation)
+# TLS passthrough - SPIRE serves cert with gateway.k2.sjc-1.k8s2-control.nvidia.com SAN via cert-manager
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: TLSRoute
+metadata:
+  name: spire-bundle-route
+  namespace: spire-system
+spec:
+  parentRefs:
+    - name: k2-gateway
+      namespace: envoy-gateway-system
+      sectionName: spire-bundle
+  rules:
+    - backendRefs:
+        - name: spire-server
+          port: 8443

@@ -1,0 +1,25 @@
+# Gateway for k1 - exposes OpenBao and Exchange services
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: k1-gateway
+  namespace: envoy-gateway-system
+spec:
+  gatewayClassName: eg
+  listeners:
+    - name: openbao
+      protocol: HTTP
+      port: 8200
+      allowedRoutes:
+        kinds:
+          - kind: HTTPRoute
+        namespaces:
+          from: All
+    - name: exchange-service
+      protocol: HTTP
+      port: 8080
+      allowedRoutes:
+        kinds:
+          - kind: HTTPRoute
+        namespaces:
+          from: All
