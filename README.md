@@ -15,47 +15,96 @@ Docker, kubectl, Kind, Helm, OpenBao CLI (`bao`), virtctl, jq
 ## Architecture
 
 ```plantuml
-@startuml
+@startuml Multi-Cluster Architecture
 
-package "k1 (sjc-1.k8s2-control.nvidia.com)" {
-  [SPIRE Server] as SPIRE1
-  [OpenBao] as Bao
-  [Exchange Service] as Exchange
-  [Envoy Gateway] as GW1
+skinparam packageStyle rectangle
+
+package "k1 Cluster" as K1 {
+  package "spire-server namespace" {
+    [SPIRE Server] as SPIRE1
+  }
+  
+  package "bao namespace" {
+    [OpenBao] as Bao
+  }
+  
+  package "default namespace" {
+    [Exchange Service] as Exchange
+  }
+  
+  package "envoy-gateway-system namespace" {
+    [Envoy Gateway] as GW1
+  }
 }
 
-package "k2 (k2.sjc-1.k8s2-control.nvidia.com)" {
-  [SPIRE Server] as SPIRE2
-  [Demo Nginx] as Nginx
-  [Metadata Service] as Metadata
-  [Ubuntu VM] as VM
-  [Envoy Gateway] as GW2
+package "k2 Cluster" as K2 {
+  package "spire-server namespace" as K2Spire {
+    [SPIRE Server] as SPIRE2
+  }
+  
+  package "Node" as K2Node {
+    [SPIRE Agent] as SpireAgent
+    
+    package "VMI Pod" as VMIPod {
+      [Ubuntu VM] as VM
+      [socat Sidecar] as Socat
+      [SPIRE CSI Socket] as SpireCSI
+      [Bridge Socket\n(Metadata Bridge CSI)] as BridgeSocket
+    }
+    
+    [Demo Nginx\n+ JWT Sidecar] as Nginx
+    [Metadata Service\n(DaemonSet)] as Metadata
+  }
+  
+  package "envoy-gateway-system namespace" as K2GW {
+    [Envoy Gateway] as GW2
+  }
 }
 
-SPIRE1 --> GW2 : Fetch bundle\n(federation)
-Nginx --> GW1 : Exchange JWT
-Nginx --> GW1 : Authenticate to Bao
-VM --> Metadata : Fetch JWT
-Metadata --> GW1 : Exchange JWT
+' Federation: k1 SPIRE fetches k2's bundle
+SPIRE1 -[#blue]-> GW2 : 1. Fetch SPIRE bundle\n(federation)
+GW2 -[#blue]-> SPIRE2
 
-note bottom of GW1 : gateway.sjc-1.k8s2-control.nvidia.com
-note bottom of GW2 : gateway.k2.sjc-1.k8s2-control.nvidia.com
+' Pod JWT Flow
+Nginx -[#green]-> SpireAgent : 2a. Fetch JWT SVID\n(Workload API)
+Nginx -[#green]-> GW1 : 2b. Exchange JWT
+GW1 -[#green]-> Exchange
+Nginx -[#green]-> GW1 : 2c. Authenticate
+GW1 -[#green]-> Bao
+
+' VM JWT Flow
+VM -[#orange]-> Metadata : 3a. POST /v1/metadata/identity
+Metadata -[#orange]-> BridgeSocket : 3b. Connect to bridge
+BridgeSocket -[#orange]-> Socat : 3c. Passthrough
+Socat -[#orange]-> SpireCSI : 3d. Passthrough
+SpireCSI -[#orange]-> SpireAgent : 3e. Fetch JWT SVID
+Metadata -[#orange]-> GW1 : 3f. Exchange JWT
+GW1 -[#orange]-> Exchange
+VM -[#orange]-> GW1 : 3g. Authenticate to Bao
+GW1 -[#orange]-> Bao
+
+' SPIRE Agent to Server
+SpireAgent --> SPIRE2 : Attestation
+
+' OpenBao JWKS validation
+Bao -[#purple]--> Exchange : 4. Fetch JWKS\n(*.sjc-1.k8s2-control.nvidia.com)
+
+legend right
+  |= Color |= Flow |
+  | <#blue> | Federation |
+  | <#green> | Pod Auth |
+  | <#orange> | VM Auth |
+  | <#purple> | JWKS Validation |
+endlegend
 
 @enduml
 ```
 
-| Component | k1 | k2 |
-|-----------|:--:|:--:|
-| SPIRE Server | X | X |
-| OpenBao | X | |
-| Exchange Service | X | |
-| Envoy Gateway | X | X |
-| KubeVirt | | X |
-| Metadata Service | | X |
-
-**Trust Domains:**
+**SPIRE Trust Domains:**
 - k1: `sjc-1.k8s2-control.nvidia.com`
 - k2: `k2.sjc-1.k8s2-control.nvidia.com`
+
+**Exchange Service Trust Domains (per-tenant):** `{tenant}.sjc-1.k8s2-control.nvidia.com`
 
 **Gateway DNS:**
 - k1: `gateway.sjc-1.k8s2-control.nvidia.com` (OpenBao :8200, Exchange :8080)
