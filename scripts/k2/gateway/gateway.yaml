@@ -1,0 +1,19 @@
+# Gateway for k2 - exposes SPIRE bundle endpoint for federation
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: k2-gateway
+  namespace: envoy-gateway-system
+spec:
+  gatewayClassName: eg
+  listeners:
+    - name: spire-bundle
+      protocol: TLS
+      port: 8443
+      tls:
+        mode: Passthrough
+      allowedRoutes:
+        kinds:
+          - kind: TLSRoute
+        namespaces:
+          from: All

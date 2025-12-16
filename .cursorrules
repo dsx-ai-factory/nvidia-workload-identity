@@ -2,7 +2,10 @@
 
 ## Project Overview
 This project demonstrates SPIFFE JWT authentication with OpenBao's CEL (Common Expression Language) enabled JWT auth method. It includes:
-- Kind cluster setup with SPIRE server/agent
+- Multi-cluster Kind setup: k1 (primary) and k2 (secondary)
+- SPIFFE Federation: k1 accepts k2's SVIDs via bundle endpoint
+- k1: SPIRE server, OpenBao, Exchange service, Envoy Gateway
+- k2: Independent SPIRE server (exposes bundle endpoint), KubeVirt, workloads
 - SPIFFE workload identity management via ClusterSPIFFEID CRDs
 - OpenBao deployment with CEL-based dynamic policy assignment
 - Go sidecar for JWT token fetching and refresh
@@ -20,6 +23,14 @@ This project demonstrates SPIFFE JWT authentication with OpenBao's CEL (Common E
 - Components from path: product_name, resource_type, resource_id
 - JWT issuer: `oidc-discovery.sjc-1.k8s2-control.nvidia.com`
 
+### Multi-Cluster Architecture
+- k1 (primary): SPIRE server, OpenBao, Exchange service, Envoy Gateway with MetalLB
+- k2 (secondary): SPIRE server (independent), KubeVirt, Kyverno, workloads (nginx, VMs), Envoy Gateway with MetalLB
+- Cross-cluster communication via Envoy Gateway with Kubernetes Gateway API
+- Only k2's SPIRE bundle endpoint is exposed externally (for federation)
+- OVN-Kubernetes CNI required in k2 for UDN support
+- Makefile supports parallel execution (`make -j`) with proper dependencies
+
 ### OpenBao CEL Integration
 - Use JWT CEL authentication (`/v1/auth/jwt/cel/login`), not static JWT auth
 - CEL program parses SPIFFE ID components for dynamic policy assignment
@@ -32,12 +43,13 @@ This project demonstrates SPIFFE JWT authentication with OpenBao's CEL (Common E
 
 ### File Organization
 - **NEVER embed files in scripts** - always reference external files on disk
-- Use `config/` directory for all configuration files
-- Use `config/policies/` subdirectory for OpenBao policy files
-- Use `scripts/` directory for numbered step scripts
-- Policy files: Use separate `.hcl` files for each OpenBao policy
+- Cluster-specific scripts: `scripts/k1/{cluster,gateway,spire,bao,exchange}/` and `scripts/k2/{cluster,gateway,spire,kubevirt,kyverno,metadata,nginx,vm}/`
+- Shared scripts at top level: `scripts/install-metallb.sh`, `scripts/install-envoy-gw.sh` (parameterized by cluster name)
+- Keep related config files alongside their deploy scripts (e.g., `scripts/k1/spire/spire-values.yaml`)
+- Policy files: Use separate `.hcl` files for each OpenBao policy in `scripts/k1/bao/policies/`
 - Template files: Use `.tmpl` extension only for files with placeholder values that require sed/envsubst processing
 - For Helm/kubectl configurations with dynamic values, prefer command-line overrides (e.g., `--set key=value`) over templating
+- Each component manages its own Gateway API routes (e.g., `scripts/k1/bao/bao-route.yaml`)
 
 ### Script Requirements
 - **All scripts must be repeatable and idempotent**
@@ -52,15 +64,23 @@ This project demonstrates SPIFFE JWT authentication with OpenBao's CEL (Common E
 - Go applications: Use multi-stage builds with minimal runtime images
 - Include resource limits and requests for all containers
 - KubeVirt VMs: Use containerDisk volumes with `imagePullPolicy: IfNotPresent` for image caching
+- **Image preloading**: Extract images dynamically from helm charts/manifests, never hardcode in arrays
+- Define workload images as variables at top of scripts (e.g., `NGINX_IMAGE="nginx:alpine"`)
+- Image preloads must not fail silently - no `|| true` on kind-load-image.sh calls
 
 ### Kubernetes Patterns
 - Use Helm charts with values files instead of raw YAML
 - Configure via `values.yaml` files, use `--set` for dynamic values only
-- Use `kubectl wait` with timeouts instead of sleep loops
+- Use `kubectl rollout status` for Deployments, StatefulSets, and DaemonSets (avoids race conditions)
+- Use `kubectl wait` for Pods and other resources, with timeouts instead of sleep loops
 
 ### SPIRE Configuration
-- Use official SPIRE Helm charts (`spiffe/spire`) 
-- Configure via `controllerManager.identities.clusterSPIFFEIDs.default.spiffeIDTemplate`
+- Use official SPIRE Helm charts (`spiffe/spire`)
+- k1 and k2 run independent SPIRE servers with different trust domains
+- k1 trust domain: `sjc-1.k8s2-control.nvidia.com`, k2 trust domain: `sjc-2.k8s2-control.nvidia.com`
+- SPIFFE Federation: k1 accepts k2's SVIDs via `clusterFederatedTrustDomains`
+- k2 exposes bundle endpoint via Envoy Gateway (port 8443) for federation
+- k1 does NOT need SPIRE ingress - only k2 bundle endpoint crosses clusters
 - Enable SPIFFE OIDC Discovery Provider for JWT validation
 - Use CSI driver for workload token access, not hostPath mounts
 
@@ -137,16 +157,58 @@ if ! command; then
 fi
 ```
 
+### Helm Repository Management
+```bash
+# Add Helm repository conditionally
+if ! helm repo list | grep -q "repo-name"; then
+    helm repo add repo-name https://repo-url/
+    helm repo update >/dev/null
+fi
+```
+
 ### Kubernetes Resource Waiting
 ```bash
+# For Deployments and DaemonSets - use rollout status (requires RollingUpdate strategy)
+kubectl rollout status deployment/deployment-name --timeout=60s
+kubectl rollout status daemonset/daemonset-name --timeout=60s
+
+# For StatefulSets - use rollout status only if using RollingUpdate strategy
+# Otherwise, use kubectl wait for pods
+kubectl rollout status statefulset/statefulset-name --timeout=60s  # Only if RollingUpdate
+kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=app-name --timeout=60s  # Fallback
+
+# For Pods and other resources - use kubectl wait
 kubectl wait --for=condition=Ready pod/pod-name --timeout=60s
 ```
 
 ### Port Forward with Cleanup
+Use a script-level variable and EXIT trap to ensure cleanup on any exit (error, signal, or normal):
 ```bash
-kubectl port-forward svc/service 8200:8200 &
-local pf_pid=$!
-trap "kill $pf_pid 2>/dev/null || true" EXIT
+# At script level (after sourcing common.sh)
+PF_PID=""
+
+cleanup_port_forward() {
+    if [[ -n "$PF_PID" ]]; then
+        kill "$PF_PID" 2>/dev/null || true
+        PF_PID=""
+    fi
+}
+
+# In functions that use port-forward
+some_function() {
+    kubectl port-forward svc/service 8200:8200 --context "${CONTEXT}" &
+    PF_PID=$!
+    sleep 3
+    
+    # ... do work ...
+    
+    cleanup_port_forward  # Explicit cleanup on success
+}
+
+# At end of script (before main)
+trap 'cleanup_port_forward' EXIT
+trap 'log_error "Script interrupted"; exit 1' INT TERM
+main "$@"
 ```
 
 ## Anti-Patterns to Avoid
@@ -159,6 +221,9 @@ trap "kill $pf_pid 2>/dev/null || true" EXIT
 - Creating files without validating they don't exist
 - Using `latest` tags in production configurations
 - Skipping validation steps that could fail silently
+- Hardcoding image names/tags in arrays - extract dynamically or use variables
+- Duplicating install scripts for same components - use shared parameterized scripts
+- Exposing unnecessary ingress (e.g., k1 SPIRE doesn't need ingress)
 
 ## When Making Changes
 1. Always run full end-to-end tests after modifications
@@ -167,6 +232,7 @@ trap "kill $pf_pid 2>/dev/null || true" EXIT
 4. Add appropriate error handling and logging
 5. Check that configuration changes are applied via scripts, not manually
 6. Only manually query cluster state for debugging and validation. Do not make changes to cluster state and then continue without updating the deployment scripts. Everything must be repeatable.
+7. Prefer make -j to make for faster deployments unless debugging something that requires serial logging output.
 
 ## More Rules
 - Keep documentation concise. It should be easy to skim and get all information needed. Do not add unneeded info.
@@ -176,6 +242,8 @@ trap "kill $pf_pid 2>/dev/null || true" EXIT
 - ALWAYS update .cursorrules immediately when receiving general directives - do not forget this step.
 - Prefer to keep temporary data in memory rather than as temp files. Temp files can leave leftovers if the scripts exit with error.
 - Batch multiple tool calls together when possible. Chain commands with `&&` to reduce back-and-forth. Read multiple files in parallel when needed.
+- **PREFER TOOL CALLS OVER SHELL COMMANDS**: Use the `grep` tool call instead of `grep` in shell, use `read_file` instead of `cat`, use file editing tools instead of `sed`. Only use shell commands when no appropriate tool exists or when executing actual deployment/installation operations.
+- Use project relative paths. Files inside the project are blocked from being read with absolute paths.
 
 ## File Movement and Reference Validation
 - When moving, renaming, or deleting files, ALWAYS validate that all references are updated:

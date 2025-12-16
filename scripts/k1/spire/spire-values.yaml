@@ -1,0 +1,52 @@
+# SPIRE Helm Values for k1 (primary cluster)
+# Based on working configuration with federation to accept k2 SVIDs
+
+global:
+  spire:
+    trustDomain: "sjc-1.k8s2-control.nvidia.com"
+    clusterName: "k1"
+    jwtIssuer: "spiffe://sjc-1.k8s2-control.nvidia.com"
+    caSubject:
+      country: "US"
+      organization: "SPIFFE"
+      commonName: "SPIRE Server CA"
+
+spire-server:
+  # Mount k2's CA for federation bundle endpoint TLS validation
+  extraVolumes:
+    - name: k2-federation-ca
+      secret:
+        secretName: k2-federation-ca
+  extraVolumeMounts:
+    - name: k2-federation-ca
+      mountPath: /etc/ssl/certs/k2-federation-ca.crt
+      subPath: ca.crt
+      readOnly: true
+  extraEnv:
+    - name: SSL_CERT_FILE
+      value: /etc/ssl/certs/k2-federation-ca.crt
+
+  controllerManager:
+    identities:
+      clusterSPIFFEIDs:
+        default:
+          spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/{{ if index .PodMeta.Labels \"spiffe.nvidia.com/domain\" }}domain/{{ index .PodMeta.Labels \"spiffe.nvidia.com/domain\" }}/{{ end }}{{ .PodMeta.Namespace }}/pod/{{ .PodMeta.UID }}"
+          federatesWith:
+            - "k2.sjc-1.k8s2-control.nvidia.com"
+      clusterFederatedTrustDomains:
+        k2:
+          bundleEndpointURL: "https://gateway.k2.sjc-1.k8s2-control.nvidia.com:8443"
+          bundleEndpointProfile:
+            type: "https_web"
+          trustDomain: "k2.sjc-1.k8s2-control.nvidia.com"
+
+  federation:
+    enabled: true
+    bundleEndpoint:
+      # k1 doesn't need to expose its bundle (one-way federation)
+      enabled: false
+
+spiffe-oidc-discovery-provider:
+  tls:
+    spire:
+      enabled: false

@@ -1,0 +1,72 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: VM_NAME_PLACEHOLDER
+  labels:
+    app: demo-vm
+    kubevirt.io/vm: VM_NAME_PLACEHOLDER
+    tenant: TENANT_PLACEHOLDER
+spec:
+  runStrategy: Always
+  template:
+    metadata:
+      labels:
+        kubevirt.io/domain: VM_NAME_PLACEHOLDER
+        app: demo-vm
+        tenant: TENANT_PLACEHOLDER
+        network: tenant-TENANT_PLACEHOLDER-network
+        spiffe.nvidia.com/domain: tenant1
+      annotations:
+        spiffe.nvidia.com/inject-workload-api-proxy: "true"
+    spec:
+      domain:
+        cpu:
+          cores: 2
+        devices:
+          disks:
+          - disk:
+              bus: virtio
+            name: rootdisk
+          - disk:
+              bus: virtio
+            name: cloudinit
+          interfaces:
+          - bridge: {}
+            name: tenant-network
+        features:
+          acpi:
+            enabled: true
+        resources:
+          requests:
+            memory: 2Gi
+          limits:
+            memory: 2Gi
+      networks:
+      - name: tenant-network
+        multus:
+          networkName: tenant-TENANT_PLACEHOLDER-network
+      volumes:
+      - containerDisk:
+          image: quay.io/containerdisks/ubuntu:24.04
+          imagePullPolicy: IfNotPresent
+        name: rootdisk
+      - cloudInitNoCloud:
+          userData: |
+            #cloud-config
+            users:
+              - name: ubuntu
+                sudo: ALL=(ALL) NOPASSWD:ALL
+                lock_passwd: false
+                plain_text_passwd: ubuntu
+                shell: /bin/bash
+            package_update: true
+            packages:
+              - curl
+              - wget
+              - vim
+              - htop
+            runcmd:
+              - systemctl enable ssh
+              - echo "VM ready!" > /var/log/vm-ready.log
+        name: cloudinit
+

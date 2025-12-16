@@ -83,20 +83,19 @@ func parseTargetDomain(path string) (subdomain string, remainingPath string, ok 
 }
 
 // transformSpiffeID transforms a SPIFFE ID by extracting the subdomain from the path
-// and prepending it to the original trust domain.
-// Input: spiffe://original.domain/domain/subdomain/rest/of/path
-// Output: spiffe://subdomain.original.domain/rest/of/path
-func transformSpiffeID(originalID spiffeid.ID) (spiffeid.ID, error) {
-	originalDomain := originalID.TrustDomain().Name()
+// and prepending it to the base trust domain (replacing the cluster prefix).
+// Input: spiffe://cluster.base.domain/domain/tenant-domain/rest/of/path
+// Output: spiffe://tenant-domain.base.domain/rest/of/path
+func transformSpiffeID(originalID spiffeid.ID, baseDomain string) (spiffeid.ID, error) {
 	originalPath := originalID.Path()
 
-	subdomain, remainingPath, ok := parseTargetDomain(originalPath)
+	tenantDomain, remainingPath, ok := parseTargetDomain(originalPath)
 	if !ok {
-		return spiffeid.ID{}, fmt.Errorf("SPIFFE ID path does not contain /domain/{subdomain}/: %s", originalPath)
+		return spiffeid.ID{}, fmt.Errorf("SPIFFE ID path does not contain /domain/{tenant-domain}/: %s", originalPath)
 	}
 
-	// Construct new trust domain: {subdomain}.{original-domain}
-	newDomain := subdomain + "." + originalDomain
+	// Construct new trust domain: {tenant-domain}.{base-domain}
+	newDomain := tenantDomain + "." + baseDomain
 
 	targetTD, err := spiffeid.TrustDomainFromString(newDomain)
 	if err != nil {
@@ -166,6 +165,8 @@ func extractAudience(token string) ([]string, error) {
 // handleExchange handles POST requests to /v1/exchange.
 // Target domain is extracted from the SPIFFE ID path pattern /domain/{targetDomain}/...
 func (s *ExchangeServer) handleExchange(w http.ResponseWriter, r *http.Request) {
+	slog.Info("Received exchange request", "method", r.Method, "path", r.URL.Path, "remote_addr", r.RemoteAddr)
+
 	body := http.MaxBytesReader(w, r.Body, 1024*1024)
 	defer body.Close()
 
@@ -207,8 +208,8 @@ func (s *ExchangeServer) handleExchange(w http.ResponseWriter, r *http.Request) 
 
 	slog.Info("JWT validated successfully", "original_spiffe_id", validatedSVID.ID.String())
 
-	// Transform the SPIFFE ID (target domain is parsed from the path)
-	newID, err := transformSpiffeID(validatedSVID.ID)
+	// Transform the SPIFFE ID (target domain is parsed from the path, base domain replaces cluster prefix)
+	newID, err := transformSpiffeID(validatedSVID.ID, s.baseDomain)
 	if err != nil {
 		slog.Warn("Failed to transform SPIFFE ID", "error", err)
 		http.Error(w, fmt.Sprintf("Failed to transform SPIFFE ID: %v", err), http.StatusBadRequest)
@@ -242,6 +243,8 @@ func (s *ExchangeServer) handleExchange(w http.ResponseWriter, r *http.Request) 
 // handleJWKS handles GET requests to /.well-known/jwks.json.
 // Tenant prefix is extracted from Host header and combined with base domain.
 func (s *ExchangeServer) handleJWKS(w http.ResponseWriter, r *http.Request) {
+	slog.Info("Received JWKS request", "method", r.Method, "path", r.URL.Path, "host", r.Host, "remote_addr", r.RemoteAddr)
+
 	tenantPrefix := extractTenantPrefix(r.Host)
 	if tenantPrefix == "" {
 		http.Error(w, "Host header required", http.StatusBadRequest)

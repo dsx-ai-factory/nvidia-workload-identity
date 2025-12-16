@@ -176,6 +176,7 @@ func (s *MetadataServer) exchangeJWT(ctx context.Context, token string) (*Exchan
 	}
 	req.Header.Set("Content-Type", "application/json")
 
+	slog.Info("Sending exchange request", "exchange_service_url", s.exchangeServiceURL)
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to call exchange service: %w", err)
