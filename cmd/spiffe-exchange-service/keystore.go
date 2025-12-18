@@ -27,8 +27,12 @@ type KeyGenerator interface {
 // This allows swapping implementations (e.g., in-memory, Kubernetes secrets, HSM).
 type KeyStore interface {
 	// GetOrCreateKey returns the signer, key ID, and algorithm for a trust domain,
-	// creating a new key pair if one doesn't exist.
+	// creating a new key pair if one doesn't exist. Used for signing.
 	GetOrCreateKey(trustDomain string) (crypto.Signer, KeyID, jose.SignatureAlgorithm, error)
+
+	// GetKeys returns all keys for a trust domain. Used for the JWKS endpoint.
+	// Creates a key if none exist for the domain.
+	GetKeys(trustDomain string) ([]DomainKey, error)
 }
 
 // DomainKey holds a key pair, its ID, and algorithm for a trust domain.
@@ -101,6 +105,21 @@ func (s *InMemoryKeyStore) GetOrCreateKey(trustDomain string) (crypto.Signer, Ke
 	}
 
 	return signer, kid, alg, nil
+}
+
+// GetKeys returns all keys for a trust domain. Creates a key if none exist.
+func (s *InMemoryKeyStore) GetKeys(trustDomain string) ([]DomainKey, error) {
+	// Ensure a key exists
+	_, _, _, err := s.GetOrCreateKey(trustDomain)
+	if err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	dk := s.keys[trustDomain]
+	return []DomainKey{*dk}, nil
 }
 
 // ES256KeyGenerator generates ECDSA P-256 keys for ES256 signing.

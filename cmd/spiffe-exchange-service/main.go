@@ -252,21 +252,22 @@ func (s *ExchangeServer) handleJWKS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	trustDomain := tenantPrefix + "." + s.baseDomain
-	signer, keyID, alg, err := s.keyStore.GetOrCreateKey(trustDomain)
+	keys, err := s.keyStore.GetKeys(trustDomain)
 	if err != nil {
-		slog.Error("Failed to get key for domain", "domain", trustDomain, "error", err)
+		slog.Error("Failed to get keys for domain", "domain", trustDomain, "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	jwk := jose.JSONWebKey{
-		Key:       signer.Public(),
-		KeyID:     keyID.String(),
-		Algorithm: string(alg),
-		Use:       "sig",
+	jwks := jose.JSONWebKeySet{Keys: make([]jose.JSONWebKey, len(keys))}
+	for i, dk := range keys {
+		jwks.Keys[i] = jose.JSONWebKey{
+			Key:       dk.Signer.Public(),
+			KeyID:     dk.KeyID.String(),
+			Algorithm: string(dk.Algorithm),
+			Use:       "sig",
+		}
 	}
-
-	jwks := jose.JSONWebKeySet{Keys: []jose.JSONWebKey{jwk}}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(jwks); err != nil {
