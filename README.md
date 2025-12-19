@@ -149,6 +149,103 @@ Meta --> App : {"token": "...", "spiffe_id": "..."}
 
 **Metadata Bridge CSI Driver**: Creates per-pod directories at `/run/metadata/metadata-bridge-sockets/<pod-uid>/` for socket bridging between VMI pod and metadata service.
 
+## VM Metadata Sidecar Architecture
+
+Metadata sidecar container co-located with the VM in the same pod. Provides SPIFFE JWTs to VMs via the link-local metadata address.
+
+### Architecture Diagram
+
+```plantuml
+@startuml VM Metadata Sidecar
+
+skinparam packageStyle rectangle
+
+package "k1 Cluster" as K1 {
+  [SPIRE Server] as SPIRE1
+  [OpenBao] as Bao
+  [Exchange Service] as Exchange
+  [Envoy Gateway] as GW1
+}
+
+package "k2 Cluster" as K2 {
+  [SPIRE Server] as SPIRE2
+  [SPIRE Agent] as SpireAgent
+  [Envoy Gateway] as GW2
+  
+  package "VMI Pod" as VMIPod {
+    [Ubuntu VM] as VM
+    [Metadata Sidecar\n169.254.169.254] as MetaSidecar
+    [SPIRE CSI Socket] as SpireCSI
+  }
+}
+
+' Federation: k1 SPIRE fetches k2's bundle
+SPIRE1 -[#blue]-> GW2 : 1. Fetch SPIRE bundle\n(federation)
+GW2 -[#blue]-> SPIRE2
+
+' VM to metadata sidecar flow
+VM -[#green]-> MetaSidecar : 1. POST /v1/metadata/identity\n(via L2 bridge route)
+MetaSidecar -[#green]-> SpireCSI : 2. FetchJWTSVID
+SpireCSI -[#green]-> SpireAgent : 3. Workload API
+SpireAgent -[#green]--> SpireCSI
+SpireCSI -[#green]--> MetaSidecar : 4. JWT SVID
+MetaSidecar -[#green]-> GW1 : 5. Exchange JWT
+GW1 -[#green]-> Exchange
+Exchange -[#green]--> GW1 : 6. Exchanged JWT
+GW1 -[#green]--> MetaSidecar
+MetaSidecar -[#green]--> VM : 7. {"token": "..."}
+
+' VM to Bao flow (authenticate)
+VM -[#orange]-> GW1 : 8. Authenticate to Bao
+GW1 -[#orange]-> Bao
+
+' SPIRE Agent to Server
+SpireAgent --> SPIRE2 : Attestation
+
+' OpenBao JWKS validation
+Bao -[#purple]--> Exchange : Fetch JWKS\n(*.{region}.{service}.nvidia.com)
+
+' Exchange validates incoming JWTs
+Exchange --> SPIRE1 : Fetch SPIFFE bundle\n(validate k2 JWTs)
+
+@enduml
+```
+
+### Sequence Diagram
+
+```plantuml
+@startuml
+participant "VM Application" as App
+participant "Metadata Sidecar\n169.254.169.254" as Meta
+participant "SPIRE Agent\n(via CSI socket)" as Agent
+participant "Envoy Gateway\n(k1)" as GW1
+participant "Exchange Service\n(k1)" as Exchange
+
+App -> Meta : POST /v1/metadata/identity
+Meta -> Agent : FetchJWTSVID\n(workload API socket)
+Agent --> Meta : JWT SVID
+Meta -> GW1 : POST /v1/exchange
+GW1 -> Exchange
+Exchange --> GW1 : Exchanged JWT
+GW1 --> Meta
+Meta --> App : {"token": "...", "spiffe_id": "..."}
+@enduml
+```
+
+### Components
+
+**Metadata Sidecar**: Container running in the VMI pod that serves the metadata API at 169.254.169.254. Routes on the KubeVirt L2 bridge direct VM traffic to the sidecar. Directly accesses the SPIRE workload API socket mounted via CSI driver.
+
+**SPIRE CSI Socket**: SPIRE agent socket mounted into the pod via CSI driver. The metadata sidecar uses this to fetch JWT SVIDs with the pod's attested SPIFFE identity.
+
+**L2 Bridge Routing**: IP routes configured on the KubeVirt pod network bridge direct traffic destined for 169.254.169.254 from the VM to the metadata sidecar container.
+
+### Security Model
+
+- **Pod Co-location**: Metadata sidecar runs in the same pod as the VM, inheriting the same SPIFFE identity
+- **Direct Socket Access**: No proxying required; sidecar directly accesses SPIRE workload API
+- **L2 Isolation**: Traffic stays within the pod's network namespace via bridge routing
+
 ### HTTP API
 
 ```bash
