@@ -1,3 +1,55 @@
+# Retry Blocked File Operations
+
+## When to Use
+- File read operation is blocked by `.cursorignore`
+- File write operation is blocked by `.cursorignore`
+- Any tool call returns "filtered out by .cursorignore" error
+
+## Instructions
+
+### 1. Auto-Retry (3 attempts)
+When a file operation fails with "filtered out by .cursorignore":
+1. Silently retry the operation up to 3 times
+2. If any retry succeeds, continue with the task
+3. If all 3 retries fail, proceed to step 2
+
+### 2. Prompt User After 3 Failures
+After 3 failed attempts:
+1. Inform the user which file was blocked
+2. Report that 3 automatic retries failed
+3. Wait for user response
+
+### 3. Handle User Response
+**If user says "try again", "retry", "continue", or similar:**
+- Retry the operation (single attempt)
+- If still blocked, wait for user response again
+
+**If user says "stop", "cancel", "skip", "abort", or similar:**
+- Abandon the blocked operation
+- Continue with other tasks if any
+
+**If user provides file content directly:**
+- Use the provided content instead of reading the file
+- Proceed with the task
+
+### 4. On Success
+- Continue with the original task
+
+## Decision Points
+
+### If blocked multiple times on same file:
+1. First 3 retries are automatic and silent
+2. After that, continue retrying as long as user says "try again"
+3. User may need time to update `.cursorignore`
+4. Only stop when user requests or operation succeeds
+
+### If multiple files are blocked:
+1. Each file gets its own 3 automatic retries
+2. Report all files that failed after their auto-retries
+3. Retry each as user permits
+
+---
+
 # SPIFFE + OpenBao CEL Project Rules
 
 ## Project Overview
@@ -83,6 +135,16 @@ This project demonstrates SPIFFE JWT authentication with OpenBao's CEL (Common E
 - k1 does NOT need SPIRE ingress - only k2 bundle endpoint crosses clusters
 - Enable SPIFFE OIDC Discovery Provider for JWT validation
 - Use CSI driver for workload token access, not hostPath mounts
+
+### TPM-based Node Attestation (PoC)
+- Use `spiffe/spire-tpm-plugin` for TPM-based node attestation instead of PSAT
+- Deploy `swtpm` as a DaemonSet to provide virtual TPM for Kind nodes
+- swtpm exposes Unix socket at `/var/run/swtpm/swtpm-sock`
+- SPIRE agent uses `TPM2TOOLS_TCTI=swtpm:path=/var/run/swtpm/swtpm-sock` env var
+- TPM CA is stored in `tpm-ca` Kubernetes Secret in spire-system namespace
+- Use `customPlugins.nodeAttestor` in Helm values for external TPM plugin
+- Plugin binaries are copied via initContainers from official plugin images
+- swtpm and TPM CA are deployed via `scripts/swtpm/deploy-swtpm.sh`
 
 ### OpenBao Configuration  
 - Use official OpenBao 2.4.0 release from quay.io/openbao/openbao:2.4.0
@@ -238,8 +300,8 @@ main "$@"
 - Keep documentation concise. It should be easy to skim and get all information needed. Do not add unneeded info.
 - Avoid marketing language in documentation (e.g., "Zero-Trust Architecture", "Production-Ready"). Keep it factual and technical.
 - No emojis, excessive exclamation marks, or overly enthusiastic language in code, documentation, scripts, or output messages. Keep tone professional and neutral.
-- Update this cursorrules file as needed when given general directives.
-- ALWAYS update .cursorrules immediately when receiving general directives - do not forget this step.
+- Update AGENTS.md as needed when given general directives.
+- ALWAYS update AGENTS.md immediately when receiving general directives - do not forget this step.
 - Prefer to keep temporary data in memory rather than as temp files. Temp files can leave leftovers if the scripts exit with error.
 - Batch multiple tool calls together when possible. Chain commands with `&&` to reduce back-and-forth. Read multiple files in parallel when needed.
 - **PREFER TOOL CALLS OVER SHELL COMMANDS**: Use the `grep` tool call instead of `grep` in shell, use `read_file` instead of `cat`, use file editing tools instead of `sed`. Only use shell commands when no appropriate tool exists or when executing actual deployment/installation operations.
@@ -254,3 +316,4 @@ main "$@"
   5. Update import statements, include paths, and relative references
   6. Test that the changes work end-to-end before considering the task complete
 - This validation is MANDATORY and must be done systematically, not assumed
+
