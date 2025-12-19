@@ -4,15 +4,19 @@
     "variables": [
       {
         "name": "is_spiffe",
-        "expression": "claims.sub.matches(r'^spiffe://[^/]+\\.[^/]+\\.[^/]+/[^/]+/[^/]+/[^/]+$')"
+        "expression": "claims.sub.matches(r'^spiffe://[^./]+\\.[^./]+\\.[^./]+\\.[^/]+/[^/]+/[^/]+$')"
       },
       {
-        "name": "spiffe_parts",
-        "expression": "is_spiffe ? claims.sub.substring(9).split('/') : []"
+        "name": "uri_parts",
+        "expression": "is_spiffe ? claims.sub.split('://') : []"
+      },
+      {
+        "name": "authority_path",
+        "expression": "size(uri_parts) > 1 ? uri_parts[1].split('/') : []"
       },
       {
         "name": "trust_domain",
-        "expression": "is_spiffe && size(spiffe_parts) > 0 ? spiffe_parts[0] : ''"
+        "expression": "size(authority_path) > 0 ? authority_path[0] : ''"
       },
       {
         "name": "domain_parts",
@@ -20,31 +24,31 @@
       },
       {
         "name": "tenant_id",
-        "expression": "size(domain_parts) >= 1 ? domain_parts[0] : ''"
+        "expression": "size(domain_parts) > 0 ? domain_parts[0] : ''"
       },
       {
         "name": "region",
-        "expression": "size(domain_parts) >= 2 ? domain_parts[1] : ''"
+        "expression": "size(domain_parts) > 1 ? domain_parts[1] : ''"
       },
       {
-        "name": "product",
-        "expression": "size(spiffe_parts) >= 2 ? spiffe_parts[1] : ''"
+        "name": "service",
+        "expression": "size(domain_parts) > 2 ? domain_parts[2] : ''"
       },
       {
         "name": "resource_type",
-        "expression": "size(spiffe_parts) >= 3 ? spiffe_parts[2] : ''"
+        "expression": "size(authority_path) > 1 ? authority_path[1] : ''"
       },
       {
         "name": "resource_id",
-        "expression": "size(spiffe_parts) >= 4 ? spiffe_parts[3] : ''"
+        "expression": "size(authority_path) > 2 ? authority_path[2] : ''"
       }
     ],
-    "expression": "is_spiffe ? pb.Auth{policies: ['spiffe-authenticated', 'region-' + region, 'tenant-' + tenant_id, 'product-' + product, 'resource-type-' + resource_type]} : false"
+    "expression": "is_spiffe ? pb.Auth{policies: ['spiffe-authenticated', 'region-' + region, 'tenant-' + tenant_id, 'service-' + service, 'resource-type-' + resource_type]} : false"
   },
   "expiration_leeway": 150,
   "not_before_leeway": 150,
   "clock_skew_leeway": 60,
   "bound_audiences": [
-    "spiffe://sjc-1.k8s2-control.nvidia.com"
+    "spiffe://sjc-1.nvidia.com"
   ]
 }

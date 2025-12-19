@@ -47,26 +47,41 @@ deploy_exchange() {
 configure_tenant_dns() {
     log_info "Configuring CoreDNS wildcard rewrite for tenant domains..."
     
-    local base_domain="sjc-1.k8s2-control.nvidia.com"
+    local region="sjc-1"
+    local base_domain="nvidia.com"
     local service_fqdn="spiffe-exchange-service.${NAMESPACE}.svc.cluster.local"
+    
+    # Products that need DNS entries (wildcard on tenant)
+    local services=("internal" "vmaas")
     
     local corefile
     corefile=$(kubectl get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}' --context "${CONTEXT}")
     
-    local escaped_domain="${base_domain//./\\.}"
-    local rewrite_rule="rewrite name regex .*\\.${escaped_domain} ${service_fqdn}"
+    local changes_needed=false
+    local rules=""
     
-    # Check if already configured
-    if echo "$corefile" | grep -qF "rewrite name regex .*\\.${escaped_domain}"; then
-        log_info "Wildcard DNS rewrite already configured for *.${base_domain}"
+    for service in "${services[@]}"; do
+        local service_domain="${region}.${service}.${base_domain}"
+        local escaped_domain="${service_domain//./\\.}"
+        local rewrite_rule="rewrite name regex .*\\.${escaped_domain} ${service_fqdn}"
+        
+        if ! echo "$corefile" | grep -qF "rewrite name regex .*\\.${escaped_domain}"; then
+            log_info "Adding wildcard DNS rewrite: *.${service_domain} -> ${service_fqdn}"
+            rules="${rules}    ${rewrite_rule}\n"
+            changes_needed=true
+        else
+            log_info "Wildcard DNS rewrite already configured for *.${service_domain}"
+        fi
+    done
+    
+    if [[ "$changes_needed" != "true" ]]; then
+        log_info "All service DNS rewrites already configured"
         return 0
     fi
     
-    log_info "Adding wildcard DNS rewrite: *.${base_domain} -> ${service_fqdn}"
-    
-    # Insert rewrite rule before "kubernetes cluster.local"
+    # Insert rewrite rules before "kubernetes cluster.local"
     local new_corefile
-    new_corefile=$(echo "$corefile" | awk -v rule="    ${rewrite_rule}" '/kubernetes cluster.local/{print rule}1')
+    new_corefile=$(echo "$corefile" | awk -v rules="$rules" '/kubernetes cluster.local/{printf "%s", rules}1')
     
     kubectl create configmap coredns -n kube-system \
         --from-literal=Corefile="$new_corefile" \
@@ -76,7 +91,7 @@ configure_tenant_dns() {
     kubectl rollout restart deployment coredns -n kube-system --context "${CONTEXT}"
     kubectl rollout status deployment coredns -n kube-system --timeout=60s --context "${CONTEXT}"
     
-    log_success "CoreDNS configured: *.${base_domain} -> ${service_fqdn}"
+    log_success "CoreDNS configured for service domains"
 }
 
 apply_route() {

@@ -10,7 +10,7 @@ CONTEXT="kind-${CLUSTER_NAME}"
 NAMESPACE="default"
 VM_NAME="${VM_NAME:-demo-ubuntu-vm}"
 VM_TENANT="${VM_TENANT:-default}"
-TEST_AUDIENCE="${TEST_AUDIENCE:-spiffe://tenant1.sjc-1.k8s2-control.nvidia.com}"
+TEST_AUDIENCE="${TEST_AUDIENCE:-spiffe://tenant1.sjc-1.vmaas.nvidia.com}"
 
 source "${PROJECT_ROOT}/scripts/common.sh"
 

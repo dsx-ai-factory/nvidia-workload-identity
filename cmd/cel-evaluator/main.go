@@ -37,7 +37,7 @@ func celEvalProgram(program celhelper.CelProgram, operation logical.Operation, j
 	// Initialize the evaluation context for CEL expressions with the raw request data.
 	// The "claims" key allows CEL expressions to access and evaluate against JWT claims.
 	// Additional variables and evaluated results will be added dynamically during processing.
-	evaluationData := map[string]interface{}{
+	evaluationData := map[string]any{
 		"claims":    jwtClaims,
 		"now":       time.Now(),
 		"operation": string(operation),
@@ -144,19 +144,19 @@ func main() {
 
 	// Create sample JWT claims data for testing (matching OpenBao's format)
 	// Example 1: Pod SPIFFE ID
-	podClaims := map[string]interface{}{
-		"sub": "spiffe://tenant1.sjc-1.k8s2-control.nvidia.com/default/pod/12345678-1234-5678-9abc-123456789abc",
-		"aud": []string{"spiffe://tenant1.sjc-1.k8s2-control.nvidia.com"},
-		"iss": "spiffe://tenant1.sjc-1.k8s2-control.nvidia.com",
+	podClaims := map[string]any{
+		"sub": "spiffe://tenant1.sjc-1.internal.nvidia.com/pod/12345678-1234-5678-9abc-123456789abc",
+		"aud": []string{"spiffe://tenant1.sjc-1.internal.nvidia.com"},
+		"iss": "spiffe://tenant1.sjc-1.internal.nvidia.com",
 		"exp": 1678886400,
 		"iat": 1678882800,
 	}
 
 	// Example 2: VM SPIFFE ID
-	vmClaims := map[string]interface{}{
-		"sub": "spiffe://tenant1.sjc-1.k8s2-control.nvidia.com/vmaas/vm/87654321-4321-8765-cba9-987654321098",
-		"aud": []string{"spiffe://tenant1.sjc-1.k8s2-control.nvidia.com"},
-		"iss": "spiffe://tenant1.sjc-1.k8s2-control.nvidia.com",
+	vmClaims := map[string]any{
+		"sub": "spiffe://tenant1.sjc-1.vmaas.nvidia.com/vm/87654321-4321-8765-cba9-987654321098",
+		"aud": []string{"spiffe://tenant1.sjc-1.vmaas.nvidia.com"},
+		"iss": "spiffe://tenant1.sjc-1.vmaas.nvidia.com",
 		"exp": 1678886400,
 		"iat": 1678882800,
 	}

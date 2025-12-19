@@ -1,11 +1,10 @@
 # SPIRE Helm Values for k2 (workload cluster)
-# Based on working configuration with bundle endpoint for federation
 
 global:
   spire:
-    trustDomain: "k2.sjc-1.k8s2-control.nvidia.com"
+    trustDomain: "k2.sjc-1.nvidia.com"
     clusterName: "k2"
-    jwtIssuer: "spiffe://k2.sjc-1.k8s2-control.nvidia.com"
+    jwtIssuer: "spiffe://k2.sjc-1.nvidia.com"
     caSubject:
       country: "US"
       organization: "SPIFFE"
@@ -15,13 +14,24 @@ spire-server:
   controllerManager:
     identities:
       clusterSPIFFEIDs:
-        default:
-          spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/{{ if index .PodMeta.Labels \"spiffe.nvidia.com/domain\" }}domain/{{ index .PodMeta.Labels \"spiffe.nvidia.com/domain\" }}/{{ end }}{{ .PodMeta.Namespace }}/pod/{{ .PodMeta.UID }}"
+        pod-workloads:
+          podSelector:
+            matchExpressions:
+            - key: spiffe.nvidia.com/tenant
+              operator: Exists
+            - key: spiffe.nvidia.com/service
+              operator: Exists
+          spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/tenant/{{ index .PodMeta.Labels \"spiffe.nvidia.com/tenant\" }}/service/{{ index .PodMeta.Labels \"spiffe.nvidia.com/service\" }}/pod/{{ .PodMeta.UID }}"
         vm-workloads:
           podSelector:
             matchLabels:
               kubevirt.io: virt-launcher
-          spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/{{ if index .PodMeta.Labels \"spiffe.nvidia.com/domain\" }}domain/{{ index .PodMeta.Labels \"spiffe.nvidia.com/domain\" }}/{{ end }}vmaas/vm/{{ .PodMeta.UID }}"
+            matchExpressions:
+            - key: spiffe.nvidia.com/tenant
+              operator: Exists
+            - key: spiffe.nvidia.com/service
+              operator: Exists
+          spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/tenant/{{ index .PodMeta.Labels \"spiffe.nvidia.com/tenant\" }}/service/{{ index .PodMeta.Labels \"spiffe.nvidia.com/service\" }}/vm/{{ .PodMeta.UID }}"
 
   federation:
     enabled: true
@@ -37,7 +47,7 @@ spire-server:
           create: false
         certificate:
           dnsNames:
-            - gateway.k2.sjc-1.k8s2-control.nvidia.com
+            - gateway.k2.sjc-1.nvidia.com
           issuerRef:
             kind: ClusterIssuer
             name: ca-issuer

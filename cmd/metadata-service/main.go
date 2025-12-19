@@ -87,11 +87,11 @@ func (s *MetadataServer) findPodByIP(ctx context.Context, clientIP string) (*cor
 		if podNetworks, ok := pod.Annotations["k8s.ovn.org/pod-networks"]; ok {
 			if strings.Contains(podNetworks, clientIP) {
 				// Parse the annotation to verify it's a valid IP match
-				var networks map[string]interface{}
+				var networks map[string]any
 				if err := json.Unmarshal([]byte(podNetworks), &networks); err == nil {
 					for _, netConfig := range networks {
-						if netMap, ok := netConfig.(map[string]interface{}); ok {
-							if ipAddrs, ok := netMap["ip_addresses"].([]interface{}); ok {
+						if netMap, ok := netConfig.(map[string]any); ok {
+							if ipAddrs, ok := netMap["ip_addresses"].([]any); ok {
 								for _, ipAddr := range ipAddrs {
 									if ipStr, ok := ipAddr.(string); ok {
 										// IP addresses may be in CIDR format (e.g., "10.1.1.5/24")

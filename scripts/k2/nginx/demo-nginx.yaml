@@ -1,5 +1,5 @@
 # Demo nginx pod for k2 cluster
-# Exchange service URL points to k1 via DNS (gateway.sjc-1.k8s2-control.nvidia.com configured in CoreDNS)
+# Exchange service URL points to k1 via DNS (gateway.sjc-1.nvidia.com configured in CoreDNS)
 apiVersion: v1
 kind: Pod
 metadata:
@@ -7,7 +7,8 @@ metadata:
   namespace: default
   labels:
     app: demo-nginx
-    spiffe.nvidia.com/domain: tenant1
+    spiffe.nvidia.com/tenant: tenant1
+    spiffe.nvidia.com/service: internal
 spec:
   # Reduce ndots from default 5 to 2 to avoid slow DNS lookups.
   # With ndots:5, hostnames with <5 dots trigger search suffix expansion,
@@ -22,12 +23,12 @@ spec:
     imagePullPolicy: Never
     args:
     - "-socket=unix:///var/run/secrets/spire.io/spire-agent.sock"
-    - "-audience=spiffe://tenant1.sjc-1.k8s2-control.nvidia.com"
+    - "-audience=spiffe://tenant1.sjc-1.internal.nvidia.com"
     - "-output=/var/run/secrets/nvidia.com/spiffe/token"
     - "-retries=3"
     - "-verbose=true"
     - "-exit-after-fetch=true"
-    - "-exchange-service-url=http://gateway.sjc-1.k8s2-control.nvidia.com:8080"
+    - "-exchange-service-url=http://gateway.sjc-1.nvidia.com:8080"
     resources:
       requests:
         cpu: 50m
@@ -65,11 +66,11 @@ spec:
     imagePullPolicy: Never
     args:
     - "-socket=unix:///var/run/secrets/spire.io/spire-agent.sock"
-    - "-audience=spiffe://tenant1.sjc-1.k8s2-control.nvidia.com"
+    - "-audience=spiffe://tenant1.sjc-1.internal.nvidia.com"
     - "-output=/var/run/secrets/nvidia.com/spiffe/token"
     - "-retries=3"
     - "-verbose=true"
-    - "-exchange-service-url=http://gateway.sjc-1.k8s2-control.nvidia.com:8080"
+    - "-exchange-service-url=http://gateway.sjc-1.nvidia.com:8080"
     resources:
       requests:
         cpu: 50m

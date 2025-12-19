@@ -9,7 +9,7 @@ CLUSTER_NAME="k2"
 CONTEXT="kind-${CLUSTER_NAME}"
 NAMESPACE="default"
 POD_NAME="demo-nginx"
-K1_GATEWAY_HOST="gateway.sjc-1.k8s2-control.nvidia.com"
+K1_GATEWAY_HOST="gateway.sjc-1.nvidia.com"
 
 source "${PROJECT_ROOT}/scripts/common.sh"
 

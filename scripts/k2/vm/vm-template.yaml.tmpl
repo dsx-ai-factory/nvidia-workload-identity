@@ -15,7 +15,8 @@ spec:
         app: demo-vm
         tenant: TENANT_PLACEHOLDER
         network: tenant-TENANT_PLACEHOLDER-network
-        spiffe.nvidia.com/domain: tenant1
+        spiffe.nvidia.com/tenant: tenant1
+        spiffe.nvidia.com/service: vmaas
       annotations:
         spiffe.nvidia.com/inject-workload-api-proxy: "true"
     spec:

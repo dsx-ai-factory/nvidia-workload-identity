@@ -25,7 +25,7 @@ func listen(proto, addr string) (net.Listener, error) {
 }
 
 // logGRPC logs gRPC requests
-func logGRPC(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+func logGRPC(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 	slog.Debug("gRPC request", "method", info.FullMethod)
 	resp, err := handler(ctx, req)
 	if err != nil {

@@ -141,7 +141,7 @@ configure_spiffe_auth() {
     bao auth list | grep -q "jwt/" || bao auth enable jwt >/dev/null
     
     # Configure JWT auth with exchange service
-    local tenant_domain="tenant1.sjc-1.k8s2-control.nvidia.com"
+    local tenant_domain="tenant1.sjc-1.internal.nvidia.com"
     bao write auth/jwt/config \
         jwks_url="http://${tenant_domain}:8080/.well-known/jwks.json" \
         bound_issuer="spiffe://${tenant_domain}" >/dev/null

@@ -1,11 +1,10 @@
 # SPIRE Helm Values for k1 (primary cluster)
-# Based on working configuration with federation to accept k2 SVIDs
 
 global:
   spire:
-    trustDomain: "sjc-1.k8s2-control.nvidia.com"
+    trustDomain: "sjc-1.nvidia.com"
     clusterName: "k1"
-    jwtIssuer: "spiffe://sjc-1.k8s2-control.nvidia.com"
+    jwtIssuer: "spiffe://sjc-1.nvidia.com"
     caSubject:
       country: "US"
       organization: "SPIFFE"
@@ -29,16 +28,27 @@ spire-server:
   controllerManager:
     identities:
       clusterSPIFFEIDs:
-        default:
-          spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/{{ if index .PodMeta.Labels \"spiffe.nvidia.com/domain\" }}domain/{{ index .PodMeta.Labels \"spiffe.nvidia.com/domain\" }}/{{ end }}{{ .PodMeta.Namespace }}/pod/{{ .PodMeta.UID }}"
+        exchange-service:
+          podSelector:
+            matchLabels:
+              app: spiffe-exchange-service
+          spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/ns/{{ .PodMeta.Namespace }}/sa/{{ .PodSpec.ServiceAccountName }}"
           federatesWith:
-            - "k2.sjc-1.k8s2-control.nvidia.com"
+            - "k2.sjc-1.nvidia.com"
+        pod-workloads:
+          podSelector:
+            matchExpressions:
+            - key: spiffe.nvidia.com/tenant
+              operator: Exists
+            - key: spiffe.nvidia.com/service
+              operator: Exists
+          spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/tenant/{{ index .PodMeta.Labels \"spiffe.nvidia.com/tenant\" }}/service/{{ index .PodMeta.Labels \"spiffe.nvidia.com/service\" }}/pod/{{ .PodMeta.UID }}"
       clusterFederatedTrustDomains:
         k2:
-          bundleEndpointURL: "https://gateway.k2.sjc-1.k8s2-control.nvidia.com:8443"
+          bundleEndpointURL: "https://gateway.k2.sjc-1.nvidia.com:8443"
           bundleEndpointProfile:
             type: "https_web"
-          trustDomain: "k2.sjc-1.k8s2-control.nvidia.com"
+          trustDomain: "k2.sjc-1.nvidia.com"
 
   federation:
     enabled: true

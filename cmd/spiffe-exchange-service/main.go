@@ -36,11 +36,12 @@ type ExchangeResponse struct {
 type ExchangeServer struct {
 	keyStore   KeyStore
 	jwtSource  *workloadapi.JWTSource
+	region     string
 	baseDomain string
 }
 
 // NewExchangeServer creates a new exchange server using the SPIFFE Workload API.
-func NewExchangeServer(ctx context.Context, keyStore KeyStore, socketPath, baseDomain string) (*ExchangeServer, error) {
+func NewExchangeServer(ctx context.Context, keyStore KeyStore, socketPath, region, baseDomain string) (*ExchangeServer, error) {
 	opts := []workloadapi.JWTSourceOption{}
 	if socketPath != "" {
 		opts = append(opts, workloadapi.WithClientOptions(workloadapi.WithAddr(socketPath)))
@@ -54,6 +55,7 @@ func NewExchangeServer(ctx context.Context, keyStore KeyStore, socketPath, baseD
 	return &ExchangeServer{
 		keyStore:   keyStore,
 		jwtSource:  jwtSource,
+		region:     region,
 		baseDomain: baseDomain,
 	}, nil
 }
@@ -63,46 +65,66 @@ func (s *ExchangeServer) Close() error {
 	return s.jwtSource.Close()
 }
 
-// parseTargetDomain extracts the subdomain from a SPIFFE ID path.
-// Expected format: /domain/{subdomain}/rest/of/path
-// Returns the subdomain and remaining path, or empty string if no domain component.
-func parseTargetDomain(path string) (subdomain string, remainingPath string, ok bool) {
-	const prefix = "/domain/"
-	if !strings.HasPrefix(path, prefix) {
-		return "", "", false
-	}
-
-	rest := path[len(prefix):]
-	idx := strings.Index(rest, "/")
-	if idx == -1 {
-		// No remaining path after domain
-		return rest, "", true
-	}
-
-	return rest[:idx], rest[idx:], true
+// PathComponents holds extracted components from a SPIFFE ID path.
+type PathComponents struct {
+	Tenant       string // From /tenant/{tenant}/
+	Service      string // From /service/{service}/
+	ResourceType string // vm or pod
+	ResourceID   string // UUID
 }
 
-// transformSpiffeID transforms a SPIFFE ID by extracting the subdomain from the path
-// and prepending it to the base trust domain (replacing the cluster prefix).
-// Input: spiffe://cluster.base.domain/domain/tenant-domain/rest/of/path
-// Output: spiffe://tenant-domain.base.domain/rest/of/path
-func transformSpiffeID(originalID spiffeid.ID, baseDomain string) (spiffeid.ID, error) {
-	originalPath := originalID.Path()
-
-	tenantDomain, remainingPath, ok := parseTargetDomain(originalPath)
-	if !ok {
-		return spiffeid.ID{}, fmt.Errorf("SPIFFE ID path does not contain /domain/{tenant-domain}/: %s", originalPath)
+// parsePathComponents extracts components from a SPIFFE ID path.
+// Format: /tenant/{tenant}/service/{service}/{resource_type}/{resource_id}
+func parsePathComponents(path string) (PathComponents, error) {
+	const tenantPrefix = "/tenant/"
+	if !strings.HasPrefix(path, tenantPrefix) {
+		return PathComponents{}, fmt.Errorf("path does not contain /tenant/: %s", path)
 	}
 
-	// Construct new trust domain: {tenant-domain}.{base-domain}
-	newDomain := tenantDomain + "." + baseDomain
+	rest := path[len(tenantPrefix):]
+	parts := strings.Split(rest, "/")
+	if len(parts) < 5 {
+		return PathComponents{}, fmt.Errorf("path has insufficient components: %s", path)
+	}
+
+	if parts[1] != "service" {
+		return PathComponents{}, fmt.Errorf("path missing /service/: %s", path)
+	}
+
+	return PathComponents{
+		Tenant:       parts[0],
+		Service:      parts[2],
+		ResourceType: parts[3],
+		ResourceID:   parts[4],
+	}, nil
+}
+
+// transformSpiffeID transforms a SPIFFE ID by extracting components from the path
+// and constructing a new trust domain with the pattern:
+// {tenant}.{region}.{service}.{base-domain}
+//
+// Input:  spiffe://k2.sjc-1.nvidia.com/tenant/tenant1/service/vmaas/vm/{uuid}
+// Output: spiffe://tenant1.sjc-1.vmaas.nvidia.com/vm/{uuid}
+func transformSpiffeID(originalID spiffeid.ID, region, baseDomain string) (spiffeid.ID, error) {
+	originalPath := originalID.Path()
+
+	components, err := parsePathComponents(originalPath)
+	if err != nil {
+		return spiffeid.ID{}, err
+	}
+
+	// Construct new trust domain: {tenant}.{region}.{service}.{base-domain}
+	newDomain := components.Tenant + "." + region + "." + components.Service + "." + baseDomain
 
 	targetTD, err := spiffeid.TrustDomainFromString(newDomain)
 	if err != nil {
 		return spiffeid.ID{}, fmt.Errorf("invalid target domain: %w", err)
 	}
 
-	newID, err := spiffeid.FromPath(targetTD, remainingPath)
+	// Construct new path: /{resource_type}/{resource_id}
+	newPath := "/" + components.ResourceType + "/" + components.ResourceID
+
+	newID, err := spiffeid.FromPath(targetTD, newPath)
 	if err != nil {
 		return spiffeid.ID{}, fmt.Errorf("failed to create new SPIFFE ID: %w", err)
 	}
@@ -147,7 +169,6 @@ func (s *ExchangeServer) resignJWT(originalClaims map[string]any, newSubject spi
 }
 
 // extractAudience extracts the audience claim from a JWT without full validation.
-// This is only used to obtain the audience for subsequent validation.
 func extractAudience(token string) ([]string, error) {
 	parsedJWT, err := jwt.ParseSigned(token, []jose.SignatureAlgorithm{jose.RS256, jose.RS384, jose.RS512, jose.ES256, jose.ES384, jose.ES512})
 	if err != nil {
@@ -163,7 +184,6 @@ func extractAudience(token string) ([]string, error) {
 }
 
 // handleExchange handles POST requests to /v1/exchange.
-// Target domain is extracted from the SPIFFE ID path pattern /domain/{targetDomain}/...
 func (s *ExchangeServer) handleExchange(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Received exchange request", "method", r.Method, "path", r.URL.Path, "remote_addr", r.RemoteAddr)
 
@@ -188,9 +208,6 @@ func (s *ExchangeServer) handleExchange(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Extract audience for validation.
-	// We don't care about the audience so we'll extract what was given and pass it
-	// to the validator which insists on an audience.
 	audience, err := extractAudience(req.JWT)
 	if err != nil {
 		slog.Warn("Failed to extract audience", "error", err)
@@ -198,7 +215,6 @@ func (s *ExchangeServer) handleExchange(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Validate the JWT using go-spiffe SDK
 	validatedSVID, err := jwtsvid.ParseAndValidate(req.JWT, s.jwtSource, audience)
 	if err != nil {
 		slog.Warn("JWT validation failed", "error", err)
@@ -208,8 +224,7 @@ func (s *ExchangeServer) handleExchange(w http.ResponseWriter, r *http.Request) 
 
 	slog.Info("JWT validated successfully", "original_spiffe_id", validatedSVID.ID.String())
 
-	// Transform the SPIFFE ID (target domain is parsed from the path, base domain replaces cluster prefix)
-	newID, err := transformSpiffeID(validatedSVID.ID, s.baseDomain)
+	newID, err := transformSpiffeID(validatedSVID.ID, s.region, s.baseDomain)
 	if err != nil {
 		slog.Warn("Failed to transform SPIFFE ID", "error", err)
 		http.Error(w, fmt.Sprintf("Failed to transform SPIFFE ID: %v", err), http.StatusBadRequest)
@@ -218,7 +233,6 @@ func (s *ExchangeServer) handleExchange(w http.ResponseWriter, r *http.Request) 
 
 	slog.Info("Transformed SPIFFE ID", "original", validatedSVID.ID.String(), "new", newID.String())
 
-	// Re-sign JWT with new subject, preserving all other claims
 	token, err := s.resignJWT(validatedSVID.Claims, newID)
 	if err != nil {
 		slog.Error("Failed to sign JWT", "error", err)
@@ -241,17 +255,19 @@ func (s *ExchangeServer) handleExchange(w http.ResponseWriter, r *http.Request) 
 }
 
 // handleJWKS handles GET requests to /.well-known/jwks.json.
-// Tenant prefix is extracted from Host header and combined with base domain.
 func (s *ExchangeServer) handleJWKS(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Received JWKS request", "method", r.Method, "path", r.URL.Path, "host", r.Host, "remote_addr", r.RemoteAddr)
 
-	tenantPrefix := extractTenantPrefix(r.Host)
-	if tenantPrefix == "" {
+	// Extract trust domain from Host header (strip port if present)
+	trustDomain := r.Host
+	if idx := strings.Index(trustDomain, ":"); idx != -1 {
+		trustDomain = trustDomain[:idx]
+	}
+	if trustDomain == "" {
 		http.Error(w, "Host header required", http.StatusBadRequest)
 		return
 	}
 
-	trustDomain := tenantPrefix + "." + s.baseDomain
 	keys, err := s.keyStore.GetKeys(trustDomain)
 	if err != nil {
 		slog.Error("Failed to get keys for domain", "domain", trustDomain, "error", err)
@@ -275,24 +291,20 @@ func (s *ExchangeServer) handleJWKS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// extractTenantPrefix extracts the tenant prefix from the Host header.
-// Host format: {tenant}.default.svc.cluster.local
-func extractTenantPrefix(host string) string {
-	if idx := strings.Index(host, "."); idx != -1 {
-		return host[:idx]
-	}
-	return host
-}
-
 func main() {
 	var (
 		listenAddr = flag.String("listen", ":8080", "HTTP server listen address")
-		socketPath = flag.String("socket", "", "SPIFFE Workload API socket path (uses default if empty)")
-		baseDomain = flag.String("base-domain", "", "Base trust domain (e.g., sjc-1.k8s2-control.nvidia.com)")
+		socketPath = flag.String("socket", "", "SPIFFE Workload API socket path")
+		region     = flag.String("region", "", "Region identifier (e.g., sjc-1)")
+		baseDomain = flag.String("base-domain", "", "Base trust domain (e.g., nvidia.com)")
 		logLevel   = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
 	)
 	flag.Parse()
 
+	if *region == "" {
+		fmt.Fprintln(os.Stderr, "error: --region is required")
+		os.Exit(1)
+	}
 	if *baseDomain == "" {
 		fmt.Fprintln(os.Stderr, "error: --base-domain is required")
 		os.Exit(1)
@@ -319,13 +331,14 @@ func main() {
 	slog.Info("Starting SPIFFE Exchange Service",
 		"listen_addr", *listenAddr,
 		"socket_path", *socketPath,
+		"region", *region,
 		"base_domain", *baseDomain,
 		"log_level", level.String())
 
 	ctx := context.Background()
 	keyStore := NewInMemoryKeyStore(ES256KeyGenerator{})
 
-	server, err := NewExchangeServer(ctx, keyStore, *socketPath, *baseDomain)
+	server, err := NewExchangeServer(ctx, keyStore, *socketPath, *region, *baseDomain)
 	if err != nil {
 		slog.Error("Failed to create exchange server", "error", err)
 		os.Exit(1)

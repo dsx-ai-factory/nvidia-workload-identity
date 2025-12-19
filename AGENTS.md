@@ -66,14 +66,15 @@ This project demonstrates SPIFFE JWT authentication with OpenBao's CEL (Common E
 ## Core Architecture Principles
 
 ### SPIFFE Identity Pattern
-- Base trust domain: `sjc-1.k8s2-control.nvidia.com`
-- Pattern: `spiffe://<tenant>.<region>.<domain.com>/<product_name>/<resource_type>/<resource_id(uuid)>`
+- Base domain: `nvidia.com`
+- Pattern: `spiffe://{tenant}.{region}.{service}.{base-domain}/{resource_type}/{resource_id}`
 - Examples:
-  - Pod: `spiffe://tenant1.sjc-1.k8s2-control.nvidia.com/default/pod/<uuid>`
-  - VM: `spiffe://tenant1.sjc-1.k8s2-control.nvidia.com/vmaas/vm/<uuid>`
-- Components from trust domain: tenant, region, domain
-- Components from path: product_name, resource_type, resource_id
-- JWT issuer: `oidc-discovery.sjc-1.k8s2-control.nvidia.com`
+  - Pod: `spiffe://tenant1.sjc-1.internal.nvidia.com/pod/{uuid}`
+  - VM: `spiffe://tenant1.sjc-1.vmaas.nvidia.com/vm/{uuid}`
+- Components from trust domain: tenant, region, service
+- Components from path: resource_type, resource_id
+- Required pod labels: `spiffe.nvidia.com/tenant`, `spiffe.nvidia.com/service`
+- SPIRE template: `/tenant/{tenant}/service/{service}/{resource_type}/{resource_id}`
 
 ### Multi-Cluster Architecture
 - k1 (primary): SPIRE server, OpenBao, Exchange service, Envoy Gateway with MetalLB
@@ -86,8 +87,9 @@ This project demonstrates SPIFFE JWT authentication with OpenBao's CEL (Common E
 ### OpenBao CEL Integration
 - Use JWT CEL authentication (`/v1/auth/jwt/cel/login`), not static JWT auth
 - CEL program parses SPIFFE ID components for dynamic policy assignment
-- Trust domain format after exchange: `{tenant}.{region}.{product}.{base-domain}`
-- Policies: `spiffe-authenticated`, `region-*`, `tenant-*`, `product-*`, `resource-type-*`
+- Trust domain format: `{tenant}.{region}.{service}.nvidia.com`
+- Path format: `/{resource_type}/{resource_id}`
+- Policies: `spiffe-authenticated`, `region-*`, `tenant-*`, `service-*`, `resource-type-*`
 - Supports both pod and VM workload types
 - Use OIDC Discovery Provider with TLS certificate extraction
 
@@ -129,7 +131,7 @@ This project demonstrates SPIFFE JWT authentication with OpenBao's CEL (Common E
 ### SPIRE Configuration
 - Use official SPIRE Helm charts (`spiffe/spire`)
 - k1 and k2 run independent SPIRE servers with different trust domains
-- k1 trust domain: `sjc-1.k8s2-control.nvidia.com`, k2 trust domain: `sjc-2.k8s2-control.nvidia.com`
+- k1 trust domain: `sjc-1.nvidia.com`, k2 trust domain: `k2.sjc-1.nvidia.com`
 - SPIFFE Federation: k1 accepts k2's SVIDs via `clusterFederatedTrustDomains`
 - k2 exposes bundle endpoint via Envoy Gateway (port 8443) for federation
 - k1 does NOT need SPIRE ingress - only k2 bundle endpoint crosses clusters

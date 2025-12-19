@@ -67,7 +67,7 @@ add_coredns_host() {
     return 0
 }
 
-# Configures gateway.sjc-1.k8s2-control.nvidia.com DNS in a cluster
+# Configures gateway.sjc-1.nvidia.com DNS in a cluster
 # Returns 0 if change was made, 1 if no change
 configure_k1_gateway_dns() {
     local context="$1"
@@ -80,10 +80,10 @@ configure_k1_gateway_dns() {
         return 1
     fi
     
-    add_coredns_host "gateway.sjc-1.k8s2-control.nvidia.com" "$k1_gateway_ip" "$context"
+    add_coredns_host "gateway.sjc-1.nvidia.com" "$k1_gateway_ip" "$context"
 }
 
-# Configures gateway.k2.sjc-1.k8s2-control.nvidia.com DNS in a cluster
+# Configures gateway.k2.sjc-1.nvidia.com DNS in a cluster
 # Returns 0 if change was made, 1 if no change
 configure_k2_gateway_dns() {
     local context="$1"
@@ -96,7 +96,7 @@ configure_k2_gateway_dns() {
         return 1
     fi
     
-    add_coredns_host "gateway.k2.sjc-1.k8s2-control.nvidia.com" "$k2_gateway_ip" "$context"
+    add_coredns_host "gateway.k2.sjc-1.nvidia.com" "$k2_gateway_ip" "$context"
 }
 
 main() {

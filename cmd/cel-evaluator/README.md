@@ -35,8 +35,8 @@ CEL program validation passed
 === Sample Claims ===
 {
   "claims": {
-    "sub": "spiffe://sjc-1.k8s2-control.nvidia.com/controlplane/vm/12345678-1234-5678-9abc-123456789abc",
-    "aud": ["spiffe://sjc-1.k8s2-control.ncp.com/controlplane/vm/fluentd", "ssa://SSA_service_id"],
+    "sub": "spiffe://tenant1.sjc-1.vmaas.nvidia.com/vm/12345678-1234-5678-9abc-123456789abc",
+    "aud": ["spiffe://tenant1.sjc-1.vmaas.nvidia.com"],
     ...
   }
 }
@@ -71,16 +71,16 @@ spiffe://<tenant>.<region>.<domain>/<product>/<resource_type>/<resource_id>
 
 **Pod Example**:
 ```
-spiffe://tenant1.sjc-1.k8s2-control.nvidia.com/default/pod/abc123-def456
+spiffe://tenant1.sjc-1.internal.nvidia.com/pod/abc123-def456
 ```
-- Trust domain: `tenant1.sjc-1.k8s2-control.nvidia.com` → tenant=tenant1, region=sjc-1
-- Path: `/default/pod/abc123-def456` → product=default, resource_type=pod, resource_id=abc123-def456
+- Trust domain: `tenant1.sjc-1.internal.nvidia.com` → tenant=tenant1, region=sjc-1, product=internal
+- Path: `/pod/abc123-def456` → resource_type=pod, resource_id=abc123-def456
 
 **VM Example**:
 ```
-spiffe://tenant1.sjc-1.k8s2-control.nvidia.com/vmaas/vm/123abc-456def
+spiffe://tenant1.sjc-1.vmaas.nvidia.com/vm/123abc-456def
 ```
-- Trust domain: `tenant1.sjc-1.k8s2-control.nvidia.com` → tenant=tenant1, region=sjc-1
-- Path: `/vmaas/vm/123abc-456def` → product=vmaas, resource_type=vm, resource_id=123abc-456def
+- Trust domain: `tenant1.sjc-1.vmaas.nvidia.com` → tenant=tenant1, region=sjc-1, product=vmaas
+- Path: `/vm/123abc-456def` → resource_type=vm, resource_id=123abc-456def
 
 This validates CEL expressions parse the pattern correctly before deploying to OpenBao.

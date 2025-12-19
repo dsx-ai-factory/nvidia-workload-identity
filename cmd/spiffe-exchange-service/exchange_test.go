@@ -12,69 +12,77 @@ import (
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 )
 
-func TestParseTargetDomain(t *testing.T) {
+func TestParsePathComponents(t *testing.T) {
 	tests := []struct {
-		name          string
-		path          string
-		wantSubdomain string
-		wantRemaining string
-		wantOk        bool
+		name             string
+		path             string
+		wantTenant       string
+		wantService      string
+		wantResourceType string
+		wantResourceID   string
+		wantErr          bool
 	}{
 		{
-			name:          "valid path with remaining",
-			path:          "/domain/tenant1/workload/pod/abc",
-			wantSubdomain: "tenant1",
-			wantRemaining: "/workload/pod/abc",
-			wantOk:        true,
+			name:             "vm workload",
+			path:             "/tenant/tenant1/service/vmaas/vm/abc-123",
+			wantTenant:       "tenant1",
+			wantService:      "vmaas",
+			wantResourceType: "vm",
+			wantResourceID:   "abc-123",
+			wantErr:          false,
 		},
 		{
-			name:          "valid path no remaining",
-			path:          "/domain/tenant1",
-			wantSubdomain: "tenant1",
-			wantRemaining: "",
-			wantOk:        true,
+			name:             "pod workload",
+			path:             "/tenant/acme-corp/service/default/pod/xyz-789",
+			wantTenant:       "acme-corp",
+			wantService:      "default",
+			wantResourceType: "pod",
+			wantResourceID:   "xyz-789",
+			wantErr:          false,
 		},
 		{
-			name:          "valid path with slash only",
-			path:          "/domain/tenant1/",
-			wantSubdomain: "tenant1",
-			wantRemaining: "/",
-			wantOk:        true,
+			name:    "missing domain prefix",
+			path:    "/workload/pod/abc",
+			wantErr: true,
 		},
 		{
-			name:          "no domain prefix",
-			path:          "/workload/pod/abc",
-			wantSubdomain: "",
-			wantRemaining: "",
-			wantOk:        false,
+			name:    "missing service segment",
+			path:    "/tenant/tenant1/vmaas/vm/abc",
+			wantErr: true,
 		},
 		{
-			name:          "empty path",
-			path:          "",
-			wantSubdomain: "",
-			wantRemaining: "",
-			wantOk:        false,
+			name:    "insufficient components",
+			path:    "/tenant/tenant1/service/vmaas",
+			wantErr: true,
 		},
 		{
-			name:          "just domain prefix",
-			path:          "/domain/",
-			wantSubdomain: "",
-			wantRemaining: "",
-			wantOk:        true,
+			name:    "empty path",
+			path:    "",
+			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			subdomain, remaining, ok := parseTargetDomain(tt.path)
-			if subdomain != tt.wantSubdomain {
-				t.Errorf("subdomain = %q, want %q", subdomain, tt.wantSubdomain)
+			got, err := parsePathComponents(tt.path)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
+				return
 			}
-			if remaining != tt.wantRemaining {
-				t.Errorf("remaining = %q, want %q", remaining, tt.wantRemaining)
+			if tt.wantErr {
+				return
 			}
-			if ok != tt.wantOk {
-				t.Errorf("ok = %v, want %v", ok, tt.wantOk)
+			if got.Tenant != tt.wantTenant {
+				t.Errorf("Tenant = %q, want %q", got.Tenant, tt.wantTenant)
+			}
+			if got.Service != tt.wantService {
+				t.Errorf("Service = %q, want %q", got.Service, tt.wantService)
+			}
+			if got.ResourceType != tt.wantResourceType {
+				t.Errorf("ResourceType = %q, want %q", got.ResourceType, tt.wantResourceType)
+			}
+			if got.ResourceID != tt.wantResourceID {
+				t.Errorf("ResourceID = %q, want %q", got.ResourceID, tt.wantResourceID)
 			}
 		})
 	}
@@ -84,37 +92,42 @@ func TestTransformSpiffeID(t *testing.T) {
 	tests := []struct {
 		name       string
 		originalID string
+		region     string
 		baseDomain string
 		wantID     string
 		wantErr    bool
 	}{
 		{
-			name:       "valid transformation",
-			originalID: "spiffe://cluster.example.com/domain/tenant1/workload/pod/abc",
-			baseDomain: "example.com",
-			wantID:     "spiffe://tenant1.example.com/workload/pod/abc",
+			name:       "vm workload",
+			originalID: "spiffe://k2.sjc-1.nvidia.com/tenant/tenant1/service/vmaas/vm/12345",
+			region:     "sjc-1",
+			baseDomain: "nvidia.com",
+			wantID:     "spiffe://tenant1.sjc-1.vmaas.nvidia.com/vm/12345",
 			wantErr:    false,
 		},
 		{
-			name:       "no remaining path",
-			originalID: "spiffe://cluster.example.com/domain/tenant1",
-			baseDomain: "example.com",
-			wantID:     "spiffe://tenant1.example.com",
+			name:       "pod workload",
+			originalID: "spiffe://k2.sjc-1.nvidia.com/tenant/acme-corp/service/default/pod/abc-xyz",
+			region:     "sjc-1",
+			baseDomain: "nvidia.com",
+			wantID:     "spiffe://acme-corp.sjc-1.default.nvidia.com/pod/abc-xyz",
 			wantErr:    false,
 		},
 		{
 			name:       "missing domain prefix",
-			originalID: "spiffe://cluster.example.com/workload/pod/abc",
-			baseDomain: "example.com",
+			originalID: "spiffe://k2.sjc-1.nvidia.com/workload/pod/abc",
+			region:     "sjc-1",
+			baseDomain: "nvidia.com",
 			wantID:     "",
 			wantErr:    true,
 		},
 		{
-			name:       "complex base domain",
-			originalID: "spiffe://k2.sjc-1.k8s2-control.nvidia.com/domain/acme-corp/vmaas/vm/12345",
-			baseDomain: "sjc-1.k8s2-control.nvidia.com",
-			wantID:     "spiffe://acme-corp.sjc-1.k8s2-control.nvidia.com/vmaas/vm/12345",
-			wantErr:    false,
+			name:       "missing product segment",
+			originalID: "spiffe://k2.sjc-1.nvidia.com/tenant/tenant1/vmaas/vm/abc",
+			region:     "sjc-1",
+			baseDomain: "nvidia.com",
+			wantID:     "",
+			wantErr:    true,
 		},
 	}
 
@@ -125,7 +138,7 @@ func TestTransformSpiffeID(t *testing.T) {
 				t.Fatalf("failed to parse original ID: %v", err)
 			}
 
-			got, err := transformSpiffeID(originalID, tt.baseDomain)
+			got, err := transformSpiffeID(originalID, tt.region, tt.baseDomain)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -137,41 +150,52 @@ func TestTransformSpiffeID(t *testing.T) {
 	}
 }
 
-func TestExtractTenantPrefix(t *testing.T) {
-	tests := []struct {
-		name string
-		host string
-		want string
-	}{
-		{
-			name: "full kubernetes service host",
-			host: "tenant1.default.svc.cluster.local",
-			want: "tenant1",
-		},
-		{
-			name: "host with port",
-			host: "tenant1.example.com:8080",
-			want: "tenant1",
-		},
-		{
-			name: "simple host",
-			host: "tenant1",
-			want: "tenant1",
-		},
-		{
-			name: "two parts",
-			host: "tenant1.example",
-			want: "tenant1",
-		},
+func TestJWKS_UsesFullHostForKeyLookup(t *testing.T) {
+	// Regression test: JWKS handler was extracting only tenant prefix,
+	// looking for keys under "tenant1.nvidia.com" instead of "tenant1.sjc-1.internal.nvidia.com"
+
+	store := NewInMemoryKeyStore(ES256KeyGenerator{})
+	server := &ExchangeServer{
+		keyStore:   store,
+		baseDomain: "nvidia.com",
+		region:     "sjc-1",
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := extractTenantPrefix(tt.host)
-			if got != tt.want {
-				t.Errorf("got = %q, want %q", got, tt.want)
-			}
-		})
+	// Pre-create a key for the full trust domain (simulating what transformSpiffeID does)
+	fullDomain := "tenant1.sjc-1.internal.nvidia.com"
+	_, expectedKID, _, err := store.GetOrCreateKey(fullDomain)
+	if err != nil {
+		t.Fatalf("failed to create key: %v", err)
+	}
+
+	// Make JWKS request with full domain as Host header
+	req := httptest.NewRequest("GET", "/.well-known/jwks.json", nil)
+	req.Host = fullDomain + ":8080"
+	rec := httptest.NewRecorder()
+
+	server.handleJWKS(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	// Verify the returned JWKS contains the key we created
+	var jwks struct {
+		Keys []struct {
+			Kid string `json:"kid"`
+		} `json:"keys"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&jwks); err != nil {
+		t.Fatalf("failed to decode JWKS: %v", err)
+	}
+
+	if len(jwks.Keys) == 0 {
+		t.Fatal("expected at least one key in JWKS")
+	}
+
+	// The key ID should match the one we created for the full domain
+	if jwks.Keys[0].Kid != expectedKID.String() {
+		t.Errorf("key ID = %q, want %q", jwks.Keys[0].Kid, expectedKID.String())
 	}
 }
 
@@ -282,7 +306,7 @@ func TestHandleJWKS(t *testing.T) {
 	keyStore := newMockKeyStore()
 	server := &ExchangeServer{
 		keyStore:   keyStore,
-		baseDomain: "example.com",
+		baseDomain: "nvidia.com",
 	}
 
 	tests := []struct {
@@ -348,7 +372,7 @@ func TestHandleExchange_InvalidRequests(t *testing.T) {
 	keyStore := newMockKeyStore()
 	server := &ExchangeServer{
 		keyStore:   keyStore,
-		baseDomain: "example.com",
+		baseDomain: "nvidia.com",
 	}
 
 	tests := []struct {
