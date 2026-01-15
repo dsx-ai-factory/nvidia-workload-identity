@@ -1,5 +1,6 @@
 #!/bin/bash
 # deploy-bao.sh - Deploys OpenBao to k1 cluster
+# Note: Helm repo setup is in scripts/setup-helm-repos.sh
 
 set -euo pipefail
 
@@ -19,14 +20,6 @@ cleanup_port_forward() {
     if [[ -n "$PF_PID" ]]; then
         kill "$PF_PID" 2>/dev/null || true
         PF_PID=""
-    fi
-}
-
-add_helm_repo() {
-    # Add OpenBao Helm repository
-    if ! helm repo list | grep -q "openbao"; then
-    helm repo add openbao https://openbao.github.io/openbao-helm
-        helm repo update >/dev/null
     fi
 }
 
@@ -207,7 +200,6 @@ main() {
             ;;
         *)
             validate_context_exists "${CONTEXT}"
-            add_helm_repo
             preload_images
             deploy_bao
             initialize_bao

@@ -1,0 +1,35 @@
+# Build stage
+FROM golang:1.25 AS builder
+
+WORKDIR /app
+
+# Copy go modules files
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY cmd/mds-network-setup/ ./cmd/mds-network-setup/
+
+# Build the binary
+RUN go build -o mds-network-setup ./cmd/mds-network-setup
+
+# Final stage
+FROM debian:bookworm-slim
+
+# Install runtime dependencies (nsenter for network namespace, ip/nft for network config)
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    iproute2 \
+    nftables \
+    util-linux \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /root/
+
+# Copy the binary from builder stage
+COPY --from=builder /app/mds-network-setup .
+
+# Run the daemon
+ENTRYPOINT ["/root/mds-network-setup"]

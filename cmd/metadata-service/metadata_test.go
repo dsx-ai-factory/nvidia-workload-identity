@@ -47,12 +47,10 @@ func TestIdentityRequest_Validation(t *testing.T) {
 		},
 	}
 
-	// Create a minimal server for testing request validation
-	// Note: This will fail at pod lookup, but we're testing request validation
 	server := &MetadataServer{
-		k8sClient:          nil, // Will cause pod lookup to fail
-		exchangeServiceURL: "http://localhost:8080",
-		httpClient:         http.DefaultClient,
+		exchangeSocket:  "/nonexistent/exchange.sock",
+		spireSocketPath: "/nonexistent/socket",
+		httpClient:      http.DefaultClient,
 	}
 
 	for _, tt := range tests {

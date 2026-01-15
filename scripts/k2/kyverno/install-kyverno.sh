@@ -1,5 +1,6 @@
 #!/bin/bash
 # install-kyverno.sh - Installs Kyverno for k2 cluster
+# Note: Helm repo setup is in scripts/setup-helm-repos.sh
 
 set -euo pipefail
 
@@ -48,12 +49,6 @@ preload_images() {
 
 install_kyverno() {
     log_info "Installing Kyverno ${KYVERNO_VERSION}..."
-    
-    # Add Kyverno Helm repository
-    if ! helm repo list | grep -q "kyverno"; then
-        helm repo add kyverno https://kyverno.github.io/kyverno/
-        helm repo update >/dev/null
-    fi
     
     helm upgrade --install kyverno kyverno/kyverno \
         --namespace kyverno \

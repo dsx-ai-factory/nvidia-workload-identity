@@ -11,15 +11,14 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
+)
+
+const (
+	defaultSpireSocketPath = "/var/run/secrets/spire.io/spire-agent.sock"
 )
 
 type IdentityRequest struct {
@@ -32,165 +31,116 @@ type IdentityResponse struct {
 	SpiffeID  string    `json:"spiffe_id"`
 }
 
-type MetadataServer struct {
-	k8sClient          *kubernetes.Clientset
-	exchangeServiceURL string
-	httpClient         *http.Client
-}
-
-// ExchangeRequest represents a request to the exchange service.
 type ExchangeRequest struct {
 	JWT string `json:"jwt"`
 }
 
-// ExchangeResponse represents a response from the exchange service.
 type ExchangeResponse struct {
 	Token     string    `json:"token"`
 	ExpiresAt time.Time `json:"expires_at"`
 	SpiffeID  string    `json:"spiffe_id"`
 }
 
-// findPodByIP queries the Kubernetes API to find the pod with the given IP address
-// Checks both primary and secondary network IPs including UDN annotations
-func (s *MetadataServer) findPodByIP(ctx context.Context, clientIP string) (*corev1.Pod, error) {
-	// List all pods in all namespaces
-	pods, err := s.k8sClient.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list pods: %w", err)
-	}
-
-	slog.Debug("Searching for pod by IP", "client_ip", clientIP, "total_pods", len(pods.Items))
-
-	targetIP := net.ParseIP(clientIP)
-	if targetIP == nil {
-		return nil, fmt.Errorf("invalid IP address: %s", clientIP)
-	}
-
-	// Check each pod's IPs
-	for _, pod := range pods.Items {
-		// Check primary network IPs (pod.Status.PodIPs)
-		for _, podIP := range pod.Status.PodIPs {
-			if podIP.IP == clientIP {
-				slog.Debug("Found pod with primary IP", "namespace", pod.Namespace, "pod", pod.Name, "ip", clientIP)
-				return &pod, nil
-			}
-		}
-
-		// Check pod.Status.PodIP for older k8s versions
-		if pod.Status.PodIP == clientIP {
-			slog.Debug("Found pod with status IP", "namespace", pod.Namespace, "pod", pod.Name, "ip", clientIP)
-			return &pod, nil
-		}
-
-		// Check secondary network IPs from OVN-Kubernetes annotations
-		// The annotation key is k8s.ovn.org/pod-networks
-		if podNetworks, ok := pod.Annotations["k8s.ovn.org/pod-networks"]; ok {
-			if strings.Contains(podNetworks, clientIP) {
-				// Parse the annotation to verify it's a valid IP match
-				var networks map[string]any
-				if err := json.Unmarshal([]byte(podNetworks), &networks); err == nil {
-					for _, netConfig := range networks {
-						if netMap, ok := netConfig.(map[string]any); ok {
-							if ipAddrs, ok := netMap["ip_addresses"].([]any); ok {
-								for _, ipAddr := range ipAddrs {
-									if ipStr, ok := ipAddr.(string); ok {
-										// IP addresses may be in CIDR format (e.g., "10.1.1.5/24")
-										ip, _, _ := net.ParseCIDR(ipStr)
-										if ip == nil {
-											ip = net.ParseIP(ipStr)
-										}
-										if ip != nil && ip.Equal(targetIP) {
-											slog.Debug("Found pod with secondary network IP", "namespace", pod.Namespace, "pod", pod.Name, "ip", clientIP)
-											return &pod, nil
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	return nil, fmt.Errorf("no pod found with IP address: %s", clientIP)
+type MetadataServer struct {
+	exchangeSocket  string
+	spireSocketPath string
+	httpClient      *http.Client
 }
 
-// fetchJWTForPod fetches a JWT SVID for the identified pod via the bridge socket
-func (s *MetadataServer) fetchJWTForPod(ctx context.Context, pod *corev1.Pod, audience string) (*jwtsvid.SVID, error) {
-	podUID := string(pod.UID)
+// fetchJWT fetches a JWT SVID from the local SPIRE workload API
+func (s *MetadataServer) fetchJWT(ctx context.Context, audience string) (*jwtsvid.SVID, error) {
+	socketAddr := fmt.Sprintf("unix://%s", s.spireSocketPath)
 
-	slog.Debug("Fetching JWT for pod via bridge socket",
-		"namespace", pod.Namespace,
-		"pod", pod.Name,
-		"pod_uid", podUID,
+	slog.Debug("Creating JWT source",
+		"socket_path", s.spireSocketPath,
+		"socket_addr", socketAddr,
 		"audience", audience)
 
-	// Construct socket path based on pod UID
-	socketPath := fmt.Sprintf("/run/metadata/metadata-bridge-sockets/%s/metadata-bridge-spire-agent.sock", podUID)
-	socketAddr := fmt.Sprintf("unix://%s", socketPath)
-
-	slog.Debug("Connecting to bridge socket", "socket_path", socketPath)
-
-	// Create a temporary JWT source connected to the pod's bridge socket
 	jwtSource, err := workloadapi.NewJWTSource(ctx, workloadapi.WithClientOptions(
 		workloadapi.WithAddr(socketAddr),
 	))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create JWT source for pod bridge socket: %w", err)
+		slog.Error("Failed to create JWT source",
+			"socket_path", s.spireSocketPath,
+			"error", err)
+		return nil, fmt.Errorf("failed to create JWT source: %w", err)
 	}
 	defer jwtSource.Close()
 
-	// Fetch JWT SVID from the pod's workload API proxy
+	slog.Debug("Fetching JWT SVID", "audience", audience)
+
 	jwt, err := jwtSource.FetchJWTSVID(ctx, jwtsvid.Params{
 		Audience: audience,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch JWT from bridge socket: %w", err)
+		slog.Error("Failed to fetch JWT SVID",
+			"audience", audience,
+			"error", err)
+		return nil, fmt.Errorf("failed to fetch JWT: %w", err)
 	}
 
-	slog.Info("Fetched JWT from bridge socket",
-		"namespace", pod.Namespace,
-		"pod", pod.Name,
-		"pod_uid", podUID,
-		"spiffe_id", jwt.ID.String())
+	slog.Info("Successfully fetched JWT from SPIRE",
+		"spiffe_id", jwt.ID.String(),
+		"audience", audience,
+		"expiry", jwt.Expiry)
 
 	return jwt, nil
 }
 
-// exchangeJWT exchanges a JWT for a new one via the exchange service.
-// The target domain is extracted from the SPIFFE ID path by the exchange service.
+// exchangeJWT exchanges a JWT for a new one via the exchange service (over Unix socket)
 func (s *MetadataServer) exchangeJWT(ctx context.Context, token string) (*ExchangeResponse, error) {
-	reqBody := ExchangeRequest{
-		JWT: token,
-	}
+	reqBody := ExchangeRequest{JWT: token}
 
 	reqBytes, err := json.Marshal(reqBody)
 	if err != nil {
+		slog.Error("Failed to marshal exchange request", "error", err)
 		return nil, fmt.Errorf("failed to marshal exchange request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.exchangeServiceURL+"/v1/exchange", bytes.NewReader(reqBytes))
+	// HTTP over Unix socket uses a dummy host (the socket handles routing)
+	exchangeURL := "http://exchange/v1/exchange"
+	slog.Debug("Creating exchange request",
+		"exchange_socket", s.exchangeSocket,
+		"token_length", len(token))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, exchangeURL, bytes.NewReader(reqBytes))
 	if err != nil {
+		slog.Error("Failed to create exchange request", "error", err)
 		return nil, fmt.Errorf("failed to create exchange request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	slog.Info("Sending exchange request", "exchange_service_url", s.exchangeServiceURL)
+	slog.Info("Sending exchange request", "exchange_socket", s.exchangeSocket)
+
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
+		slog.Error("Failed to call exchange service",
+			"exchange_socket", s.exchangeSocket,
+			"error", err)
 		return nil, fmt.Errorf("failed to call exchange service: %w", err)
 	}
 	defer resp.Body.Close()
 
+	slog.Debug("Received exchange response",
+		"status_code", resp.StatusCode,
+		"status", resp.Status)
+
 	if resp.StatusCode != http.StatusOK {
+		slog.Error("Exchange service returned non-OK status",
+			"status_code", resp.StatusCode,
+			"status", resp.Status)
 		return nil, fmt.Errorf("exchange service returned status %d", resp.StatusCode)
 	}
 
 	var exchangeResp ExchangeResponse
 	if err := json.NewDecoder(resp.Body).Decode(&exchangeResp); err != nil {
+		slog.Error("Failed to decode exchange response", "error", err)
 		return nil, fmt.Errorf("failed to decode exchange response: %w", err)
 	}
+
+	slog.Info("Successfully received exchange response",
+		"new_spiffe_id", exchangeResp.SpiffeID,
+		"expires_at", exchangeResp.ExpiresAt)
 
 	return &exchangeResp, nil
 }
@@ -200,56 +150,66 @@ func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) 
 	body := http.MaxBytesReader(w, r.Body, 1024*1024)
 	defer body.Close()
 
-	// Extract client IP from request
-	clientIP, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		// If SplitHostPort fails, try using RemoteAddr directly
-		clientIP = r.RemoteAddr
-	}
-
-	slog.Info("Received identity request", "client_ip", clientIP)
+	slog.Info("Received identity request",
+		"remote_addr", r.RemoteAddr,
+		"method", r.Method,
+		"path", r.URL.Path,
+		"content_type", r.Header.Get("Content-Type"))
 
 	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mediaType != "application/json" {
-		slog.Warn("Invalid content type", "client_ip", clientIP)
+		slog.Warn("Invalid content type",
+			"content_type", r.Header.Get("Content-Type"),
+			"remote_addr", r.RemoteAddr)
 		http.Error(w, "Invalid content type", http.StatusUnsupportedMediaType)
 		return
 	}
 
-	// Parse request body
 	var req IdentityRequest
 	if err := json.NewDecoder(body).Decode(&req); err != nil {
-		slog.Warn("Failed to decode request", "error", err, "client_ip", clientIP)
+		slog.Warn("Failed to decode request body",
+			"error", err,
+			"remote_addr", r.RemoteAddr)
 		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
 		return
 	}
 
+	slog.Debug("Parsed identity request",
+		"audience", req.Audience,
+		"remote_addr", r.RemoteAddr)
+
 	if req.Audience == "" {
-		slog.Warn("Missing audience in request", "client_ip", clientIP)
+		slog.Warn("Missing audience in request", "remote_addr", r.RemoteAddr)
 		http.Error(w, "Audience is required", http.StatusBadRequest)
 		return
 	}
 
-	// Find pod by IP
 	ctx := r.Context()
-	pod, err := s.findPodByIP(ctx, clientIP)
-	if err != nil {
-		slog.Warn("Failed to find pod", "client_ip", clientIP, "error", err)
-		http.Error(w, fmt.Sprintf("Pod not found: %v", err), http.StatusNotFound)
-		return
-	}
 
-	// Fetch JWT SVID for the pod
-	jwt, err := s.fetchJWTForPod(ctx, pod, req.Audience)
+	// Fetch JWT from local SPIRE socket
+	slog.Info("Fetching JWT from local SPIRE socket",
+		"audience", req.Audience,
+		"socket_path", s.spireSocketPath)
+
+	jwt, err := s.fetchJWT(ctx, req.Audience)
 	if err != nil {
-		slog.Error("Failed to fetch JWT", "namespace", pod.Namespace, "pod", pod.Name, "error", err)
+		slog.Error("Failed to fetch JWT from SPIRE",
+			"error", err,
+			"remote_addr", r.RemoteAddr)
 		http.Error(w, fmt.Sprintf("Failed to fetch JWT: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	// Exchange JWT via the exchange service (target domain is in SPIFFE ID path)
+	slog.Info("Fetched JWT, now exchanging",
+		"original_spiffe_id", jwt.ID.String(),
+		"audience", req.Audience)
+
+	// Exchange JWT via the exchange service
 	exchangeResp, err := s.exchangeJWT(ctx, jwt.Marshal())
 	if err != nil {
-		slog.Error("Failed to exchange JWT", "namespace", pod.Namespace, "pod", pod.Name, "error", err)
+		slog.Error("Failed to exchange JWT",
+			"original_spiffe_id", jwt.ID.String(),
+			"error", err,
+			"remote_addr", r.RemoteAddr)
 		http.Error(w, fmt.Sprintf("Failed to exchange JWT: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -261,40 +221,41 @@ func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) 
 	}
 
 	slog.Info("Successfully exchanged JWT",
-		"namespace", pod.Namespace,
-		"pod", pod.Name,
 		"original_spiffe_id", jwt.ID.String(),
-		"new_spiffe_id", exchangeResp.SpiffeID)
+		"new_spiffe_id", exchangeResp.SpiffeID,
+		"expires_at", exchangeResp.ExpiresAt,
+		"remote_addr", r.RemoteAddr)
 
-	// Send response
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		slog.Error("Failed to encode response", "error", err)
+		slog.Error("Failed to encode response",
+			"error", err,
+			"remote_addr", r.RemoteAddr)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
+
+	slog.Debug("Response sent successfully", "remote_addr", r.RemoteAddr)
 }
 
 func main() {
 	var (
-		listenAddr         = flag.String("listen", ":8080", "HTTP server listen address")
-		logLevel           = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
-		exchangeServiceURL = flag.String("exchange-service-url", "", "URL of the SPIFFE exchange service")
+		listenAddr      = flag.String("listen", ":80", "HTTP server listen address")
+		logLevel        = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
+		exchangeSocket  = flag.String("exchange-socket", "", "Path to exchange service Unix socket")
+		spireSocketPath = flag.String("spire-socket", defaultSpireSocketPath, "Path to SPIRE agent socket")
 	)
 	flag.Parse()
 
-	if *exchangeServiceURL == "" {
-		fmt.Fprintln(os.Stderr, "error: --exchange-service-url is required")
+	if *exchangeSocket == "" {
+		fmt.Fprintln(os.Stderr, "error: --exchange-socket is required")
 		os.Exit(1)
 	}
 
-	// Setup structured logging
 	var level slog.Level
 	switch *logLevel {
 	case "debug":
 		level = slog.LevelDebug
-	case "info":
-		level = slog.LevelInfo
 	case "warn":
 		level = slog.LevelWarn
 	case "error":
@@ -310,38 +271,32 @@ func main() {
 	slog.Info("Starting SPIFFE Metadata Service",
 		"listen_addr", *listenAddr,
 		"log_level", level.String(),
-		"exchange_service_url", *exchangeServiceURL)
+		"exchange_socket", *exchangeSocket,
+		"spire_socket", *spireSocketPath)
 
-	// Create in-cluster Kubernetes client
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		slog.Error("Failed to create in-cluster config", "error", err)
-		panic(err)
-	}
-
-	k8sClient, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		slog.Error("Failed to create Kubernetes client", "error", err)
-		panic(err)
-	}
-
-	// Create metadata server
-	server := &MetadataServer{
-		k8sClient:          k8sClient,
-		exchangeServiceURL: *exchangeServiceURL,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+	// Create HTTP client that connects via Unix socket
+	httpClient := &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return net.Dial("unix", *exchangeSocket)
+			},
 		},
 	}
 
-	// Setup HTTP handlers
+	server := &MetadataServer{
+		exchangeSocket:  *exchangeSocket,
+		spireSocketPath: *spireSocketPath,
+		httpClient:      httpClient,
+	}
+
 	http.HandleFunc("POST /v1/metadata/identity", server.handleIdentity)
 	http.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		slog.Debug("Health check", "remote_addr", r.RemoteAddr)
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, "OK")
 	})
 
-	// Start HTTP server
 	slog.Info("Starting HTTP server", "listen_addr", *listenAddr)
 	if err := http.ListenAndServe(*listenAddr, nil); err != nil {
 		slog.Error("HTTP server failed", "error", err)

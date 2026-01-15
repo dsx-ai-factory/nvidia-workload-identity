@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 CLUSTER_NAME="k1"
 CONTEXT="kind-${CLUSTER_NAME}"
-NAMESPACE="default"
+NAMESPACE="spiffe-exchange"
 IMAGE_NAME="spiffe-exchange-service"
 IMAGE_TAG="latest"
 

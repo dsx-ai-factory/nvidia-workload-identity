@@ -1,5 +1,6 @@
 #!/bin/bash
 # deploy-spire.sh - Deploys SPIRE server to k2 cluster with bundle endpoint
+# Note: Helm repo setup is in scripts/setup-helm-repos.sh
 
 set -euo pipefail
 
@@ -12,13 +13,6 @@ SPIRE_CRDS_VERSION="0.5.0"
 SPIRE_VERSION="0.27.1"
 
 source "${PROJECT_ROOT}/scripts/common.sh"
-
-add_helm_repo() {
-    if ! helm repo list | grep -q "spiffe"; then
-        helm repo add spiffe https://spiffe.github.io/helm-charts-hardened/
-        helm repo update >/dev/null
-    fi
-}
 
 install_spire() {
     log_info "Installing SPIRE CRDs..."
@@ -77,7 +71,6 @@ main() {
             ;;
         *)
             validate_context_exists "${CONTEXT}"
-            add_helm_repo
             install_spire
             apply_bundle_route
             display_info

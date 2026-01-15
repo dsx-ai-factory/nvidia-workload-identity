@@ -1,6 +1,6 @@
 # SPIFFE + OpenBao CEL Multi-Cluster Demo Makefile
 
-.PHONY: help install clean test verify-spire verify-nginx verify-vm cluster metallb gateway spire nginx bao metadata-service exchange-service vm status k1 k2 k2-cluster k2-gateway kubevirt kyverno k2-spire configure-dns cert-manager-k2 sync-federation-ca
+.PHONY: help install clean test verify-spire verify-nginx verify-vm cluster metallb gateway spire nginx bao metadata-service exchange-service vm status k1 k2 k2-cluster k2-gateway kubevirt kyverno k2-spire configure-dns cert-manager-k2 sync-federation-ca helm-repos
 
 # Default target
 help: ## Show this help message
@@ -69,11 +69,11 @@ status: ## Show status of all components
 	@echo "Nodes:"
 	@kubectl get nodes --context kind-k1 2>/dev/null || echo "k1 cluster not found"
 	@echo ""
-	@echo "External SPIRE Server:"
-	@kubectl get pods -n spire-mgmt -l app.kubernetes.io/name=external-server --context kind-k1 2>/dev/null || echo "Not found"
+	@echo "SPIRE Server:"
+	@kubectl get pods -n spire-system -l app.kubernetes.io/name=server --context kind-k1 2>/dev/null || echo "Not found"
 	@echo ""
 	@echo "Exchange Service:"
-	@kubectl get deployment spiffe-exchange-service --context kind-k1 2>/dev/null || echo "Not found"
+	@kubectl get deployment spiffe-exchange-service -n spiffe-exchange --context kind-k1 2>/dev/null || echo "Not found"
 	@echo ""
 	@echo "OpenBao:"
 	@kubectl get pods -n bao -l app.kubernetes.io/name=openbao --context kind-k1 2>/dev/null || echo "Not found"
@@ -97,10 +97,14 @@ status: ## Show status of all components
 	@echo ""
 	@echo "=== Workloads ==="
 	@echo "Demo Nginx:"
-	@kubectl get pod demo-nginx --context kind-k2 2>/dev/null || echo "Not found"
+	@kubectl get pod demo-nginx -n default --context kind-k2 2>/dev/null || echo "Not found"
 	@echo ""
 	@echo "VM:"
-	@kubectl get vm --context kind-k2 2>/dev/null || echo "Not found"
+	@kubectl get vm -A --context kind-k2 2>/dev/null || echo "Not found"
+
+# Helm repositories (serialized before parallel helm installs)
+helm-repos:
+	@./scripts/setup-helm-repos.sh
 
 # k1 individual targets (with dependencies)
 cluster: ## Create k1 Kind cluster
@@ -115,7 +119,7 @@ gateway: cluster ## Install MetalLB and Envoy Gateway on k1
 sync-federation-ca: cert-manager-k2 cluster ## Sync k2's CA to k1 for federation
 	@./scripts/sync-federation-ca.sh
 
-spire: gateway sync-federation-ca ## Install SPIRE root on k1 (with k2 federation CA)
+spire: gateway sync-federation-ca helm-repos ## Install SPIRE root on k1 (with k2 federation CA)
 	@echo "Installing SPIRE root on k1..."
 	@./scripts/k1/spire/deploy-spire.sh
 
@@ -123,7 +127,7 @@ exchange-service: cluster spire gateway ## Deploy SPIFFE exchange service on k1
 	@echo "Deploying exchange service on k1..."
 	@./scripts/k1/exchange/deploy-exchange.sh
 
-bao: cluster spire gateway exchange-service ## Deploy OpenBao on k1 (requires exchange-service for JWT)
+bao: cluster spire gateway exchange-service helm-repos ## Deploy OpenBao on k1 (requires exchange-service for JWT)
 	@echo "Deploying OpenBao on k1..."
 	@./scripts/k1/bao/deploy-bao.sh
 
@@ -144,11 +148,11 @@ kubevirt: k2-cluster ## Install KubeVirt and CDI on k2
 	@echo "Installing KubeVirt on k2..."
 	@./scripts/k2/kubevirt/install-kubevirt.sh
 
-kyverno: k2-cluster ## Install Kyverno on k2
+kyverno: k2-cluster helm-repos ## Install Kyverno on k2
 	@echo "Installing Kyverno on k2..."
 	@./scripts/k2/kyverno/install-kyverno.sh
 
-k2-spire: k2-cluster k2-gateway cert-manager-k2 ## Install SPIRE on k2 (with cert-manager TLS for federation)
+k2-spire: k2-cluster k2-gateway cert-manager-k2 helm-repos ## Install SPIRE on k2 (with cert-manager TLS for federation)
 	@echo "Installing SPIRE on k2..."
 	@./scripts/k2/spire/deploy-spire.sh
 

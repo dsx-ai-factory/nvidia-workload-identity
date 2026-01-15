@@ -1,0 +1,107 @@
+# Git
+.git/
+.gitignore
+.gitmodules
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+
+# Documentation
+*.md
+!go.mod
+
+# Build artifacts and binaries
+/bin/
+/dist/
+/build/
+/target/
+/cel-evaluator
+/spiffe-token-fetcher
+/metadata-service
+/spiffe-exchange-service
+/mds-network-setup
+/exchange-proxy-csi
+
+# Test files and coverage
+*_test.go
+*.test
+coverage.out
+coverage.html
+.coverage/
+
+# Profiling
+*.prof
+*.pprof
+
+# Development tools and config
+.golangci.yml
+.pre-commit-config.yaml
+Makefile
+
+# Deployment scripts (not needed in container)
+scripts/
+
+# Third-party submodules
+third-party/
+
+# Temporary files
+*.tmp
+*.temp
+/tmp/
+.cache/
+
+# Log files
+*.log
+logs/
+log/
+
+# Environment files
+*.env
+*.env.*
+.env
+
+# Certificate and key files
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Backup files
+*.bak
+*.backup
+
+# Local development
+local/
+dev/
+debug
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Vault/OpenBao data
+vault-data/
+bao-data/
+raft-data/
+audit.log
+
+# Node.js (if any)
+node_modules/
+npm-debug.log*
+
+# Cursor/AI
+.cursor/
+AGENTS.md

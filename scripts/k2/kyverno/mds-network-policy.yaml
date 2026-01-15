@@ -1,0 +1,63 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: inject-mds-sidecar
+  annotations:
+    policies.kyverno.io/title: Inject MDS Sidecar
+    policies.kyverno.io/category: SPIFFE
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Injects the metadata-service sidecar into virt-launcher pods with the
+      spiffe.nvidia.com/inject-mds annotation. Network setup is handled by the
+      mds-network-setup DaemonSet which runs privileged on each node.
+spec:
+  background: true
+  rules:
+  - name: add-mds-sidecar
+    match:
+      any:
+      - resources:
+          kinds: [Pod]
+          annotations:
+            spiffe.nvidia.com/inject-mds: "true"
+    mutate:
+      patchStrategicMerge:
+        spec:
+          containers:
+          - name: metadata-service
+            image: metadata-service:latest
+            imagePullPolicy: IfNotPresent
+            args:
+            - --listen=:80
+            - --log-level=info
+            - --exchange-socket=/var/run/secrets/exchange.io/exchange.sock
+            ports:
+            - containerPort: 80
+              name: http
+            resources:
+              requests:
+                cpu: 50m
+                memory: 64Mi
+              limits:
+                cpu: 100m
+                memory: 128Mi
+            securityContext:
+              capabilities:
+                add:
+                - NET_BIND_SERVICE
+            volumeMounts:
+            - name: spiffe-csi
+              mountPath: /var/run/secrets/spire.io
+              readOnly: true
+            - name: exchange-csi
+              mountPath: /var/run/secrets/exchange.io
+              readOnly: true
+          volumes:
+          - name: spiffe-csi
+            csi:
+              driver: csi.spiffe.io
+              readOnly: true
+          - name: exchange-csi
+            csi:
+              driver: csi.exchange.nvidia.com
+              readOnly: true

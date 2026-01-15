@@ -1,0 +1,134 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: exchange-proxy-system
+  labels:
+    app.kubernetes.io/name: exchange-proxy-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: exchange-proxy-csi
+  namespace: exchange-proxy-system
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: exchange-proxy-csi
+  namespace: exchange-proxy-system
+  labels:
+    app: exchange-proxy-csi
+spec:
+  selector:
+    matchLabels:
+      app: exchange-proxy-csi
+  template:
+    metadata:
+      labels:
+        app: exchange-proxy-csi
+    spec:
+      serviceAccountName: exchange-proxy-csi
+      containers:
+      # socat container - creates Unix socket and forwards to exchange service
+      - name: exchange-proxy
+        image: alpine/socat:1.8.0.3
+        imagePullPolicy: IfNotPresent
+        args:
+        - UNIX-LISTEN:/run/exchange-proxy/exchange.sock,fork,mode=777
+        - TCP:EXCHANGE_SERVICE_URL_PLACEHOLDER
+        volumeMounts:
+        - name: exchange-socket-dir
+          mountPath: /run/exchange-proxy
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            cpu: 50m
+            memory: 32Mi
+
+      # CSI driver container
+      - name: exchange-proxy-csi
+        image: exchange-proxy-csi:latest
+        imagePullPolicy: IfNotPresent
+        args:
+        - -socket-dir=/run/exchange-proxy
+        - -csi-socket-path=/exchange-proxy-csi/csi.sock
+        env:
+        - name: MY_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        securityContext:
+          privileged: true
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - all
+        volumeMounts:
+        - name: exchange-socket-dir
+          mountPath: /run/exchange-proxy
+          readOnly: true
+        - name: csi-socket-dir
+          mountPath: /exchange-proxy-csi
+        - name: mountpoint-dir
+          mountPath: /var/lib/kubelet/pods
+          mountPropagation: Bidirectional
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 50m
+            memory: 64Mi
+
+      # CSI node driver registrar
+      - name: node-driver-registrar
+        image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.12.0
+        imagePullPolicy: IfNotPresent
+        args:
+        - --csi-address=/exchange-proxy-csi/csi.sock
+        - --kubelet-registration-path=/var/lib/kubelet/plugins/csi.exchange.nvidia.com/csi.sock
+        volumeMounts:
+        - name: csi-socket-dir
+          mountPath: /exchange-proxy-csi
+        - name: kubelet-plugin-registration-dir
+          mountPath: /registration
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            cpu: 50m
+            memory: 32Mi
+
+      volumes:
+      # Shared volume for exchange socket between socat and CSI driver
+      - name: exchange-socket-dir
+        emptyDir: {}
+      # CSI driver socket directory
+      - name: csi-socket-dir
+        hostPath:
+          path: /var/lib/kubelet/plugins/csi.exchange.nvidia.com
+          type: DirectoryOrCreate
+      # Where CSI driver mounts volumes into pods
+      - name: mountpoint-dir
+        hostPath:
+          path: /var/lib/kubelet/pods
+          type: Directory
+      # Where node-driver-registrar registers the plugin
+      - name: kubelet-plugin-registration-dir
+        hostPath:
+          path: /var/lib/kubelet/plugins_registry
+          type: Directory
+---
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: csi.exchange.nvidia.com
+spec:
+  attachRequired: false
+  podInfoOnMount: true
+  fsGroupPolicy: None
+  volumeLifecycleModes:
+  - Ephemeral

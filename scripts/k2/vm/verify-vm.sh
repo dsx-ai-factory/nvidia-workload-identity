@@ -1,5 +1,5 @@
 #!/bin/bash
-# verify-vm.sh - Verifies VM metadata service access
+# verify-vm.sh - Verifies VM with MDS sidecar
 
 set -euo pipefail
 
@@ -7,35 +7,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 CLUSTER_NAME="k2"
 CONTEXT="kind-${CLUSTER_NAME}"
-NAMESPACE="default"
 VM_NAME="${VM_NAME:-demo-ubuntu-vm}"
-VM_TENANT="${VM_TENANT:-default}"
+VM_TENANT="${VM_TENANT:-tenant1}"
+NAMESPACE="tenant-${VM_TENANT}"
 TEST_AUDIENCE="${TEST_AUDIENCE:-spiffe://tenant1.sjc-1.vmaas.nvidia.com}"
+MDS_IP="169.254.169.254"
 
 source "${PROJECT_ROOT}/scripts/common.sh"
-
-# Get metadata service UDN IP
-get_metadata_service_udn_ip() {
-    local pod_name
-    pod_name=$(kubectl get pod -n "${NAMESPACE}" -l app=metadata-service,tenant="${VM_TENANT}" \
-        --context "${CONTEXT}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-    
-    if [[ -z "$pod_name" ]]; then
-        return 1
-    fi
-    
-    local udn_ip
-    udn_ip=$(kubectl get pod -n "${NAMESPACE}" "${pod_name}" --context "${CONTEXT}" \
-        -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' 2>/dev/null | \
-        jq -r '.["'${NAMESPACE}'/tenant-'${VM_TENANT}'-network"].ip_addresses[0]' 2>/dev/null | \
-        cut -d'/' -f1)
-    
-    if [[ -z "$udn_ip" || "$udn_ip" == "null" ]]; then
-        return 1
-    fi
-    
-    echo "$udn_ip"
-}
 
 # Execute command in VM via virtctl console
 exec_in_vm() {
@@ -95,11 +73,9 @@ parse_jwt_response() {
 
 # Test metadata service JWT endpoint
 test_jwt_endpoint() {
-    local metadata_ip="$1"
+    log_test "Testing JWT endpoint at ${MDS_IP}:80/v1/metadata/identity..."
     
-    log_test "Testing JWT endpoint at ${metadata_ip}:8080/v1/metadata/identity..."
-    
-    local curl_cmd="curl -v -X POST http://${metadata_ip}:8080/v1/metadata/identity -H 'Content-Type: application/json' -d '{\"audience\": \"${TEST_AUDIENCE}\"}' --max-time 10"
+    local curl_cmd="curl -v -X POST http://${MDS_IP}/v1/metadata/identity -H 'Content-Type: application/json' -d '{\"audience\": \"${TEST_AUDIENCE}\"}' --max-time 10"
     
     local response
     if response=$(exec_in_vm "$curl_cmd" 60); then
@@ -137,8 +113,8 @@ verify_vm_running() {
     fi
 }
 
-verify_workload_api_proxy() {
-    log_test "Checking workload API proxy sidecar..."
+verify_mds_sidecar() {
+    log_test "Checking MDS sidecar..."
     
     local pod_name
     pod_name=$(kubectl get pod -n "${NAMESPACE}" -l kubevirt.io/domain="${VM_NAME}" \
@@ -150,61 +126,24 @@ verify_workload_api_proxy() {
     fi
     
     if kubectl get pod "${pod_name}" -n "${NAMESPACE}" --context "${CONTEXT}" \
-        -o jsonpath='{.spec.containers[*].name}' 2>/dev/null | grep -q "workload-api-proxy"; then
-        log_success "Workload API proxy sidecar present"
+        -o jsonpath='{.spec.containers[*].name}' 2>/dev/null | grep -q "metadata-service"; then
+        log_success "MDS sidecar present"
         return 0
     else
-        log_error "Workload API proxy sidecar not found"
+        log_error "MDS sidecar not found"
         return 1
     fi
 }
 
-verify_metadata_service() {
-    log_test "Checking metadata service..."
+verify_mds_network_setup() {
+    log_test "Checking MDS network setup DaemonSet..."
     
-    local tenant="${VM_TENANT:-default}"
-    
-    if kubectl get daemonset "metadata-service-${tenant}" -n "${NAMESPACE}" --context "${CONTEXT}" \
+    if kubectl get daemonset mds-network-setup -n mds-system --context "${CONTEXT}" \
         --no-headers 2>/dev/null | grep -q .; then
-        log_success "Metadata service daemonset exists"
+        log_success "MDS network setup DaemonSet exists"
         return 0
     else
-        log_error "Metadata service daemonset not found"
-        return 1
-    fi
-}
-
-verify_metadata_access() {
-    log_test "Testing metadata service from VM..."
-    
-    # Check prerequisites
-    if ! command -v virtctl &> /dev/null; then
-        log_warning "virtctl is not installed. Skipping automated VM test."
-        log_info "To test metadata access from inside the VM:"
-        echo
-        echo "  virtctl console ${VM_NAME} -n ${NAMESPACE} --context ${CONTEXT}"
-        echo "  # Then run inside VM:"
-        echo "  curl -X POST http://169.254.169.254:8080/v1/metadata/identity \\"
-        echo "    -H 'Content-Type: application/json' \\"
-        echo "    -d '{\"audience\": \"${TEST_AUDIENCE}\"}'"
-        echo
-        return 0
-    fi
-    
-    # Get metadata service IP
-    log_info "Retrieving metadata service UDN IP address..."
-    local metadata_ip
-    if ! metadata_ip=$(get_metadata_service_udn_ip); then
-        log_warning "Failed to get metadata service IP. Skipping automated test."
-        return 0
-    fi
-    
-    log_success "Metadata service UDN IP: ${metadata_ip}"
-    
-    # Test JWT endpoint
-    if test_jwt_endpoint "${metadata_ip}"; then
-        return 0
-    else
+        log_error "MDS network setup DaemonSet not found"
         return 1
     fi
 }
@@ -227,6 +166,31 @@ verify_node_labels() {
     fi
 }
 
+verify_metadata_access() {
+    log_test "Testing metadata service from VM..."
+    
+    # Check prerequisites
+    if ! command -v virtctl &> /dev/null; then
+        log_warning "virtctl is not installed. Skipping automated VM test."
+        log_info "To test metadata access from inside the VM:"
+        echo
+        echo "  virtctl console ${VM_NAME} -n ${NAMESPACE} --context ${CONTEXT}"
+        echo "  # Then run inside VM:"
+        echo "  curl -X POST http://${MDS_IP}/v1/metadata/identity \\"
+        echo "    -H 'Content-Type: application/json' \\"
+        echo "    -d '{\"audience\": \"${TEST_AUDIENCE}\"}'"
+        echo
+        return 0
+    fi
+    
+    # Test JWT endpoint
+    if test_jwt_endpoint; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 display_vm_info() {
     echo
     echo "VM Information:"
@@ -240,25 +204,35 @@ display_vm_info() {
     kubectl get pod -n "${NAMESPACE}" -l kubevirt.io/domain="${VM_NAME}" --context "${CONTEXT}" 2>/dev/null || echo "  Not found"
     
     echo
-    echo "Metadata Service:"
-    kubectl get pod -n "${NAMESPACE}" -l app=metadata-service,tenant="${VM_TENANT}" \
-        --context "${CONTEXT}" 2>/dev/null || echo "  Not found"
+    echo "Launcher Pod Containers:"
+    local pod_name
+    pod_name=$(kubectl get pod -n "${NAMESPACE}" -l kubevirt.io/domain="${VM_NAME}" \
+        -o jsonpath='{.items[0].metadata.name}' --context "${CONTEXT}" 2>/dev/null || echo "")
+    if [[ -n "$pod_name" ]]; then
+        kubectl get pod "${pod_name}" -n "${NAMESPACE}" --context "${CONTEXT}" \
+            -o jsonpath='{range .spec.containers[*]}{.name}{"\n"}{end}' 2>/dev/null
+    fi
     
     echo
     echo "Access:"
     echo "  Console: virtctl console ${VM_NAME} -n ${NAMESPACE} --context ${CONTEXT}"
     echo "  Credentials: ubuntu / ubuntu"
+    echo
+    echo "Test MDS from inside VM:"
+    echo "  curl -X POST http://${MDS_IP}/v1/metadata/identity \\"
+    echo "    -H 'Content-Type: application/json' \\"
+    echo "    -d '{\"audience\": \"${TEST_AUDIENCE}\"}'"
 }
 
 main() {
-    log_info "Verifying VM metadata service..."
+    log_info "Verifying VM with MDS sidecar..."
     echo
     
     local failed=0
     
     verify_vm_running || ((failed++))
-    verify_workload_api_proxy || ((failed++))
-    verify_metadata_service || ((failed++))
+    verify_mds_sidecar || ((failed++))
+    verify_mds_network_setup || ((failed++))
     verify_node_labels || ((failed++))
     verify_metadata_access || ((failed++))
     
@@ -275,4 +249,3 @@ main() {
 
 trap 'log_error "Script interrupted"; exit 1' INT TERM
 main "$@"
-
