@@ -82,6 +82,12 @@ install_kubevirt() {
         -p '{"spec":{"configuration":{"developerConfiguration":{"useEmulation":true}}}}' \
         --context "${CONTEXT}"
     
+    # Configure l2bridge network binding for Primary UDN support
+    log_info "Configuring l2bridge network binding..."
+    kubectl patch kubevirt kubevirt -n kubevirt --type=merge \
+        -p '{"spec":{"configuration":{"network":{"binding":{"l2bridge":{"domainAttachmentType":"managedTap","migration":{}}}}}}}' \
+        --context "${CONTEXT}"
+    
     log_info "Waiting for KubeVirt..."
     kubectl wait --for=condition=Available kubevirt kubevirt -n kubevirt \
         --timeout=600s --context "${CONTEXT}"

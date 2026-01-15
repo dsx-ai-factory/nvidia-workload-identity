@@ -14,11 +14,10 @@ spec:
         kubevirt.io/domain: VM_NAME_PLACEHOLDER
         app: demo-vm
         tenant: TENANT_PLACEHOLDER
-        network: tenant-TENANT_PLACEHOLDER-network
         spiffe.nvidia.com/tenant: tenant1
         spiffe.nvidia.com/service: vmaas
       annotations:
-        spiffe.nvidia.com/inject-workload-api-proxy: "true"
+        spiffe.nvidia.com/inject-mds: "true"
     spec:
       domain:
         cpu:
@@ -32,8 +31,9 @@ spec:
               bus: virtio
             name: cloudinit
           interfaces:
-          - bridge: {}
-            name: tenant-network
+          - name: default
+            # TEMPORARY: Using bridge:{} for Kind cluster compatibility
+            bridge: {}
         features:
           acpi:
             enabled: true
@@ -43,9 +43,10 @@ spec:
           limits:
             memory: 2Gi
       networks:
-      - name: tenant-network
+      - name: default
         multus:
-          networkName: tenant-TENANT_PLACEHOLDER-network
+          networkName: tenant-TENANT_PLACEHOLDER/tenant-TENANT_PLACEHOLDER-network
+          default: true
       volumes:
       - containerDisk:
           image: quay.io/containerdisks/ubuntu:24.04
@@ -69,5 +70,9 @@ spec:
             runcmd:
               - systemctl enable ssh
               - echo "VM ready!" > /var/log/vm-ready.log
+          networkData: |
+            version: 2
+            ethernets:
+              enp1s0:
+                dhcp4: true
         name: cloudinit
-

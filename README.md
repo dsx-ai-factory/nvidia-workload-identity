@@ -31,38 +31,35 @@ package "k2 Cluster" as K2 {
   [SPIRE Agent] as SpireAgent
   [Envoy Gateway] as GW2
   
-  package "VMI Pod" as VMIPod {
-    [Ubuntu VM] as VM
-    [socat Sidecar] as Socat
-    [SPIRE CSI Socket] as SpireCSI
-    [Bridge Socket\n(Metadata Bridge CSI)] as BridgeSocket
+  package "Workloads" as Workloads {
+    [Regular Pod\n(spiffe-token-fetcher)] as Pod
+    [VMI Pod\n(metadata sidecar)] as VMIPod
   }
-  
-  [Metadata Service] as Metadata
 }
 
 ' Federation: k1 SPIRE fetches k2's bundle
-SPIRE1 -[#blue]-> GW2 : 1. Fetch SPIRE bundle\n(federation)
+SPIRE1 -[#blue]-> GW2 : Fetch SPIRE bundle\n(federation)
 GW2 -[#blue]-> SPIRE2
 
-' VM to SPIFFE flow (get JWT)
-VM -[#green]-> Metadata : 1. POST /v1/metadata/identity
-Metadata -[#green]-> BridgeSocket : 2. Connect to bridge
-BridgeSocket -[#green]-> Socat : 3. Passthrough
-Socat -[#green]-> SpireCSI : 4. Passthrough
-SpireCSI -[#green]-> SpireAgent : 5. Fetch JWT SVID
-Metadata -[#green]-> GW1 : 6. Exchange JWT
+' Workloads to SPIRE Agent
+Pod -[#green]-> SpireAgent : FetchJWTSVID\n(SPIRE CSI)
+VMIPod -[#green]-> SpireAgent : FetchJWTSVID\n(SPIRE CSI)
+
+' Workloads to Exchange Service
+Pod -[#green]-> GW1 : Exchange JWT\n(HTTP)
+VMIPod -[#green]-> GW1 : Exchange JWT\n(Exchange CSI)
 GW1 -[#green]-> Exchange
 
-' VM to Bao flow (authenticate)
-VM -[#orange]-> GW1 : 7. Authenticate to Bao
+' Workloads to Bao
+Pod -[#orange]-> GW1 : Authenticate
+VMIPod -[#orange]-> GW1 : Authenticate
 GW1 -[#orange]-> Bao
 
 ' SPIRE Agent to Server
 SpireAgent --> SPIRE2 : Attestation
 
 ' OpenBao JWKS validation
-Bao -[#purple]--> Exchange : 4. Fetch JWKS\n(*.{region}.{service}.nvidia.com)
+Bao -[#purple]--> Exchange : Fetch JWKS\n(*.{region}.{service}.nvidia.com)
 
 ' Exchange validates incoming JWTs
 Exchange --> SPIRE1 : Fetch SPIFFE bundle\n(validate k2 JWTs)
@@ -110,48 +107,74 @@ The exchange service:
 
 Exchange service serves `/.well-known/jwks.json` for each tenant domain. CoreDNS wildcard rewrite routes `*.{region}.{service}.nvidia.com` to the exchange service per service, enabling OpenBao to fetch JWKS for any tenant.
 
-## SPIFFE JWT Metadata Service
+## Pod Workload Architecture
 
-HTTP metadata service at **169.254.169.254** providing SPIFFE JWTs to KubeVirt VMs via tenant-specific DaemonSet. Uses OVN User Defined Networks (UDN) for tenant isolation and source IP identity verification.
+Regular pods use the spiffe-token-fetcher sidecar to fetch and refresh SPIFFE JWTs.
 
-### Sequence Diagram
+### Architecture Diagram
 
 ```plantuml
-@startuml
-participant "VM Application" as App
-participant "Metadata Service\n169.254.169.254" as Meta
-participant "K8s API" as K8s
-participant "Bridge Socket" as Bridge
-participant "Workload API Proxy\n(socat sidecar)" as Proxy
-participant "SPIRE Agent" as Agent
-participant "Exchange Service\n(k1)" as Exchange
+@startuml Pod Workload
 
-App -> Meta : POST /v1/metadata/identity
-Meta -> K8s : Lookup pod by source IP
-K8s --> Meta : Pod info (UID)
-Meta -> Bridge : Connect to /run/metadata/.../metadata-bridge-spire-agent.sock
-Bridge -> Proxy : Passthrough
-Proxy -> Agent : FetchJWTSVID
-Agent --> Proxy : JWT SVID
-Proxy --> Bridge : Passthrough
-Bridge --> Meta : JWT
-Meta -> Exchange : POST /v1/exchange
-Exchange --> Meta : Exchanged JWT
-Meta --> App : {"token": "...", "spiffe_id": "..."}
+skinparam packageStyle rectangle
+
+package "k1 Cluster" as K1 {
+  [OpenBao] as Bao
+  [Exchange Service] as Exchange
+  [Envoy Gateway] as GW1
+}
+
+package "k2 Cluster" as K2 {
+  [SPIRE Agent] as SpireAgent
+  
+  package "Application Pod" as AppPod {
+    [nginx] as App
+    [spiffe-token-fetcher\n(init + sidecar)] as Fetcher
+    [SPIRE CSI Socket] as SpireCSI
+    [Shared Volume\n/var/run/secrets/nvidia.com/spiffe] as TokenVol
+  }
+}
+
+' Token fetcher flow
+Fetcher -[#green]-> SpireCSI : 1. FetchJWTSVID
+SpireCSI -[#green]-> SpireAgent : 2. Workload API
+SpireAgent -[#green]--> SpireCSI
+SpireCSI -[#green]--> Fetcher : 3. JWT SVID
+Fetcher -[#green]-> GW1 : 4. POST /v1/exchange
+GW1 -[#green]-> Exchange
+Exchange -[#green]--> Fetcher : 5. Exchanged JWT
+Fetcher -[#green]-> TokenVol : 6. Write token to file
+
+' App reads token
+App -[#gray]-> TokenVol : Read token
+
+' App to Bao
+App -[#orange]-> GW1 : 7. Authenticate to Bao
+GW1 -[#orange]-> Bao
+
 @enduml
 ```
 
 ### Components
 
-**Metadata Service DaemonSet**: Per-tenant deployment attached to tenant UDN. Resolves VM source IP to pod via K8s API, connects to bridge socket to fetch JWT.
+**spiffe-token-fetcher**: Runs as both init container (blocks until token available) and sidecar (refreshes token before expiry). Fetches JWT from SPIRE, exchanges via HTTP, writes to shared volume.
 
-**Workload API Proxy Sidecar**: Injected into VMI pods via Kyverno policy. Proxies SPIRE socket to bridge socket using `socat`. Inherits VMI pod's SPIFFE identity.
+**SPIRE CSI Driver**: Mounts SPIRE agent socket at `/var/run/secrets/spire.io/spire-agent.sock`.
 
-**Metadata Bridge CSI Driver**: Creates per-pod directories at `/run/metadata/metadata-bridge-sockets/<pod-uid>/` for socket bridging between VMI pod and metadata service.
+**Shared Token Volume**: EmptyDir volume at `/var/run/secrets/nvidia.com/spiffe/` where token is written as a file.
 
-## VM Metadata Sidecar Architecture
+### Token File
 
-Metadata sidecar container co-located with the VM in the same pod. Provides SPIFFE JWTs to VMs via the link-local metadata address.
+The application reads the exchanged JWT from the token file:
+
+```bash
+TOKEN=$(cat /var/run/secrets/nvidia.com/spiffe/token)
+curl -H "Authorization: Bearer $TOKEN" https://gateway.sjc-1.nvidia.com:8200/v1/auth/jwt/cel/login
+```
+
+## VM Workload Architecture
+
+KubeVirt VMs access SPIFFE JWTs via an HTTP metadata service at **169.254.169.254**. The metadata sidecar runs in each VMI pod, injected via Kyverno policy.
 
 ### Architecture Diagram
 
@@ -172,27 +195,37 @@ package "k2 Cluster" as K2 {
   [SPIRE Agent] as SpireAgent
   [Envoy Gateway] as GW2
   
-  package "VMI Pod" as VMIPod {
+  package "exchange-proxy-system" as ExchangeNS {
+    [Exchange Proxy CSI\nDaemonSet] as ExchangeCSI
+  }
+  
+  package "mds-system" as MDSNS {
+    [MDS Network Setup\nDaemonSet] as MDSNetwork
+  }
+  
+  package "VMI Pod (tenant-tenant1)" as VMIPod {
     [Ubuntu VM] as VM
-    [Metadata Sidecar\n169.254.169.254] as MetaSidecar
+    [Metadata Sidecar\n169.254.169.254:80] as MetaSidecar
     [SPIRE CSI Socket] as SpireCSI
+    [Exchange CSI Socket] as ExchangeSocket
   }
 }
 
 ' Federation: k1 SPIRE fetches k2's bundle
-SPIRE1 -[#blue]-> GW2 : 1. Fetch SPIRE bundle\n(federation)
+SPIRE1 -[#blue]-> GW2 : Fetch SPIRE bundle\n(federation)
 GW2 -[#blue]-> SPIRE2
 
 ' VM to metadata sidecar flow
-VM -[#green]-> MetaSidecar : 1. POST /v1/metadata/identity\n(via L2 bridge route)
+VM -[#green]-> MetaSidecar : 1. POST /v1/metadata/identity\n(via nftables MAC rewrite)
 MetaSidecar -[#green]-> SpireCSI : 2. FetchJWTSVID
 SpireCSI -[#green]-> SpireAgent : 3. Workload API
 SpireAgent -[#green]--> SpireCSI
 SpireCSI -[#green]--> MetaSidecar : 4. JWT SVID
-MetaSidecar -[#green]-> GW1 : 5. Exchange JWT
+MetaSidecar -[#green]-> ExchangeSocket : 5. Exchange JWT\n(Unix socket)
+ExchangeSocket -[#green]-> ExchangeCSI : socat forward
+ExchangeCSI -[#green]-> GW1
 GW1 -[#green]-> Exchange
-Exchange -[#green]--> GW1 : 6. Exchanged JWT
-GW1 -[#green]--> MetaSidecar
+Exchange -[#green]--> MetaSidecar : 6. Exchanged JWT
 MetaSidecar -[#green]--> VM : 7. {"token": "..."}
 
 ' VM to Bao flow (authenticate)
@@ -201,6 +234,9 @@ GW1 -[#orange]-> Bao
 
 ' SPIRE Agent to Server
 SpireAgent --> SPIRE2 : Attestation
+
+' MDS Network Setup configures pod networking
+MDSNetwork ..[#gray].> VMIPod : Configure nftables\n(veth, routes, MAC rewrite)
 
 ' OpenBao JWKS validation
 Bao -[#purple]--> Exchange : Fetch JWKS\n(*.{region}.{service}.nvidia.com)
@@ -211,45 +247,53 @@ Exchange --> SPIRE1 : Fetch SPIFFE bundle\n(validate k2 JWTs)
 @enduml
 ```
 
+### Components
+
+**Metadata Sidecar**: Container running in the VMI pod that serves the metadata API at 169.254.169.254. Directly accesses the SPIRE workload API socket and exchange service socket via CSI drivers.
+
+**MDS Network Setup DaemonSet**: Privileged DaemonSet that configures networking in each VMI pod's namespace to route VM traffic to the metadata sidecar (see [cmd/mds-network-setup/README.md](cmd/mds-network-setup/README.md)).
+
+**Exchange Proxy CSI Driver**: DaemonSet that creates Unix sockets forwarding to the exchange service via socat, mounted into VMI pods for exchange service access without cluster network.
+
+**SPIRE CSI Driver**: Mounts SPIRE agent socket into the pod for workload API access.
+
 ### Sequence Diagram
 
 ```plantuml
 @startuml
 participant "VM Application" as App
 participant "Metadata Sidecar\n169.254.169.254" as Meta
-participant "SPIRE Agent\n(via CSI socket)" as Agent
-participant "Envoy Gateway\n(k1)" as GW1
-participant "Exchange Service\n(k1)" as Exchange
+participant "SPIRE Agent\n(via SPIRE CSI)" as Agent
+participant "Exchange Service\n(via Exchange CSI)" as Exchange
 
 App -> Meta : POST /v1/metadata/identity
 Meta -> Agent : FetchJWTSVID\n(workload API socket)
 Agent --> Meta : JWT SVID
-Meta -> GW1 : POST /v1/exchange
-GW1 -> Exchange
-Exchange --> GW1 : Exchanged JWT
-GW1 --> Meta
+Meta -> Exchange : POST /v1/exchange\n(Unix socket)
+Exchange --> Meta : Exchanged JWT
 Meta --> App : {"token": "...", "spiffe_id": "..."}
 @enduml
 ```
 
-### Components
+### CSI Volumes
 
-**Metadata Sidecar**: Container running in the VMI pod that serves the metadata API at 169.254.169.254. Routes on the KubeVirt L2 bridge direct VM traffic to the sidecar. Directly accesses the SPIRE workload API socket mounted via CSI driver.
+**SPIRE CSI** (`csi.spiffe.io`): Mounts SPIRE agent socket at `/var/run/secrets/spire.io/spire-agent.sock` for fetching JWT SVIDs.
 
-**SPIRE CSI Socket**: SPIRE agent socket mounted into the pod via CSI driver. The metadata sidecar uses this to fetch JWT SVIDs with the pod's attested SPIFFE identity.
+**Exchange CSI** (`csi.exchange.nvidia.com`): Mounts exchange service socket at `/var/run/secrets/exchange.io/exchange.sock` for JWT exchange without cluster network access.
 
-**L2 Bridge Routing**: IP routes configured on the KubeVirt pod network bridge direct traffic destined for 169.254.169.254 from the VM to the metadata sidecar container.
+### Network Configuration
+
+The MDS Network Setup DaemonSet configures each VMI pod's network namespace to route VM traffic to the metadata sidecar. See `cmd/mds-network-setup/README.md` for details.
 
 ### Security Model
 
-- **Pod Co-location**: Metadata sidecar runs in the same pod as the VM, inheriting the same SPIFFE identity
-- **Direct Socket Access**: No proxying required; sidecar directly accesses SPIRE workload API
-- **L2 Isolation**: Traffic stays within the pod's network namespace via bridge routing
+- **Pod Co-location**: Metadata sidecar runs in the same pod as the VM, inheriting the same SPIFFE identity. It serves only one VM.
+- **Local traffic**: Metadata service API is not exposed as a K8s service, only routing with the pod local network rewrite.
 
 ### HTTP API
 
 ```bash
-curl -X POST http://169.254.169.254:8080/v1/metadata/identity \
+curl -X POST http://169.254.169.254/v1/metadata/identity \
   -H "Content-Type: application/json" \
   -d '{"audience": "spiffe://tenant1.sjc-1.vmaas.nvidia.com"}'
 ```
@@ -261,13 +305,6 @@ curl -X POST http://169.254.169.254:8080/v1/metadata/identity \
   "spiffe_id": "spiffe://tenant1.sjc-1.vmaas.nvidia.com/vm/{uuid}"
 }
 ```
-
-### Security Model
-
-- **Source IP Authenticity**: OVN guarantees source IP cannot be spoofed within UDN
-- **Pod Identity**: K8s API confirms VMI pod identity from source IP
-- **Workload Attestation**: SPIRE attests sidecar PID to VMI pod identity
-- **Socket Isolation**: Per-pod sockets prevent cross-VM access
 
 ## OpenBao CEL Integration
 
@@ -314,8 +351,8 @@ make verify-nginx     # Test nginx -> OpenBao auth
 make verify-vm        # Test VM -> metadata service
 
 # Logs
-kubectl logs -l app=spiffe-exchange-service --context kind-k1
-kubectl logs -l app=metadata-service --context kind-k2
+kubectl logs -l app=spiffe-exchange-service -n spiffe-exchange --context kind-k1
+kubectl logs -n tenant-tenant1 -l kubevirt.io/domain -c metadata-service --context kind-k2
 
 # VM console (ubuntu/ubuntu)
 virtctl console demo-ubuntu-vm --context kind-k2

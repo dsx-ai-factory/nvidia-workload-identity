@@ -7,8 +7,9 @@
 /cel-evaluator
 /spiffe-token-fetcher
 /metadata-service
-/metadata-bridge-csi-driver
 /spiffe-exchange-service
+/mds-network-setup
+/exchange-proxy-csi
 
 # Test binary, built with `go test -c`
 *.test
@@ -70,10 +71,6 @@ yarn-error.log*
 /website/build/
 /website/.docusaurus/
 /website/node_modules/
-
-# Docker
-.dockerignore
-*.log
 
 # Temporary files
 *.tmp

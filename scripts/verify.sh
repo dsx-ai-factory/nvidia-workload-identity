@@ -45,7 +45,7 @@ verify_k1() {
     fi
     
     # Exchange Service
-    if kubectl get pods -l app=spiffe-exchange-service \
+    if kubectl get pods -n spiffe-exchange -l app=spiffe-exchange-service \
         --context "${K1_CONTEXT}" --no-headers 2>/dev/null | grep -q Running; then
         log_success "k1: Exchange service running"
     else

@@ -21,6 +21,8 @@ spire-server:
               operator: Exists
             - key: spiffe.nvidia.com/service
               operator: Exists
+            - key: kubevirt.io
+              operator: DoesNotExist
           spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/tenant/{{ index .PodMeta.Labels \"spiffe.nvidia.com/tenant\" }}/service/{{ index .PodMeta.Labels \"spiffe.nvidia.com/service\" }}/pod/{{ .PodMeta.UID }}"
         vm-workloads:
           podSelector:
