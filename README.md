@@ -157,7 +157,7 @@ GW1 -[#orange]-> Bao
 
 ### Components
 
-**spiffe-token-fetcher**: Runs as both init container (blocks until token available) and sidecar (refreshes token before expiry). Fetches JWT from SPIRE, exchanges via HTTP, writes to shared volume.
+**spiffe-token-fetcher**: Runs as a native sidecar (init container with `restartPolicy: Always`). Blocks pod startup until initial token is available, then continues running to refresh token before expiry. Fetches JWT from SPIRE, exchanges via HTTP, writes to shared volume.
 
 **SPIRE CSI Driver**: Mounts SPIRE agent socket at `/var/run/secrets/spire.io/spire-agent.sock`.
 
