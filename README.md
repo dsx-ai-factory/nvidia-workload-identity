@@ -318,6 +318,44 @@ spiffe://tenant1.sjc-1.vmaas.nvidia.com/vm/{uuid}
 
 Assigned policies: `spiffe-authenticated`, `tenant-tenant1`, `region-sjc-1`, `service-vmaas`, `resource-type-vm`
 
+### Authentication Sequence
+
+```plantuml
+@startuml OpenBao Auth
+participant "Workload" as App
+participant "OpenBao" as Bao
+participant "Exchange Service\n(JWKS)" as Exchange
+
+App -> Bao : POST /v1/auth/jwt/cel/login\nAuthorization: Bearer <JWT>
+Bao -> Exchange : GET /.well-known/jwks.json\nHost: tenant1.sjc-1.vmaas.nvidia.com
+Exchange --> Bao : {"keys": [...]}
+
+Bao -> Bao : Validate JWT signature
+Bao -> Bao : Parse SPIFFE ID:\ntenant, region, service, resource_type
+Bao -> Bao : CEL Policy Evaluation
+Bao --> App : Bao Token\n(policies: tenant-tenant1, ...)
+
+App -> Bao : GET /v1/kv/tenant1/secrets\nX-Vault-Token: <bao-token>
+Bao --> App : Secret data
+@enduml
+```
+
+### Example Login
+
+```bash
+# Get JWT from token file (pod) or metadata service (VM)
+TOKEN=$(cat /var/run/secrets/nvidia.com/spiffe/token)
+
+# Authenticate to OpenBao
+BAO_TOKEN=$(curl -s -X POST https://gateway.sjc-1.nvidia.com:8200/v1/auth/jwt/cel/login \
+  -H "Content-Type: application/json" \
+  -d "{\"jwt\": \"$TOKEN\"}" | jq -r '.auth.client_token')
+
+# Access secrets
+curl -s https://gateway.sjc-1.nvidia.com:8200/v1/kv/tenant1/example \
+  -H "X-Vault-Token: $BAO_TOKEN"
+```
+
 ## Required Pod Labels
 
 Workloads must have these labels for SPIFFE identity:
