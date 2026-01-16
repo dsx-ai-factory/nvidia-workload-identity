@@ -25,13 +25,13 @@ import (
 )
 
 const (
-	mdsIP         = "169.254.169.254"
-	vethPod       = "veth-mds-pod"
-	vethMDS       = "veth-mds"
-	bridgePrefix  = "k6t-"
-	annotationKey = "spiffe.nvidia.com/inject-mds"
-	containerName = "compute"
-	criSocket     = "/run/containerd/containerd.sock"
+	mdsIP             = "169.254.169.254"
+	vethVMSide        = "mds-vm"  // max 15 chars for ifname
+	vethContainerSide = "mds-ctr" // max 15 chars for ifname
+	bridgePrefix      = "k6t-"
+	annotationKey     = "spiffe.nvidia.com/inject-mds"
+	containerName     = "compute"
+	criSocket         = "/run/containerd/containerd.sock"
 )
 
 var (
@@ -298,13 +298,6 @@ func extractPID(info string) string {
 func (ns *NetworkSetup) setupPodNetwork(ctx context.Context, pod *corev1.Pod, pid int) error {
 	podKey := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
 
-	// Check if already configured
-	slog.Debug("Checking if network already configured", "pod", podKey)
-	if ns.nsexecCheck(pid, "ip", "link", "show", vethMDS) == nil {
-		slog.Info("Network already configured", "pod", podKey)
-		return nil
-	}
-
 	// Wait for bridge
 	slog.Debug("Waiting for bridge", "pod", podKey, "prefix", bridgePrefix)
 	bridge, err := ns.waitForBridge(ctx, pid)
@@ -313,48 +306,71 @@ func (ns *NetworkSetup) setupPodNetwork(ctx context.Context, pod *corev1.Pod, pi
 	}
 	slog.Info("Found bridge", "pod", podKey, "bridge", bridge)
 
-	// Create veth pair
-	slog.Debug("Creating veth pair", "pod", podKey, "veth_pod", vethPod, "veth_mds", vethMDS)
-	if err := ns.nsexec(pid, "ip", "link", "add", vethPod, "type", "veth", "peer", "name", vethMDS); err != nil {
-		return fmt.Errorf("creating veth pair: %w", err)
+	// Create veth pair (idempotent - check if exists first)
+	if _, err := ns.nsexec(pid, "ip", "link", "show", vethContainerSide); err != nil {
+		slog.Debug("Creating veth pair", "pod", podKey, "veth_vm_side", vethVMSide, "veth_container_side", vethContainerSide)
+		if _, err := ns.nsexec(pid, "ip", "link", "add", vethVMSide, "type", "veth", "peer", "name", vethContainerSide); err != nil {
+			return fmt.Errorf("creating veth pair: %w", err)
+		}
+	} else {
+		slog.Debug("Veth pair already exists", "pod", podKey)
 	}
 
-	slog.Debug("Attaching veth to bridge", "pod", podKey, "veth", vethPod, "bridge", bridge)
-	if err := ns.nsexec(pid, "ip", "link", "set", vethPod, "master", bridge); err != nil {
-		return fmt.Errorf("attaching veth to bridge: %w", err)
+	// Attach veth to bridge (idempotent - check if already attached)
+	if !ns.isInterfaceAttachedToBridge(pid, vethVMSide, bridge) {
+		slog.Debug("Attaching veth to bridge", "pod", podKey, "veth", vethVMSide, "bridge", bridge)
+		if _, err := ns.nsexec(pid, "ip", "link", "set", vethVMSide, "master", bridge); err != nil {
+			return fmt.Errorf("attaching veth to bridge: %w", err)
+		}
+	} else {
+		slog.Debug("Veth already attached to bridge", "pod", podKey)
 	}
 
+	// Bring up interfaces (idempotent)
 	slog.Debug("Bringing up interfaces", "pod", podKey)
-	if err := ns.nsexec(pid, "ip", "link", "set", vethPod, "up"); err != nil {
-		return fmt.Errorf("bringing up %s: %w", vethPod, err)
+	if _, err := ns.nsexec(pid, "ip", "link", "set", vethVMSide, "up"); err != nil {
+		return fmt.Errorf("bringing up %s: %w", vethVMSide, err)
+	}
+	if _, err := ns.nsexec(pid, "ip", "link", "set", vethContainerSide, "up"); err != nil {
+		return fmt.Errorf("bringing up %s: %w", vethContainerSide, err)
 	}
 
-	if err := ns.nsexec(pid, "ip", "link", "set", vethMDS, "up"); err != nil {
-		return fmt.Errorf("bringing up %s: %w", vethMDS, err)
-	}
-
-	slog.Debug("Assigning MDS IP", "pod", podKey, "ip", mdsIP, "dev", vethMDS)
-	if err := ns.nsexec(pid, "ip", "addr", "add", mdsIP+"/32", "dev", vethMDS); err != nil {
-		return fmt.Errorf("assigning IP to %s: %w", vethMDS, err)
+	// Assign MDS IP (idempotent - check if already assigned)
+	if !ns.hasIPAddress(pid, vethContainerSide, mdsIP) {
+		slog.Debug("Assigning MDS IP", "pod", podKey, "ip", mdsIP, "dev", vethContainerSide)
+		if _, err := ns.nsexec(pid, "ip", "addr", "add", mdsIP+"/32", "dev", vethContainerSide); err != nil {
+			return fmt.Errorf("assigning IP to %s: %w", vethContainerSide, err)
+		}
+	} else {
+		slog.Debug("MDS IP already assigned", "pod", podKey, "ip", mdsIP)
 	}
 
 	// Get veth MAC
-	vethMAC, err := ns.getInterfaceMAC(pid, vethMDS)
+	vethMAC, err := ns.getInterfaceMAC(pid, vethContainerSide)
 	if err != nil {
 		return fmt.Errorf("getting veth MAC: %w", err)
 	}
 	slog.Info("Got veth MAC", "pod", podKey, "mac", vethMAC)
 
-	// Setup nftables
+	// Setup nftables - create table and chain if they don't exist.
 	slog.Debug("Setting up nftables bridge nat table", "pod", podKey)
-	_ = ns.nsexec(pid, "nft", "add", "table", "bridge", "nat") // ignore if exists
-	_ = ns.nsexec(pid, "nft", "add", "chain", "bridge", "nat", "PREROUTING",
-		"{ type filter hook prerouting priority dstnat; policy accept; }")
+	if err := ns.ensureNftTable(pid, "bridge", "nat"); err != nil {
+		return fmt.Errorf("creating nftables table: %w", err)
+	}
+	if err := ns.ensureNftChain(pid, "bridge", "nat", "PREROUTING",
+		"{ type filter hook prerouting priority dstnat; policy accept; }"); err != nil {
+		return fmt.Errorf("creating nftables chain: %w", err)
+	}
 
-	slog.Debug("Adding nftables MAC rewrite rule", "pod", podKey, "dst_ip", mdsIP, "dst_mac", vethMAC)
-	if err := ns.nsexec(pid, "nft", "add", "rule", "bridge", "nat", "PREROUTING",
-		"ip", "daddr", mdsIP, "ether", "daddr", "set", vethMAC); err != nil {
-		return fmt.Errorf("adding nftables rule: %w", err)
+	// Add nftables MAC rewrite rule (idempotent - check if exists first)
+	if ns.hasNftRule(pid, "bridge", "nat", "PREROUTING", mdsIP) {
+		slog.Debug("nftables rule already exists", "pod", podKey, "dst_ip", mdsIP)
+	} else {
+		slog.Debug("Adding nftables MAC rewrite rule", "pod", podKey, "dst_ip", mdsIP, "dst_mac", vethMAC)
+		if _, err := ns.nsexec(pid, "nft", "add", "rule", "bridge", "nat", "PREROUTING",
+			"ip", "daddr", mdsIP, "ether", "daddr", "set", vethMAC); err != nil {
+			return fmt.Errorf("adding nftables rule: %w", err)
+		}
 	}
 
 	// Get VM IP from pod status
@@ -374,32 +390,41 @@ func (ns *NetworkSetup) setupPodNetwork(ctx context.Context, pod *corev1.Pod, pi
 	// The pod and VM share the same IP (vmIP). The pod has a local route for this IP,
 	// which causes incoming packets from the VM to be rejected as "martian source".
 	// We need to:
-	// 1. Delete the IP from eth0 so incoming packets aren't rejected as martian
-	// 2. Add an explicit route via veth-mds so replies reach the VM
-
-	// Look up the IP with its prefix length from eth0
+	// 1. Remove the IP from eth0 so incoming packets aren't rejected as martian
+	// 2. Add an explicit route via mds-ctr so replies reach the VM
+	//
+	// Alternative: `ip route del local <vmIP> table local` would remove
+	// only the local route while keeping the IP on eth0. Either approach works here
+	// since eth0 is DOWN in KubeVirt bridge mode and the pod has no cluster network
+	// access (UDN isolation). We use `ip addr del` as the simpler option.
+	//
+	// Idempotent: only remove if still present
 	vmIPWithPrefix, err := ns.getIPWithPrefix(pid, "eth0", vmIP)
 	if err != nil {
-		slog.Warn("Could not find IP on eth0, using /32", "pod", podKey, "vm_ip", vmIP, "error", err)
-		vmIPWithPrefix = vmIP + "/32"
+		slog.Debug("IP already removed from eth0 or not present", "pod", podKey, "vm_ip", vmIP)
+	} else {
+		slog.Debug("Removing IP from eth0", "pod", podKey, "cidr", vmIPWithPrefix)
+		if _, err := ns.nsexec(pid, "ip", "addr", "del", vmIPWithPrefix, "dev", "eth0"); err != nil {
+			return fmt.Errorf("removing IP from eth0: %w", err)
+		}
 	}
-	slog.Debug("Removing IP from eth0", "pod", podKey, "cidr", vmIPWithPrefix)
-	_ = ns.nsexec(pid, "ip", "addr", "del", vmIPWithPrefix, "dev", "eth0")
 
 	slog.Debug("Adding explicit route for VM IP", "pod", podKey, "vm_ip", vmIP)
-	if err := ns.nsexec(pid, "ip", "route", "replace", vmIP+"/32", "dev", vethMDS); err != nil {
+	if _, err := ns.nsexec(pid, "ip", "route", "replace", vmIP+"/32", "dev", vethContainerSide); err != nil {
 		return fmt.Errorf("adding route for VM IP: %w", err)
 	}
 
 	// Add neighbor entry for VM MAC
 	slog.Debug("Adding neighbor entry for VM", "pod", podKey, "vm_ip", vmIP, "vm_mac", vmMAC)
-	if err := ns.nsexec(pid, "ip", "neigh", "replace", vmIP, "lladdr", vmMAC, "dev", vethMDS, "nud", "permanent"); err != nil {
+	if _, err := ns.nsexec(pid, "ip", "neigh", "replace", vmIP, "lladdr", vmMAC, "dev", vethContainerSide, "nud", "permanent"); err != nil {
 		return fmt.Errorf("adding neighbor entry: %w", err)
 	}
 
-	// List nftables for verification
-	slog.Debug("Listing nftables rules for verification", "pod", podKey)
-	_ = ns.nsexec(pid, "nft", "list", "table", "bridge", "nat")
+	// List nftables for verification (debug only, ignore errors)
+	if slog.Default().Enabled(ctx, slog.LevelDebug) {
+		slog.Debug("Listing nftables rules for verification", "pod", podKey)
+		_, _ = ns.nsexec(pid, "nft", "list", "table", "bridge", "nat")
+	}
 
 	return nil
 }
@@ -425,15 +450,12 @@ func (ns *NetworkSetup) waitForBridge(ctx context.Context, pid int) (string, err
 }
 
 func (ns *NetworkSetup) findBridge(pid int) (string, error) {
-	cmd := exec.Command("nsenter", "-t", fmt.Sprintf("%d", pid), "-n",
-		"ip", "-o", "link", "show", "type", "bridge")
-
-	output, err := cmd.Output()
+	output, err := ns.nsexec(pid, "ip", "-o", "link", "show", "type", "bridge")
 	if err != nil {
 		return "", err
 	}
 
-	for _, line := range strings.Split(string(output), "\n") {
+	for _, line := range strings.Split(output, "\n") {
 		if strings.Contains(line, bridgePrefix) {
 			// Extract interface name: "4: k6t-xxx: <BROADCAST..."
 			parts := strings.Fields(line)
@@ -450,18 +472,14 @@ func (ns *NetworkSetup) findBridge(pid int) (string, error) {
 }
 
 func (ns *NetworkSetup) getInterfaceMAC(pid int, iface string) (string, error) {
-	cmd := exec.Command("nsenter", "-t", fmt.Sprintf("%d", pid), "-n",
-		"ip", "-o", "link", "show", iface)
-
-	output, err := cmd.Output()
+	output, err := ns.nsexec(pid, "ip", "-o", "link", "show", iface)
 	if err != nil {
 		return "", err
 	}
 
-	// Parse: "5: veth-mds: ... link/ether aa:bb:cc:dd:ee:ff ..."
-	line := string(output)
-	if idx := strings.Index(line, "link/ether "); idx >= 0 {
-		macPart := line[idx+11:]
+	// Parse: "5: mds-ctr: ... link/ether aa:bb:cc:dd:ee:ff ..."
+	if idx := strings.Index(output, "link/ether "); idx >= 0 {
+		macPart := output[idx+11:]
 		if spaceIdx := strings.Index(macPart, " "); spaceIdx > 0 {
 			mac := macPart[:spaceIdx]
 			if _, err := net.ParseMAC(mac); err == nil {
@@ -473,18 +491,16 @@ func (ns *NetworkSetup) getInterfaceMAC(pid int, iface string) (string, error) {
 	return "", fmt.Errorf("MAC not found for %s", iface)
 }
 
-func (ns *NetworkSetup) nsexec(pid int, args ...string) error {
+// nsexec runs a command in the pod's network namespace and returns combined stdout/stderr.
+func (ns *NetworkSetup) nsexec(pid int, args ...string) (string, error) {
 	cmdArgs := append([]string{"-t", fmt.Sprintf("%d", pid), "-n"}, args...)
 	cmd := exec.Command("nsenter", cmdArgs...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
-func (ns *NetworkSetup) nsexecCheck(pid int, args ...string) error {
-	cmdArgs := append([]string{"-t", fmt.Sprintf("%d", pid), "-n"}, args...)
-	cmd := exec.Command("nsenter", cmdArgs...)
-	return cmd.Run()
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Include output in error for debugging
+		return string(output), fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return string(output), nil
 }
 
 // macFromIP derives the OVN-style MAC address from an IPv4 address.
@@ -500,16 +516,13 @@ func macFromIP(ip string) (string, error) {
 // getIPWithPrefix looks up an IP address on an interface and returns it with its prefix length.
 // For example, if eth0 has 10.100.1.7/24, returns "10.100.1.7/24".
 func (ns *NetworkSetup) getIPWithPrefix(pid int, iface, ip string) (string, error) {
-	cmd := exec.Command("nsenter", "-t", fmt.Sprintf("%d", pid), "-n",
-		"ip", "-o", "addr", "show", "dev", iface)
-
-	output, err := cmd.Output()
+	output, err := ns.nsexec(pid, "ip", "-o", "addr", "show", "dev", iface)
 	if err != nil {
 		return "", fmt.Errorf("ip addr show failed: %w", err)
 	}
 
 	// Parse output like: "2: eth0    inet 10.100.1.7/24 brd 10.100.1.255 ..."
-	for _, line := range strings.Split(string(output), "\n") {
+	for _, line := range strings.Split(output, "\n") {
 		if !strings.Contains(line, "inet ") || strings.Contains(line, "inet6") {
 			continue
 		}
@@ -527,4 +540,62 @@ func (ns *NetworkSetup) getIPWithPrefix(pid int, iface, ip string) (string, erro
 	}
 
 	return "", fmt.Errorf("IP %s not found on %s", ip, iface)
+}
+
+// isInterfaceAttachedToBridge checks if an interface is attached to a specific bridge.
+func (ns *NetworkSetup) isInterfaceAttachedToBridge(pid int, iface, bridge string) bool {
+	output, err := ns.nsexec(pid, "ip", "-o", "link", "show", iface)
+	if err != nil {
+		return false
+	}
+	// Output like: "5: mds-vm: <BROADCAST...> master k6t-net1 state UP ..."
+	return strings.Contains(output, "master "+bridge)
+}
+
+// hasIPAddress checks if an interface has a specific IP address assigned.
+func (ns *NetworkSetup) hasIPAddress(pid int, iface, ip string) bool {
+	output, err := ns.nsexec(pid, "ip", "-o", "addr", "show", "dev", iface)
+	if err != nil {
+		return false
+	}
+	// Check if the IP is in the output
+	return strings.Contains(output, ip)
+}
+
+// ensureNftTable creates an nftables table if it doesn't exist.
+func (ns *NetworkSetup) ensureNftTable(pid int, family, name string) error {
+	// Check if table exists
+	if _, err := ns.nsexec(pid, "nft", "list", "table", family, name); err == nil {
+		slog.Debug("nftables table already exists", "family", family, "table", name)
+		return nil
+	}
+	// Create it
+	if _, err := ns.nsexec(pid, "nft", "add", "table", family, name); err != nil {
+		return fmt.Errorf("nft add table %s %s: %w", family, name, err)
+	}
+	return nil
+}
+
+// hasNftRule checks if an nftables rule matching the given IP exists in the chain.
+func (ns *NetworkSetup) hasNftRule(pid int, family, table, chain, ip string) bool {
+	output, err := ns.nsexec(pid, "nft", "list", "chain", family, table, chain)
+	if err != nil {
+		return false
+	}
+	// Look for our rule pattern: "ip daddr 169.254.169.254"
+	return strings.Contains(output, "ip daddr "+ip)
+}
+
+// ensureNftChain creates an nftables chain if it doesn't exist.
+func (ns *NetworkSetup) ensureNftChain(pid int, family, table, chain, spec string) error {
+	// Check if chain exists
+	if _, err := ns.nsexec(pid, "nft", "list", "chain", family, table, chain); err == nil {
+		slog.Debug("nftables chain already exists", "family", family, "table", table, "chain", chain)
+		return nil
+	}
+	// Create it
+	if _, err := ns.nsexec(pid, "nft", "add", "chain", family, table, chain, spec); err != nil {
+		return fmt.Errorf("nft add chain %s %s %s: %w", family, table, chain, err)
+	}
+	return nil
 }
