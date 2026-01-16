@@ -2,7 +2,7 @@
 
 A privileged DaemonSet that configures network routing within virt-launcher pods to enable VMs to reach the metadata service at `169.254.169.254`.
 
-KubeVirt VMs run inside virt-launcher pods. VM traffic passes through a Linux bridge (`k6t-*`). This DaemonSet uses `nsenter` to configure routing so packets destined to `169.254.169.254` reach the metadata-service sidecar.
+KubeVirt VMs run inside virt-launcher pods. VM traffic passes through a Linux bridge (`k6t-*`). This DaemonSet uses native Go libraries (`vishvananda/netlink`, `vishvananda/netns`, `google/nftables`) to configure routing so packets destined to `169.254.169.254` reach the metadata-service sidecar.
 
 ## Configuration Steps
 

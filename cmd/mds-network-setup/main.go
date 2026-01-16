@@ -7,13 +7,18 @@ import (
 	"log/slog"
 	"net"
 	"os"
-	"os/exec"
 	"os/signal"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/google/nftables"
+	"github.com/google/nftables/binaryutil"
+	"github.com/google/nftables/expr"
+	"github.com/vishvananda/netlink"
+	"github.com/vishvananda/netns"
+	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	corev1 "k8s.io/api/core/v1"
@@ -32,6 +37,14 @@ const (
 	annotationKey     = "spiffe.nvidia.com/inject-mds"
 	containerName     = "compute"
 	criSocket         = "/run/containerd/containerd.sock"
+
+	// IPv4 header offsets (RFC 791)
+	ipv4DstAddrOffset = 16 // Destination IP address offset in IPv4 header
+	ipv4AddrLen       = 4  // IPv4 address length in bytes
+
+	// Ethernet header offsets (IEEE 802.3)
+	ethDstAddrOffset = 0 // Destination MAC address offset in Ethernet header
+	ethAddrLen       = 6 // MAC address length in bytes
 )
 
 var (
@@ -194,12 +207,7 @@ func (ns *NetworkSetup) handlePod(ctx context.Context, pod *corev1.Pod) {
 	// Get container PID
 	pid, err := ns.getContainerPID(ctx, pod.Namespace, pod.Name, containerName)
 	if err != nil {
-		slog.Debug("Failed to get container PID", "pod", podKey, "error", err)
-		return
-	}
-
-	if pid == 0 {
-		slog.Debug("Container PID not available yet", "pod", podKey)
+		slog.Debug("Container not ready yet", "pod", podKey, "error", err)
 		return
 	}
 	slog.Debug("Got container PID", "pod", podKey, "pid", pid)
@@ -233,7 +241,7 @@ func (ns *NetworkSetup) getContainerPID(ctx context.Context, namespace, podName,
 	}
 
 	if len(resp.Containers) == 0 {
-		return 0, nil
+		return 0, fmt.Errorf("container %q not found in pod %s/%s", container, namespace, podName)
 	}
 
 	containerID := resp.Containers[0].Id
@@ -298,79 +306,59 @@ func extractPID(info string) string {
 func (ns *NetworkSetup) setupPodNetwork(ctx context.Context, pod *corev1.Pod, pid int) error {
 	podKey := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
 
+	// Get network namespace handle for the container
+	nsHandle, err := netns.GetFromPid(pid)
+	if err != nil {
+		return fmt.Errorf("getting netns for pid %d: %w", pid, err)
+	}
+	defer nsHandle.Close()
+
+	// Create netlink handle for this namespace
+	nlHandle, err := netlink.NewHandleAt(nsHandle)
+	if err != nil {
+		return fmt.Errorf("creating netlink handle: %w", err)
+	}
+	defer nlHandle.Close()
+
 	// Wait for bridge
 	slog.Debug("Waiting for bridge", "pod", podKey, "prefix", bridgePrefix)
-	bridge, err := ns.waitForBridge(ctx, pid)
+	bridge, err := ns.waitForBridge(ctx, nlHandle)
 	if err != nil {
 		return fmt.Errorf("waiting for bridge: %w", err)
 	}
-	slog.Info("Found bridge", "pod", podKey, "bridge", bridge)
+	slog.Info("Found bridge", "pod", podKey, "bridge", bridge.Attrs().Name)
 
-	// Create veth pair (idempotent - check if exists first)
-	if _, err := ns.nsexec(pid, "ip", "link", "show", vethContainerSide); err != nil {
-		slog.Debug("Creating veth pair", "pod", podKey, "veth_vm_side", vethVMSide, "veth_container_side", vethContainerSide)
-		if _, err := ns.nsexec(pid, "ip", "link", "add", vethVMSide, "type", "veth", "peer", "name", vethContainerSide); err != nil {
-			return fmt.Errorf("creating veth pair: %w", err)
-		}
-	} else {
-		slog.Debug("Veth pair already exists", "pod", podKey)
+	// Create veth pair
+	vethCtr, vethVM, err := createVethPair(nlHandle, podKey)
+	if err != nil {
+		return err
 	}
 
-	// Attach veth to bridge (idempotent - check if already attached)
-	if !ns.isInterfaceAttachedToBridge(pid, vethVMSide, bridge) {
-		slog.Debug("Attaching veth to bridge", "pod", podKey, "veth", vethVMSide, "bridge", bridge)
-		if _, err := ns.nsexec(pid, "ip", "link", "set", vethVMSide, "master", bridge); err != nil {
-			return fmt.Errorf("attaching veth to bridge: %w", err)
-		}
-	} else {
-		slog.Debug("Veth already attached to bridge", "pod", podKey)
+	// Attach veth to bridge
+	if err := attachToBridge(nlHandle, vethVM, bridge, podKey); err != nil {
+		return err
 	}
 
-	// Bring up interfaces (idempotent)
-	slog.Debug("Bringing up interfaces", "pod", podKey)
-	if _, err := ns.nsexec(pid, "ip", "link", "set", vethVMSide, "up"); err != nil {
-		return fmt.Errorf("bringing up %s: %w", vethVMSide, err)
+	// Bring up interfaces
+	if err := bringUpLink(nlHandle, vethVM, podKey); err != nil {
+		return err
 	}
-	if _, err := ns.nsexec(pid, "ip", "link", "set", vethContainerSide, "up"); err != nil {
-		return fmt.Errorf("bringing up %s: %w", vethContainerSide, err)
+	if err := bringUpLink(nlHandle, vethCtr, podKey); err != nil {
+		return err
 	}
 
-	// Assign MDS IP (idempotent - check if already assigned)
-	if !ns.hasIPAddress(pid, vethContainerSide, mdsIP) {
-		slog.Debug("Assigning MDS IP", "pod", podKey, "ip", mdsIP, "dev", vethContainerSide)
-		if _, err := ns.nsexec(pid, "ip", "addr", "add", mdsIP+"/32", "dev", vethContainerSide); err != nil {
-			return fmt.Errorf("assigning IP to %s: %w", vethContainerSide, err)
-		}
-	} else {
-		slog.Debug("MDS IP already assigned", "pod", podKey, "ip", mdsIP)
+	// Assign MDS IP
+	if err := assignMDSIP(nlHandle, vethCtr, podKey); err != nil {
+		return err
 	}
 
 	// Get veth MAC
-	vethMAC, err := ns.getInterfaceMAC(pid, vethContainerSide)
-	if err != nil {
-		return fmt.Errorf("getting veth MAC: %w", err)
-	}
-	slog.Info("Got veth MAC", "pod", podKey, "mac", vethMAC)
+	vethMAC := vethCtr.Attrs().HardwareAddr
+	slog.Info("Got veth MAC", "pod", podKey, "mac", vethMAC.String())
 
-	// Setup nftables - create table and chain if they don't exist.
-	slog.Debug("Setting up nftables bridge nat table", "pod", podKey)
-	if err := ns.ensureNftTable(pid, "bridge", "nat"); err != nil {
-		return fmt.Errorf("creating nftables table: %w", err)
-	}
-	if err := ns.ensureNftChain(pid, "bridge", "nat", "PREROUTING",
-		"{ type filter hook prerouting priority dstnat; policy accept; }"); err != nil {
-		return fmt.Errorf("creating nftables chain: %w", err)
-	}
-
-	// Add nftables MAC rewrite rule (idempotent - check if exists first)
-	if ns.hasNftRule(pid, "bridge", "nat", "PREROUTING", mdsIP) {
-		slog.Debug("nftables rule already exists", "pod", podKey, "dst_ip", mdsIP)
-	} else {
-		slog.Debug("Adding nftables MAC rewrite rule", "pod", podKey, "dst_ip", mdsIP, "dst_mac", vethMAC)
-		if _, err := ns.nsexec(pid, "nft", "add", "rule", "bridge", "nat", "PREROUTING",
-			"ip", "daddr", mdsIP, "ether", "daddr", "set", vethMAC); err != nil {
-			return fmt.Errorf("adding nftables rule: %w", err)
-		}
+	// Setup nftables in the namespace
+	if err := setupNftablesMACRewrite(int(nsHandle), vethMAC, podKey); err != nil {
+		return err
 	}
 
 	// Get VM IP from pod status
@@ -384,52 +372,27 @@ func (ns *NetworkSetup) setupPodNetwork(ctx context.Context, pod *corev1.Pod, pi
 	if err != nil {
 		return fmt.Errorf("deriving MAC from IP: %w", err)
 	}
-	slog.Info("Derived VM MAC from IP", "pod", podKey, "ip", vmIP, "mac", vmMAC)
+	slog.Info("Derived VM MAC from IP", "pod", podKey, "ip", vmIP, "mac", vmMAC.String())
 
-	// Setup reply path
-	// The pod and VM share the same IP (vmIP). The pod has a local route for this IP,
-	// which causes incoming packets from the VM to be rejected as "martian source".
-	// We need to:
-	// 1. Remove the IP from eth0 so incoming packets aren't rejected as martian
-	// 2. Add an explicit route via mds-ctr so replies reach the VM
-	//
-	// Alternative: `ip route del local <vmIP> table local` would remove
-	// only the local route while keeping the IP on eth0. Either approach works here
-	// since eth0 is DOWN in KubeVirt bridge mode and the pod has no cluster network
-	// access (UDN isolation). We use `ip addr del` as the simpler option.
-	//
-	// Idempotent: only remove if still present
-	vmIPWithPrefix, err := ns.getIPWithPrefix(pid, "eth0", vmIP)
-	if err != nil {
-		slog.Debug("IP already removed from eth0 or not present", "pod", podKey, "vm_ip", vmIP)
-	} else {
-		slog.Debug("Removing IP from eth0", "pod", podKey, "cidr", vmIPWithPrefix)
-		if _, err := ns.nsexec(pid, "ip", "addr", "del", vmIPWithPrefix, "dev", "eth0"); err != nil {
-			return fmt.Errorf("removing IP from eth0: %w", err)
-		}
+	// Remove IP from eth0 to prevent martian source rejection
+	if err := removeIPFromEth0(nlHandle, vmIP, podKey); err != nil {
+		return err
 	}
 
-	slog.Debug("Adding explicit route for VM IP", "pod", podKey, "vm_ip", vmIP)
-	if _, err := ns.nsexec(pid, "ip", "route", "replace", vmIP+"/32", "dev", vethContainerSide); err != nil {
-		return fmt.Errorf("adding route for VM IP: %w", err)
+	// Add reply route for VM IP
+	if err := addVMRoute(nlHandle, vethCtr, vmIP, podKey); err != nil {
+		return err
 	}
 
 	// Add neighbor entry for VM MAC
-	slog.Debug("Adding neighbor entry for VM", "pod", podKey, "vm_ip", vmIP, "vm_mac", vmMAC)
-	if _, err := ns.nsexec(pid, "ip", "neigh", "replace", vmIP, "lladdr", vmMAC, "dev", vethContainerSide, "nud", "permanent"); err != nil {
-		return fmt.Errorf("adding neighbor entry: %w", err)
-	}
-
-	// List nftables for verification (debug only, ignore errors)
-	if slog.Default().Enabled(ctx, slog.LevelDebug) {
-		slog.Debug("Listing nftables rules for verification", "pod", podKey)
-		_, _ = ns.nsexec(pid, "nft", "list", "table", "bridge", "nat")
+	if err := addVMNeighbor(nlHandle, vethCtr, vmIP, vmMAC, podKey); err != nil {
+		return err
 	}
 
 	return nil
 }
 
-func (ns *NetworkSetup) waitForBridge(ctx context.Context, pid int) (string, error) {
+func (ns *NetworkSetup) waitForBridge(ctx context.Context, nlHandle *netlink.Handle) (netlink.Link, error) {
 	timeout := time.After(60 * time.Second)
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -437,165 +400,333 @@ func (ns *NetworkSetup) waitForBridge(ctx context.Context, pid int) (string, err
 	for {
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return nil, ctx.Err()
 		case <-timeout:
-			return "", fmt.Errorf("timeout waiting for bridge")
+			return nil, fmt.Errorf("timeout waiting for bridge")
 		case <-ticker.C:
-			bridge, err := ns.findBridge(pid)
-			if err == nil && bridge != "" {
+			bridge, err := ns.findBridge(nlHandle)
+			if err == nil && bridge != nil {
 				return bridge, nil
 			}
 		}
 	}
 }
 
-func (ns *NetworkSetup) findBridge(pid int) (string, error) {
-	output, err := ns.nsexec(pid, "ip", "-o", "link", "show", "type", "bridge")
+func (ns *NetworkSetup) findBridge(nlHandle *netlink.Handle) (netlink.Link, error) {
+	links, err := nlHandle.LinkList()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	for _, line := range strings.Split(output, "\n") {
-		if strings.Contains(line, bridgePrefix) {
-			// Extract interface name: "4: k6t-xxx: <BROADCAST..."
-			parts := strings.Fields(line)
-			if len(parts) >= 2 {
-				name := strings.TrimSuffix(parts[1], ":")
-				if strings.HasPrefix(name, bridgePrefix) {
-					return name, nil
+	for _, link := range links {
+		if link.Type() == "bridge" && strings.HasPrefix(link.Attrs().Name, bridgePrefix) {
+			return link, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no bridge found")
+}
+
+// createVethPair creates a virtual ethernet pair for MDS connectivity.
+// Equivalent to: ip link add mds-vm type veth peer name mds-ctr
+func createVethPair(nlHandle *netlink.Handle, podKey string) (vethCtr, vethVM netlink.Link, err error) {
+	vethCtr, err = nlHandle.LinkByName(vethContainerSide)
+	if err != nil {
+		slog.Debug("Creating veth pair", "pod", podKey, "veth_vm_side", vethVMSide, "veth_container_side", vethContainerSide)
+		veth := &netlink.Veth{
+			LinkAttrs: netlink.LinkAttrs{Name: vethVMSide},
+			PeerName:  vethContainerSide,
+		}
+		if err := nlHandle.LinkAdd(veth); err != nil {
+			return nil, nil, fmt.Errorf("creating veth pair: %w", err)
+		}
+		vethCtr, err = nlHandle.LinkByName(vethContainerSide)
+		if err != nil {
+			return nil, nil, fmt.Errorf("getting veth container side: %w", err)
+		}
+	} else {
+		slog.Debug("Veth pair already exists", "pod", podKey)
+	}
+
+	vethVM, err = nlHandle.LinkByName(vethVMSide)
+	if err != nil {
+		return nil, nil, fmt.Errorf("getting veth vm side: %w", err)
+	}
+
+	return vethCtr, vethVM, nil
+}
+
+// attachToBridge attaches a link to a bridge interface.
+// Equivalent to: ip link set mds-vm master <bridge>
+func attachToBridge(nlHandle *netlink.Handle, link, bridge netlink.Link, podKey string) error {
+	if link.Attrs().MasterIndex != bridge.Attrs().Index {
+		slog.Debug("Attaching veth to bridge", "pod", podKey, "veth", link.Attrs().Name, "bridge", bridge.Attrs().Name)
+		if err := nlHandle.LinkSetMaster(link, bridge); err != nil {
+			return fmt.Errorf("attaching veth to bridge: %w", err)
+		}
+	} else {
+		slog.Debug("Veth already attached to bridge", "pod", podKey)
+	}
+	return nil
+}
+
+// bringUpLink sets a network interface to the UP state.
+// Equivalent to: ip link set <iface> up
+func bringUpLink(nlHandle *netlink.Handle, link netlink.Link, podKey string) error {
+	slog.Debug("Bringing up interface", "pod", podKey, "iface", link.Attrs().Name)
+	if err := nlHandle.LinkSetUp(link); err != nil {
+		return fmt.Errorf("bringing up %s: %w", link.Attrs().Name, err)
+	}
+	return nil
+}
+
+// assignMDSIP assigns the metadata service IP address to an interface.
+// Equivalent to: ip addr add 169.254.169.254/32 dev mds-ctr
+func assignMDSIP(nlHandle *netlink.Handle, link netlink.Link, podKey string) error {
+	mdsAddr, err := netlink.ParseAddr(mdsIP + "/32")
+	if err != nil {
+		return fmt.Errorf("parsing MDS address: %w", err)
+	}
+	addrs, err := nlHandle.AddrList(link, netlink.FAMILY_V4)
+	if err != nil {
+		return fmt.Errorf("listing addresses on %s: %w", link.Attrs().Name, err)
+	}
+	for _, a := range addrs {
+		if a.IP.Equal(mdsAddr.IP) {
+			slog.Debug("MDS IP already assigned", "pod", podKey, "ip", mdsIP)
+			return nil
+		}
+	}
+	slog.Debug("Assigning MDS IP", "pod", podKey, "ip", mdsIP, "dev", link.Attrs().Name)
+	if err := nlHandle.AddrAdd(link, mdsAddr); err != nil {
+		return fmt.Errorf("assigning IP to %s: %w", link.Attrs().Name, err)
+	}
+	return nil
+}
+
+// setupNftablesMACRewrite configures nftables to rewrite destination MAC for MDS traffic.
+func setupNftablesMACRewrite(nsfd int, vethMAC net.HardwareAddr, podKey string) error {
+	slog.Debug("Setting up nftables bridge nat table", "pod", podKey)
+
+	// Create nftables connection in the target namespace
+	conn, err := nftables.New(nftables.WithNetNSFd(nsfd))
+	if err != nil {
+		return fmt.Errorf("creating nftables connection: %w", err)
+	}
+
+	// Create table
+	table, err := nftAddTable(conn)
+	if err != nil {
+		return err
+	}
+
+	// Create chain
+	chain, err := nftAddChain(conn, table)
+	if err != nil {
+		return err
+	}
+
+	// Add rule (idempotent)
+	if err := nftAddMDSRule(conn, table, chain, vethMAC); err != nil {
+		return err
+	}
+
+	slog.Debug("nftables rule added", "dst_ip", mdsIP, "dst_mac", vethMAC.String())
+	return nil
+}
+
+// nftAddTable creates the bridge nat table.
+// Equivalent to: nft add table bridge nat
+func nftAddTable(conn *nftables.Conn) (*nftables.Table, error) {
+	table := &nftables.Table{
+		Family: nftables.TableFamilyBridge,
+		Name:   "nat",
+	}
+	conn.AddTable(table)
+	if err := conn.Flush(); err != nil {
+		return nil, fmt.Errorf("nft add table bridge nat: %w", err)
+	}
+	return table, nil
+}
+
+// nftAddChain creates the PREROUTING chain in the bridge nat table.
+// Equivalent to: nft add chain bridge nat PREROUTING { type filter hook prerouting priority dstnat; policy accept; }
+func nftAddChain(conn *nftables.Conn, table *nftables.Table) (*nftables.Chain, error) {
+	policy := nftables.ChainPolicyAccept
+	chain := &nftables.Chain{
+		Name:     "PREROUTING",
+		Table:    table,
+		Type:     nftables.ChainTypeFilter,
+		Hooknum:  nftables.ChainHookPrerouting,
+		Priority: nftables.ChainPriorityNATDest,
+		Policy:   &policy,
+	}
+	conn.AddChain(chain)
+	if err := conn.Flush(); err != nil {
+		return nil, fmt.Errorf("nft add chain bridge nat PREROUTING: %w", err)
+	}
+	return chain, nil
+}
+
+// nftAddMDSRule adds the MAC rewrite rule for MDS traffic.
+// Equivalent to: nft add rule bridge nat PREROUTING ip daddr 169.254.169.254 ether daddr set <mac>
+func nftAddMDSRule(conn *nftables.Conn, table *nftables.Table, chain *nftables.Chain, vethMAC net.HardwareAddr) error {
+	mdsIPParsed := net.ParseIP(mdsIP).To4()
+	if mdsIPParsed == nil {
+		return fmt.Errorf("invalid MDS IP: %s", mdsIP)
+	}
+
+	// Check if rule already exists
+	chains, err := conn.ListChainsOfTableFamily(nftables.TableFamilyBridge)
+	if err != nil {
+		return fmt.Errorf("listing chains: %w", err)
+	}
+	for _, c := range chains {
+		if c.Name == "PREROUTING" && c.Table.Name == "nat" {
+			rules, err := conn.GetRules(table, c)
+			if err != nil {
+				return fmt.Errorf("getting rules: %w", err)
+			}
+			for _, r := range rules {
+				for _, e := range r.Exprs {
+					if cmp, ok := e.(*expr.Cmp); ok {
+						if len(cmp.Data) == 4 && cmp.Data[0] == mdsIPParsed[0] &&
+							cmp.Data[1] == mdsIPParsed[1] && cmp.Data[2] == mdsIPParsed[2] &&
+							cmp.Data[3] == mdsIPParsed[3] {
+							slog.Debug("nftables rule already exists", "dst_ip", mdsIP)
+							return nil
+						}
+					}
 				}
 			}
+			break
 		}
 	}
 
-	return "", fmt.Errorf("no bridge found")
+	// Add the rule - matching shell command bytecode exactly:
+	// [ meta load protocol => reg 1 ]
+	// [ cmp eq reg 1 0x0800 ]  (ETH_P_IP = IPv4 ethertype)
+	// [ payload load 4b @ network header + 16 => reg 1 ]
+	// [ cmp eq reg 1 <mdsIP> ]
+	// [ immediate reg 1 <mac> ]
+	// [ payload write reg 1 => 6b @ link header + 0 ]
+	conn.AddRule(&nftables.Rule{
+		Table: table,
+		Chain: chain,
+		Exprs: []expr.Any{
+			// meta load protocol => reg 1
+			&expr.Meta{
+				Key:      expr.MetaKeyPROTOCOL,
+				Register: 1,
+			},
+			// cmp eq reg 1 ETH_P_IP (0x0800)
+			&expr.Cmp{
+				Op:       expr.CmpOpEq,
+				Register: 1,
+				Data:     binaryutil.BigEndian.PutUint16(unix.ETH_P_IP),
+			},
+			// payload load 4b @ network header + ipv4DstAddrOffset => reg 1
+			&expr.Payload{
+				DestRegister: 1,
+				Base:         expr.PayloadBaseNetworkHeader,
+				Offset:       ipv4DstAddrOffset,
+				Len:          ipv4AddrLen,
+			},
+			// cmp eq reg 1 <mdsIP>
+			&expr.Cmp{
+				Op:       expr.CmpOpEq,
+				Register: 1,
+				Data:     mdsIPParsed,
+			},
+			// immediate reg 1 <mac>
+			&expr.Immediate{
+				Register: 1,
+				Data:     vethMAC,
+			},
+			// payload write reg 1 => 6b @ link header + ethDstAddrOffset
+			&expr.Payload{
+				OperationType:  expr.PayloadWrite,
+				SourceRegister: 1,
+				Base:           expr.PayloadBaseLLHeader,
+				Offset:         ethDstAddrOffset,
+				Len:            ethAddrLen,
+			},
+		},
+	})
+
+	if err := conn.Flush(); err != nil {
+		return fmt.Errorf("nft add rule bridge nat PREROUTING ip daddr %s ether daddr set %s: %w", mdsIP, vethMAC, err)
+	}
+	return nil
 }
 
-func (ns *NetworkSetup) getInterfaceMAC(pid int, iface string) (string, error) {
-	output, err := ns.nsexec(pid, "ip", "-o", "link", "show", iface)
+// removeIPFromEth0 removes the VM IP from eth0 to prevent martian source rejection.
+// Equivalent to: ip addr del <vmIP>/<prefix> dev eth0
+//
+// The pod and VM share the same IP. When packets arrive from the VM with this source IP,
+// the kernel would reject them as "martian source" (a local IP appearing externally).
+// Alternative: `ip route del local <vmIP> table local` removes only the local route.
+func removeIPFromEth0(nlHandle *netlink.Handle, vmIP, podKey string) error {
+	eth0, err := nlHandle.LinkByName("eth0")
 	if err != nil {
-		return "", err
+		return fmt.Errorf("getting eth0: %w", err)
 	}
-
-	// Parse: "5: mds-ctr: ... link/ether aa:bb:cc:dd:ee:ff ..."
-	if idx := strings.Index(output, "link/ether "); idx >= 0 {
-		macPart := output[idx+11:]
-		if spaceIdx := strings.Index(macPart, " "); spaceIdx > 0 {
-			mac := macPart[:spaceIdx]
-			if _, err := net.ParseMAC(mac); err == nil {
-				return mac, nil
+	eth0Addrs, err := nlHandle.AddrList(eth0, netlink.FAMILY_V4)
+	if err != nil {
+		return fmt.Errorf("listing addresses on eth0: %w", err)
+	}
+	vmIPParsed := net.ParseIP(vmIP)
+	for _, a := range eth0Addrs {
+		if a.IP.Equal(vmIPParsed) {
+			slog.Debug("Removing IP from eth0", "pod", podKey, "cidr", a.IPNet.String())
+			if err := nlHandle.AddrDel(eth0, &a); err != nil {
+				return fmt.Errorf("removing IP from eth0: %w", err)
 			}
+			return nil
 		}
 	}
-
-	return "", fmt.Errorf("MAC not found for %s", iface)
+	slog.Debug("IP already removed from eth0", "pod", podKey, "vm_ip", vmIP)
+	return nil
 }
 
-// nsexec runs a command in the pod's network namespace and returns combined stdout/stderr.
-func (ns *NetworkSetup) nsexec(pid int, args ...string) (string, error) {
-	cmdArgs := append([]string{"-t", fmt.Sprintf("%d", pid), "-n"}, args...)
-	cmd := exec.Command("nsenter", cmdArgs...)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		// Include output in error for debugging
-		return string(output), fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
+// addVMRoute adds a host route for the VM IP via the veth interface.
+// Equivalent to: ip route replace <vmIP>/32 dev mds-ctr
+func addVMRoute(nlHandle *netlink.Handle, link netlink.Link, vmIP, podKey string) error {
+	vmIPParsed := net.ParseIP(vmIP)
+	slog.Debug("Adding explicit route for VM IP", "pod", podKey, "vm_ip", vmIP)
+	vmRoute := &netlink.Route{
+		Dst:       &net.IPNet{IP: vmIPParsed, Mask: net.CIDRMask(32, 32)},
+		LinkIndex: link.Attrs().Index,
 	}
-	return string(output), nil
+	if err := nlHandle.RouteReplace(vmRoute); err != nil {
+		return fmt.Errorf("adding route for VM IP: %w", err)
+	}
+	return nil
+}
+
+// addVMNeighbor adds a static ARP entry for the VM.
+// Equivalent to: ip neigh replace <vmIP> lladdr <vmMAC> dev mds-ctr nud permanent
+func addVMNeighbor(nlHandle *netlink.Handle, link netlink.Link, vmIP string, vmMAC net.HardwareAddr, podKey string) error {
+	vmIPParsed := net.ParseIP(vmIP)
+	slog.Debug("Adding neighbor entry for VM", "pod", podKey, "vm_ip", vmIP, "vm_mac", vmMAC.String())
+	neigh := &netlink.Neigh{
+		LinkIndex:    link.Attrs().Index,
+		IP:           vmIPParsed,
+		HardwareAddr: vmMAC,
+		State:        netlink.NUD_PERMANENT,
+	}
+	if err := nlHandle.NeighSet(neigh); err != nil {
+		return fmt.Errorf("adding neighbor entry: %w", err)
+	}
+	return nil
 }
 
 // macFromIP derives the OVN-style MAC address from an IPv4 address.
 // OVN uses the format 0a:58:XX:YY:ZZ:WW where XX.YY.ZZ.WW is the IP.
-func macFromIP(ip string) (string, error) {
+func macFromIP(ip string) (net.HardwareAddr, error) {
 	parsed := net.ParseIP(ip).To4()
 	if parsed == nil {
-		return "", fmt.Errorf("invalid IPv4: %s", ip)
+		return nil, fmt.Errorf("invalid IPv4: %s", ip)
 	}
-	return fmt.Sprintf("0a:58:%02x:%02x:%02x:%02x", parsed[0], parsed[1], parsed[2], parsed[3]), nil
-}
-
-// getIPWithPrefix looks up an IP address on an interface and returns it with its prefix length.
-// For example, if eth0 has 10.100.1.7/24, returns "10.100.1.7/24".
-func (ns *NetworkSetup) getIPWithPrefix(pid int, iface, ip string) (string, error) {
-	output, err := ns.nsexec(pid, "ip", "-o", "addr", "show", "dev", iface)
-	if err != nil {
-		return "", fmt.Errorf("ip addr show failed: %w", err)
-	}
-
-	// Parse output like: "2: eth0    inet 10.100.1.7/24 brd 10.100.1.255 ..."
-	for _, line := range strings.Split(output, "\n") {
-		if !strings.Contains(line, "inet ") || strings.Contains(line, "inet6") {
-			continue
-		}
-		// Find "inet X.X.X.X/NN"
-		fields := strings.Fields(line)
-		for i, f := range fields {
-			if f == "inet" && i+1 < len(fields) {
-				cidr := fields[i+1]
-				// Check if this is the IP we're looking for
-				if strings.HasPrefix(cidr, ip+"/") {
-					return cidr, nil
-				}
-			}
-		}
-	}
-
-	return "", fmt.Errorf("IP %s not found on %s", ip, iface)
-}
-
-// isInterfaceAttachedToBridge checks if an interface is attached to a specific bridge.
-func (ns *NetworkSetup) isInterfaceAttachedToBridge(pid int, iface, bridge string) bool {
-	output, err := ns.nsexec(pid, "ip", "-o", "link", "show", iface)
-	if err != nil {
-		return false
-	}
-	// Output like: "5: mds-vm: <BROADCAST...> master k6t-net1 state UP ..."
-	return strings.Contains(output, "master "+bridge)
-}
-
-// hasIPAddress checks if an interface has a specific IP address assigned.
-func (ns *NetworkSetup) hasIPAddress(pid int, iface, ip string) bool {
-	output, err := ns.nsexec(pid, "ip", "-o", "addr", "show", "dev", iface)
-	if err != nil {
-		return false
-	}
-	// Check if the IP is in the output
-	return strings.Contains(output, ip)
-}
-
-// ensureNftTable creates an nftables table if it doesn't exist.
-func (ns *NetworkSetup) ensureNftTable(pid int, family, name string) error {
-	// Check if table exists
-	if _, err := ns.nsexec(pid, "nft", "list", "table", family, name); err == nil {
-		slog.Debug("nftables table already exists", "family", family, "table", name)
-		return nil
-	}
-	// Create it
-	if _, err := ns.nsexec(pid, "nft", "add", "table", family, name); err != nil {
-		return fmt.Errorf("nft add table %s %s: %w", family, name, err)
-	}
-	return nil
-}
-
-// hasNftRule checks if an nftables rule matching the given IP exists in the chain.
-func (ns *NetworkSetup) hasNftRule(pid int, family, table, chain, ip string) bool {
-	output, err := ns.nsexec(pid, "nft", "list", "chain", family, table, chain)
-	if err != nil {
-		return false
-	}
-	// Look for our rule pattern: "ip daddr 169.254.169.254"
-	return strings.Contains(output, "ip daddr "+ip)
-}
-
-// ensureNftChain creates an nftables chain if it doesn't exist.
-func (ns *NetworkSetup) ensureNftChain(pid int, family, table, chain, spec string) error {
-	// Check if chain exists
-	if _, err := ns.nsexec(pid, "nft", "list", "chain", family, table, chain); err == nil {
-		slog.Debug("nftables chain already exists", "family", family, "table", table, "chain", chain)
-		return nil
-	}
-	// Create it
-	if _, err := ns.nsexec(pid, "nft", "add", "chain", family, table, chain, spec); err != nil {
-		return fmt.Errorf("nft add chain %s %s %s: %w", family, table, chain, err)
-	}
-	return nil
+	return net.HardwareAddr{0x0a, 0x58, parsed[0], parsed[1], parsed[2], parsed[3]}, nil
 }

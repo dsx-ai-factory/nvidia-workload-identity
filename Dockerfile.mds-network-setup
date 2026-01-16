@@ -18,13 +18,8 @@ RUN go build -o mds-network-setup ./cmd/mds-network-setup
 # Final stage
 FROM debian:bookworm-slim
 
-# Install runtime dependencies (nsenter for network namespace, ip/nft for network config)
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    iproute2 \
-    nftables \
-    util-linux \
-    && rm -rf /var/lib/apt/lists/*
+# Install ca-certificates for TLS
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /root/
 
