@@ -28,4 +28,3 @@ COPY --from=builder /app/spiffe-exchange-service .
 
 # Run the exchange service
 ENTRYPOINT ["/root/spiffe-exchange-service"]
-

@@ -128,4 +128,3 @@ main() {
 
 trap 'log_error "Script interrupted"; exit 1' INT TERM
 main "$@"
-

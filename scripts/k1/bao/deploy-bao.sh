@@ -213,4 +213,3 @@ main() {
 trap 'cleanup_port_forward' EXIT
 trap 'log_error "Script interrupted"; exit 1' INT TERM
 main "$@"
-

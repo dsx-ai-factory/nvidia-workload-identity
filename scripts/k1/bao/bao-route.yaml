@@ -12,4 +12,3 @@ spec:
     - backendRefs:
         - name: openbao
           port: 8200
-

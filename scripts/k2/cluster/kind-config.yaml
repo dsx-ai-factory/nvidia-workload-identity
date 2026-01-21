@@ -29,4 +29,3 @@ networking:
   # Disable default CNI and kube-proxy so OVN-Kubernetes can provide them
   disableDefaultCNI: true
   kubeProxyMode: none
-

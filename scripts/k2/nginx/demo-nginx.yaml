@@ -80,4 +80,3 @@ spec:
   - name: spiffe-tokens
     emptyDir: {}
   restartPolicy: Never
-

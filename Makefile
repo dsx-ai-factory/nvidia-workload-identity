@@ -39,7 +39,6 @@ k2: k2-cluster kubevirt kyverno k2-spire nginx metadata-service vm ## Setup k2 c
 	@echo ""
 	@echo "k2 cluster ready"
 
-
 clean: ## Clean up: Remove both Kind clusters
 	@echo "Cleaning up multi-cluster demo..."
 	@./scripts/k1/cluster/setup-cluster.sh cleanup 2>/dev/null || true

@@ -28,4 +28,3 @@ COPY --from=builder /app/metadata-service .
 
 # Run the metadata service
 ENTRYPOINT ["/root/metadata-service"]
-
