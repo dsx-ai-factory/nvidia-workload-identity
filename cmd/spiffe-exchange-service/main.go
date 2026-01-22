@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"maps"
 	"mime"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -135,12 +137,12 @@ func transformSpiffeID(originalID spiffeid.ID, region, baseDomain string) (spiff
 // resignJWT re-signs a JWT with a new subject, preserving all other claims.
 func (s *ExchangeServer) resignJWT(originalClaims map[string]any, newSubject spiffeid.ID) (string, error) {
 	trustDomain := newSubject.TrustDomain().Name()
-	slog.Info("resigning JWT", "trustDomain", trustDomain, "newSubject", newSubject)
-
 	key, keyID, alg, err := s.keyStore.GetOrCreateKey(trustDomain)
 	if err != nil {
 		return "", fmt.Errorf("failed to get key: %w", err)
 	}
+
+	slog.Info("resigning JWT", "trustDomain", trustDomain, "newSubject", newSubject, "kid", keyID)
 
 	signerKey := jose.SigningKey{
 		Algorithm: alg,
@@ -298,15 +300,29 @@ func main() {
 		region     = flag.String("region", "", "Region identifier (e.g., sjc-1)")
 		baseDomain = flag.String("base-domain", "", "Base trust domain (e.g., nvidia.com)")
 		logLevel   = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
+
+		// KeyStore backend selection
+		keystoreBackend = flag.String("keystore-backend", "in-memory", "KeyStore backend: in-memory or postgres")
+
+		// Postgres configuration (used when keystore-backend=postgres)
+		pgHost     = flag.String("pg-host", getEnvOrDefault("EXCHANGE_PG_HOST", "localhost"), "PostgreSQL host")
+		pgPort     = flag.Int("pg-port", getEnvOrDefaultInt("EXCHANGE_PG_PORT", 5432), "PostgreSQL port")
+		pgDatabase = flag.String("pg-database", getEnvOrDefault("EXCHANGE_PG_DATABASE", "exchange"), "PostgreSQL database")
+		pgUser     = flag.String("pg-user", getEnvOrDefault("EXCHANGE_PG_USER", "exchange"), "PostgreSQL user")
+		pgPassword = flag.String("pg-password", getEnvOrDefault("EXCHANGE_PG_PASSWORD", ""), "PostgreSQL password")
+		pgSSLMode  = flag.String("pg-sslmode", getEnvOrDefault("EXCHANGE_PG_SSLMODE", "disable"), "PostgreSQL SSL mode")
+
+		// Encryption key for Postgres backend (base64-encoded 32-byte key)
+		encryptionKeyB64 = flag.String("encryption-key", getEnvOrDefault("EXCHANGE_KEY_ENCRYPTION_KEY_B64", ""), "Base64-encoded 32-byte encryption key for keyset storage")
 	)
 	flag.Parse()
 
 	if *region == "" {
-		fmt.Fprintln(os.Stderr, "error: --region is required")
+		slog.Error("--region is required")
 		os.Exit(1)
 	}
 	if *baseDomain == "" {
-		fmt.Fprintln(os.Stderr, "error: --base-domain is required")
+		slog.Error("--base-domain is required")
 		os.Exit(1)
 	}
 
@@ -328,15 +344,64 @@ func main() {
 		Level: level,
 	})))
 
+	ctx := context.Background()
+
+	// Create the appropriate KeyStore backend
+	var keyStore KeyStore
+
+	switch *keystoreBackend {
+	case "in-memory":
+		slog.Info("Using in-memory keystore backend")
+		keyStore = NewInMemoryKeyStore(ES256KeyGenerator{})
+	case "postgres":
+		if *encryptionKeyB64 == "" {
+			slog.Error("--encryption-key is required for postgres backend")
+			os.Exit(1)
+		}
+		if *pgPassword == "" {
+			slog.Error("--pg-password is required for postgres backend")
+			os.Exit(1)
+		}
+
+		pgConfig := PostgresConfig{
+			Host:     *pgHost,
+			Port:     *pgPort,
+			Database: *pgDatabase,
+			User:     *pgUser,
+			Password: *pgPassword,
+			SSLMode:  *pgSSLMode,
+		}
+
+		slog.Info("Connecting to PostgreSQL",
+			"host", pgConfig.Host,
+			"port", pgConfig.Port,
+			"database", pgConfig.Database,
+			"user", pgConfig.User,
+			"sslmode", pgConfig.SSLMode)
+
+		pgStore, err := NewPostgresKeyStore(ctx, pgConfig, *encryptionKeyB64, ES256KeyGenerator{})
+		if err != nil {
+			slog.Error("Failed to create postgres keystore", "error", err)
+			os.Exit(1)
+		}
+		keyStore = pgStore
+		slog.Info("Using postgres keystore backend")
+	default:
+		slog.Error("Unknown keystore backend", "backend", *keystoreBackend)
+		os.Exit(1)
+	}
+
+	if closer, ok := keyStore.(io.Closer); ok {
+		defer closer.Close()
+	}
+
 	slog.Info("Starting SPIFFE Exchange Service",
 		"listen_addr", *listenAddr,
 		"socket_path", *socketPath,
 		"region", *region,
 		"base_domain", *baseDomain,
+		"keystore_backend", *keystoreBackend,
 		"log_level", level.String())
-
-	ctx := context.Background()
-	keyStore := NewInMemoryKeyStore(ES256KeyGenerator{})
 
 	server, err := NewExchangeServer(ctx, keyStore, *socketPath, *region, *baseDomain)
 	if err != nil {
@@ -349,7 +414,7 @@ func main() {
 	http.HandleFunc("GET /.well-known/jwks.json", server.handleJWKS)
 	http.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, "OK")
+		_, _ = w.Write([]byte("OK"))
 	})
 
 	slog.Info("Starting HTTP server", "listen_addr", *listenAddr)
@@ -357,4 +422,22 @@ func main() {
 		slog.Error("HTTP server failed", "error", err)
 		os.Exit(1)
 	}
+}
+
+// getEnvOrDefault returns the environment variable value or the default if not set.
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
+// getEnvOrDefaultInt returns the environment variable as int or the default if not set.
+func getEnvOrDefaultInt(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		if intValue, err := strconv.Atoi(value); err == nil {
+			return intValue
+		}
+	}
+	return defaultValue
 }

@@ -66,7 +66,7 @@ func generateKeyID(pub crypto.PublicKey) KeyID {
 		pubBytes = elliptic.MarshalCompressed(k.Curve, k.X, k.Y)
 	default:
 		// Fallback: use string representation
-		pubBytes = []byte(fmt.Sprintf("%v", pub))
+		pubBytes = fmt.Appendf(nil, "%v", pub)
 	}
 	hash := sha256.Sum256(pubBytes)
 	return KeyID(base64.RawURLEncoding.EncodeToString(hash[:12]))

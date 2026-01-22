@@ -36,6 +36,22 @@ spec:
         - --region=sjc-1
         - --base-domain=nvidia.com
         - --log-level=info
+        - --keystore-backend=postgres
+        - --pg-host=postgres-rw.postgres-system.svc.cluster.local
+        - --pg-port=5432
+        - --pg-database=exchange
+        - --pg-user=exchange
+        env:
+        - name: EXCHANGE_PG_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-app
+              key: password
+        - name: EXCHANGE_KEY_ENCRYPTION_KEY_B64
+          valueFrom:
+            secretKeyRef:
+              name: exchange-encryption-key
+              key: EXCHANGE_KEY_ENCRYPTION_KEY_B64
         resources:
           requests:
             cpu: 100m

@@ -31,8 +31,53 @@ load_image() {
     log_success "Image loaded"
 }
 
+ensure_namespace() {
+    kubectl create namespace "${NAMESPACE}" --context "${CONTEXT}" --dry-run=client -o yaml | \
+        kubectl apply -f - --context "${CONTEXT}"
+}
+
+copy_postgres_secret() {
+    log_info "Copying PostgreSQL credentials to exchange namespace..."
+    
+    ensure_namespace
+    
+    # Copy CloudNativePG app credentials secret from postgres-system to spiffe-exchange namespace
+    kubectl get secret postgres-app -n postgres-system --context "${CONTEXT}" -o json | \
+        jq 'del(.metadata.namespace, .metadata.resourceVersion, .metadata.uid, .metadata.creationTimestamp, .metadata.ownerReferences)' | \
+        kubectl apply -n "${NAMESPACE}" --context "${CONTEXT}" -f -
+    
+    log_success "PostgreSQL credentials copied"
+}
+
+create_encryption_key_secret() {
+    log_info "Ensuring encryption key secret exists..."
+    
+    ensure_namespace
+    
+    # Check if secret already exists
+    if kubectl get secret exchange-encryption-key -n "${NAMESPACE}" --context "${CONTEXT}" &>/dev/null; then
+        log_info "Encryption key secret already exists"
+        return 0
+    fi
+    
+    # Generate a random 32-byte key and base64 encode it
+    local key_b64
+    key_b64=$(openssl rand -base64 32)
+    
+    kubectl create secret generic exchange-encryption-key \
+        -n "${NAMESPACE}" \
+        --context "${CONTEXT}" \
+        --from-literal=EXCHANGE_KEY_ENCRYPTION_KEY_B64="${key_b64}"
+    
+    log_success "Encryption key secret created"
+}
+
 deploy_exchange() {
     log_info "Deploying SPIFFE exchange service..."
+    
+    # Ensure secrets exist before deploying
+    copy_postgres_secret
+    create_encryption_key_secret
     
     kubectl apply -f "${SCRIPT_DIR}/exchange-service.yaml" \
         --context "${CONTEXT}"

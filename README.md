@@ -103,6 +103,21 @@ The exchange service:
 3. Constructs new trust domain: `{tenant}.{region}.{service}.nvidia.com` (region is configured)
 4. Re-signs JWT with tenant-specific key, updating `sub` and `iss` claims
 
+### Key Storage
+
+The exchange service supports two keyset storage backends:
+
+**In-Memory (default for local dev):** Keys are generated on first use and lost on restart. Use `--keystore-backend=in-memory`.
+
+**PostgreSQL (production):** Keys are encrypted with AES-256-GCM and persisted in PostgreSQL via CloudNativePG operator. Use `--keystore-backend=postgres`.
+
+Required configuration for Postgres backend:
+- `--pg-host`, `--pg-port`, `--pg-database`, `--pg-user`: Connection parameters
+- `EXCHANGE_PG_PASSWORD`: Database password (from CloudNativePG's `postgres-app` secret)
+- `EXCHANGE_KEY_ENCRYPTION_KEY_B64`: Base64-encoded 32-byte AES key for encrypting stored keys
+
+Generate encryption key: `openssl rand -base64 32`
+
 ### JWKS Endpoint
 
 Exchange service serves `/.well-known/jwks.json` for each tenant domain. CoreDNS wildcard rewrite routes `*.{region}.{service}.nvidia.com` to the exchange service per service, enabling OpenBao to fetch JWKS for any tenant.

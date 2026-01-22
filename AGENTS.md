@@ -148,7 +148,7 @@ This project demonstrates SPIFFE JWT authentication with OpenBao's CEL (Common E
 - Plugin binaries are copied via initContainers from official plugin images
 - swtpm and TPM CA are deployed via `scripts/swtpm/deploy-swtpm.sh`
 
-### OpenBao Configuration  
+### OpenBao Configuration
 - Use official OpenBao 2.4.0 release from quay.io/openbao/openbao:2.4.0
 - Use official OpenBao Helm chart with official image
 - Configure JWT auth with OIDC Discovery URL and CA certificate
@@ -156,6 +156,17 @@ This project demonstrates SPIFFE JWT authentication with OpenBao's CEL (Common E
 - Use `bao` CLI with port-forwarding, not `kubectl exec` with `curl`
 - Use temporary files for multi-line content (certificates, policies)
 - Clean up temporary files and background processes
+
+### PostgreSQL for Exchange Service
+- Use CloudNativePG operator (CNCF Sandbox) for PostgreSQL deployment on k1
+- Operator installed via Helm chart (`cnpg/cloudnative-pg`) in `cnpg-system` namespace
+- Database cluster (`Cluster` CRD) deployed in `postgres-system` namespace
+- Keyset table created via `postInitSQL` in cluster spec
+- AES-256-GCM encryption for private key material before storage
+- Encryption key provided via `EXCHANGE_KEY_ENCRYPTION_KEY_B64` env var (base64-encoded 32-byte key)
+- CloudNativePG creates `postgres-app` secret with credentials, copied to `spiffe-exchange` namespace
+- Service endpoint: `postgres-rw.postgres-system.svc.cluster.local`
+- Postgres is a dependency of `exchange-service` target in Makefile
 
 ### Go Development
 - Use Go 1.25+

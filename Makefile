@@ -1,6 +1,6 @@
 # SPIFFE + OpenBao CEL Multi-Cluster Demo Makefile
 
-.PHONY: help install clean test verify-spire verify-nginx verify-vm cluster metallb gateway spire nginx bao metadata-service exchange-service vm status k1 k2 k2-cluster k2-gateway kubevirt kyverno k2-spire configure-dns cert-manager-k2 sync-federation-ca helm-repos
+.PHONY: help install clean test verify-spire verify-nginx verify-vm cluster metallb gateway spire nginx bao metadata-service exchange-service postgres vm status k1 k2 k2-cluster k2-gateway kubevirt kyverno k2-spire configure-dns cert-manager-k2 sync-federation-ca helm-repos
 
 # Default target
 help: ## Show this help message
@@ -71,6 +71,9 @@ status: ## Show status of all components
 	@echo "SPIRE Server:"
 	@kubectl get pods -n spire-system -l app.kubernetes.io/name=server --context kind-k1 2>/dev/null || echo "Not found"
 	@echo ""
+	@echo "PostgreSQL (CloudNativePG):"
+	@kubectl get cluster postgres -n postgres-system --context kind-k1 2>/dev/null || echo "Not found"
+	@echo ""
 	@echo "Exchange Service:"
 	@kubectl get deployment spiffe-exchange-service -n spiffe-exchange --context kind-k1 2>/dev/null || echo "Not found"
 	@echo ""
@@ -122,7 +125,11 @@ spire: gateway sync-federation-ca helm-repos ## Install SPIRE root on k1 (with k
 	@echo "Installing SPIRE root on k1..."
 	@./scripts/k1/spire/deploy-spire.sh
 
-exchange-service: cluster spire gateway ## Deploy SPIFFE exchange service on k1
+postgres: cluster helm-repos ## Deploy CloudNativePG and PostgreSQL cluster on k1
+	@echo "Deploying PostgreSQL on k1..."
+	@./scripts/k1/postgres/deploy-postgres.sh
+
+exchange-service: cluster spire gateway postgres ## Deploy SPIFFE exchange service on k1
 	@echo "Deploying exchange service on k1..."
 	@./scripts/k1/exchange/deploy-exchange.sh
 

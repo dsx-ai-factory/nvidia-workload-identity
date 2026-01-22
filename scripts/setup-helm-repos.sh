@@ -11,6 +11,7 @@ REPOS=(
     "spiffe|https://spiffe.github.io/helm-charts-hardened/"
     "kyverno|https://kyverno.github.io/kyverno/"
     "openbao|https://openbao.github.io/openbao-helm"
+    "cnpg|https://cloudnative-pg.github.io/charts"
 )
 
 setup_repos() {
