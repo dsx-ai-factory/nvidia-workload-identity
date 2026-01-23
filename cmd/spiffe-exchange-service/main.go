@@ -22,21 +22,30 @@ import (
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 
 	"spiffe-jwt-issuer/cmd/spiffe-exchange-service/keystore"
+	"spiffe-jwt-issuer/cmd/spiffe-exchange-service/keystore/cached"
 	"spiffe-jwt-issuer/cmd/spiffe-exchange-service/keystore/memory"
 	"spiffe-jwt-issuer/cmd/spiffe-exchange-service/keystore/postgres"
-	"spiffe-jwt-issuer/cmd/spiffe-exchange-service/keystore/cached"
 )
 
-// ExchangeRequest represents a request to exchange a SPIFFE JWT.
-type ExchangeRequest struct {
-	JWT string `json:"jwt"`
+// RFC 8693 OAuth 2.0 Token Exchange constants
+const (
+	GrantTypeTokenExchange    = "urn:ietf:params:oauth:grant-type:token-exchange"
+	TokenTypeJWT              = "urn:ietf:params:oauth:token-type:jwt"
+	ContentTypeFormURLEncoded = "application/x-www-form-urlencoded"
+)
+
+// TokenExchangeResponse represents an RFC 8693 token exchange response.
+type TokenExchangeResponse struct {
+	AccessToken     string `json:"access_token"`
+	IssuedTokenType string `json:"issued_token_type"`
+	TokenType       string `json:"token_type"`
+	ExpiresIn       int64  `json:"expires_in"`
 }
 
-// ExchangeResponse represents the response from a JWT exchange.
-type ExchangeResponse struct {
-	Token     string    `json:"token"`
-	ExpiresAt time.Time `json:"expires_at"`
-	SpiffeID  string    `json:"spiffe_id"`
+// TokenExchangeErrorResponse represents an RFC 8693 error response.
+type TokenExchangeErrorResponse struct {
+	Error            string `json:"error"`
+	ErrorDescription string `json:"error_description,omitempty"`
 }
 
 // ExchangeServer handles SPIFFE JWT exchange operations.
@@ -190,72 +199,115 @@ func extractAudience(token string) ([]string, error) {
 	return claims.Audience, nil
 }
 
-// handleExchange handles POST requests to /v1/exchange.
-func (s *ExchangeServer) handleExchange(w http.ResponseWriter, r *http.Request) {
-	slog.Info("Received exchange request", "method", r.Method, "path", r.URL.Path, "remote_addr", r.RemoteAddr)
+// writeTokenError writes an RFC 8693 compliant error response.
+func writeTokenError(w http.ResponseWriter, statusCode int, errorCode, description string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(statusCode)
+	resp := TokenExchangeErrorResponse{
+		Error:            errorCode,
+		ErrorDescription: description,
+	}
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		slog.Error("Failed to encode error response", "error", err)
+	}
+}
 
-	body := http.MaxBytesReader(w, r.Body, 1024*1024)
-	defer body.Close()
+// handleTokenExchange handles POST requests to /token (RFC 8693 Token Exchange).
+func (s *ExchangeServer) handleTokenExchange(w http.ResponseWriter, r *http.Request) {
+	slog.Info("Received token exchange request", "method", r.Method, "path", r.URL.Path, "remote_addr", r.RemoteAddr)
 
-	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mediaType != "application/json" {
-		slog.Warn("Invalid content type")
-		http.Error(w, "Invalid content type", http.StatusUnsupportedMediaType)
+	// Validate Content-Type
+	contentType := r.Header.Get("Content-Type")
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil || mediaType != ContentTypeFormURLEncoded {
+		slog.Warn("Invalid content type", "content_type", contentType, "error", err)
+		writeTokenError(w, http.StatusUnsupportedMediaType, "invalid_request", "Content-Type must be application/x-www-form-urlencoded")
 		return
 	}
 
-	var req ExchangeRequest
-	if err := json.NewDecoder(body).Decode(&req); err != nil {
-		slog.Warn("Failed to decode request", "error", err)
-		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+	// Parse form data
+	if err := r.ParseForm(); err != nil {
+		slog.Warn("Failed to parse form", "error", err)
+		writeTokenError(w, http.StatusBadRequest, "invalid_request", "Failed to parse form data")
 		return
 	}
 
-	if req.JWT == "" {
-		http.Error(w, "jwt is required", http.StatusBadRequest)
+	// Validate grant_type
+	grantType := r.FormValue("grant_type")
+	if grantType != GrantTypeTokenExchange {
+		slog.Warn("Invalid grant_type", "grant_type", grantType)
+		writeTokenError(w, http.StatusBadRequest, "unsupported_grant_type", fmt.Sprintf("grant_type must be %s", GrantTypeTokenExchange))
 		return
 	}
 
-	audience, err := extractAudience(req.JWT)
+	// Get subject_token
+	subjectToken := r.FormValue("subject_token")
+	if subjectToken == "" {
+		slog.Warn("Missing subject_token")
+		writeTokenError(w, http.StatusBadRequest, "invalid_request", "subject_token is required")
+		return
+	}
+
+	// Validate subject_token_type
+	subjectTokenType := r.FormValue("subject_token_type")
+	if subjectTokenType != TokenTypeJWT {
+		slog.Warn("Invalid subject_token_type", "subject_token_type", subjectTokenType)
+		writeTokenError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("subject_token_type must be %s", TokenTypeJWT))
+		return
+	}
+
+	// Extract audience from the JWT
+	audience, err := extractAudience(subjectToken)
 	if err != nil {
 		slog.Warn("Failed to extract audience", "error", err)
-		http.Error(w, fmt.Sprintf("Invalid JWT: %v", err), http.StatusBadRequest)
+		writeTokenError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("Invalid subject_token: %v", err))
 		return
 	}
 
-	validatedSVID, err := jwtsvid.ParseAndValidate(req.JWT, s.jwtSource, audience)
+	// Validate the JWT SVID
+	validatedSVID, err := jwtsvid.ParseAndValidate(subjectToken, s.jwtSource, audience)
 	if err != nil {
 		slog.Warn("JWT validation failed", "error", err)
-		http.Error(w, fmt.Sprintf("JWT validation failed: %v", err), http.StatusUnauthorized)
+		writeTokenError(w, http.StatusUnauthorized, "invalid_grant", fmt.Sprintf("JWT validation failed: %v", err))
 		return
 	}
 
 	slog.Info("JWT validated successfully", "original_spiffe_id", validatedSVID.ID.String())
 
+	// Transform the SPIFFE ID
 	newID, err := transformSpiffeID(validatedSVID.ID, s.region, s.baseDomain)
 	if err != nil {
 		slog.Warn("Failed to transform SPIFFE ID", "error", err)
-		http.Error(w, fmt.Sprintf("Failed to transform SPIFFE ID: %v", err), http.StatusBadRequest)
+		writeTokenError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("Failed to transform SPIFFE ID: %v", err))
 		return
 	}
 
 	slog.Info("Transformed SPIFFE ID", "original", validatedSVID.ID.String(), "new", newID.String())
 
+	// Re-sign the JWT with the new identity
 	token, err := s.resignJWT(validatedSVID.Claims, newID)
 	if err != nil {
 		slog.Error("Failed to sign JWT", "error", err)
-		http.Error(w, fmt.Sprintf("Failed to sign JWT: %v", err), http.StatusInternalServerError)
+		writeTokenError(w, http.StatusInternalServerError, "server_error", "Failed to sign JWT")
 		return
 	}
 
-	resp := ExchangeResponse{
-		Token:     token,
-		ExpiresAt: validatedSVID.Expiry,
-		SpiffeID:  newID.String(),
+	// Calculate expires_in (seconds until expiration)
+	expiresIn := max(int64(time.Until(validatedSVID.Expiry).Seconds()), 0)
+
+	// Build RFC 8693 compliant response
+	resp := TokenExchangeResponse{
+		AccessToken:     token,
+		IssuedTokenType: TokenTypeJWT,
+		TokenType:       "Bearer",
+		ExpiresIn:       expiresIn,
 	}
 
-	slog.Info("Successfully exchanged JWT", "new_spiffe_id", newID.String())
+	slog.Info("Successfully exchanged JWT", "new_spiffe_id", newID.String(), "expires_in", expiresIn)
 
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		slog.Error("Failed to encode response", "error", err)
 	}
@@ -415,7 +467,7 @@ func main() {
 	}
 	defer server.Close()
 
-	http.HandleFunc("POST /v1/exchange", server.handleExchange)
+	http.HandleFunc("POST /v1/exchange", server.handleTokenExchange)
 	http.HandleFunc("GET /.well-known/jwks.json", server.handleJWKS)
 	http.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -13,8 +12,17 @@ import (
 	"os"
 	"time"
 
+	"github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
+	"golang.org/x/oauth2"
+)
+
+// RFC 8693 OAuth 2.0 Token Exchange constants.
+const (
+	grantTypeTokenExchange = "urn:ietf:params:oauth:grant-type:token-exchange"
+	tokenTypeJWT           = "urn:ietf:params:oauth:token-type:jwt"
 )
 
 const (
@@ -31,20 +39,28 @@ type IdentityResponse struct {
 	SpiffeID  string    `json:"spiffe_id"`
 }
 
-type ExchangeRequest struct {
-	JWT string `json:"jwt"`
-}
-
-type ExchangeResponse struct {
-	Token     string    `json:"token"`
-	ExpiresAt time.Time `json:"expires_at"`
-	SpiffeID  string    `json:"spiffe_id"`
-}
-
 type MetadataServer struct {
 	exchangeSocket  string
 	spireSocketPath string
 	httpClient      *http.Client
+}
+
+// extractSubjectFromJWT extracts the subject claim from a JWT without validation.
+func extractSubjectFromJWT(token string) (string, error) {
+	parsedJWT, err := jwt.ParseSigned(token, []jose.SignatureAlgorithm{
+		jose.RS256, jose.RS384, jose.RS512,
+		jose.ES256, jose.ES384, jose.ES512,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to parse JWT: %w", err)
+	}
+
+	var claims jwt.Claims
+	if err := parsedJWT.UnsafeClaimsWithoutVerification(&claims); err != nil {
+		return "", fmt.Errorf("failed to extract claims: %w", err)
+	}
+
+	return claims.Subject, nil
 }
 
 // fetchJWT fetches a JWT SVID from the local SPIRE workload API
@@ -88,61 +104,43 @@ func (s *MetadataServer) fetchJWT(ctx context.Context, audience string) (*jwtsvi
 }
 
 // exchangeJWT exchanges a JWT for a new one via the exchange service (over Unix socket)
-func (s *MetadataServer) exchangeJWT(ctx context.Context, token string) (*ExchangeResponse, error) {
-	reqBody := ExchangeRequest{JWT: token}
-
-	reqBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		slog.Error("Failed to marshal exchange request", "error", err)
-		return nil, fmt.Errorf("failed to marshal exchange request: %w", err)
-	}
-
-	// HTTP over Unix socket uses a dummy host (the socket handles routing)
-	exchangeURL := "http://exchange/v1/exchange"
-	slog.Debug("Creating exchange request",
+// using RFC 8693 OAuth 2.0 Token Exchange format.
+func (s *MetadataServer) exchangeJWT(ctx context.Context, token string) (*oauth2.Token, error) {
+	slog.Debug("Creating token exchange request",
 		"exchange_socket", s.exchangeSocket,
 		"token_length", len(token))
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, exchangeURL, bytes.NewReader(reqBytes))
-	if err != nil {
-		slog.Error("Failed to create exchange request", "error", err)
-		return nil, fmt.Errorf("failed to create exchange request: %w", err)
+	slog.Info("Sending token exchange request", "exchange_socket", s.exchangeSocket)
+
+	// HTTP over Unix socket uses a dummy host (the socket handles routing)
+	conf := &oauth2.Config{
+		Endpoint: oauth2.Endpoint{
+			TokenURL: "http://exchange/v1/exchange",
+		},
 	}
-	req.Header.Set("Content-Type", "application/json")
 
-	slog.Info("Sending exchange request", "exchange_socket", s.exchangeSocket)
+	ctx = context.WithValue(ctx, oauth2.HTTPClient, s.httpClient)
 
-	resp, err := s.httpClient.Do(req)
+	resp, err := conf.Exchange(ctx, "",
+		oauth2.SetAuthURLParam("grant_type", grantTypeTokenExchange),
+		oauth2.SetAuthURLParam("subject_token", token),
+		oauth2.SetAuthURLParam("subject_token_type", tokenTypeJWT),
+	)
 	if err != nil {
-		slog.Error("Failed to call exchange service",
+		slog.Error("Failed to exchange JWT",
 			"exchange_socket", s.exchangeSocket,
 			"error", err)
-		return nil, fmt.Errorf("failed to call exchange service: %w", err)
-	}
-	defer resp.Body.Close()
-
-	slog.Debug("Received exchange response",
-		"status_code", resp.StatusCode,
-		"status", resp.Status)
-
-	if resp.StatusCode != http.StatusOK {
-		slog.Error("Exchange service returned non-OK status",
-			"status_code", resp.StatusCode,
-			"status", resp.Status)
-		return nil, fmt.Errorf("exchange service returned status %d", resp.StatusCode)
+		return nil, err
 	}
 
-	var exchangeResp ExchangeResponse
-	if err := json.NewDecoder(resp.Body).Decode(&exchangeResp); err != nil {
-		slog.Error("Failed to decode exchange response", "error", err)
-		return nil, fmt.Errorf("failed to decode exchange response: %w", err)
-	}
+	// Extract the new SPIFFE ID from the JWT's subject claim
+	newSpiffeID, _ := extractSubjectFromJWT(resp.AccessToken)
 
 	slog.Info("Successfully received exchange response",
-		"new_spiffe_id", exchangeResp.SpiffeID,
-		"expires_at", exchangeResp.ExpiresAt)
+		"new_spiffe_id", newSpiffeID,
+		"expires_at", resp.Expiry)
 
-	return &exchangeResp, nil
+	return resp, nil
 }
 
 // handleIdentity handles POST requests to /v1/metadata/identity
@@ -190,7 +188,7 @@ func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) 
 		"audience", req.Audience,
 		"socket_path", s.spireSocketPath)
 
-	jwt, err := s.fetchJWT(ctx, req.Audience)
+	spiffeJWT, err := s.fetchJWT(ctx, req.Audience)
 	if err != nil {
 		slog.Error("Failed to fetch JWT from SPIRE",
 			"error", err,
@@ -200,30 +198,39 @@ func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) 
 	}
 
 	slog.Info("Fetched JWT, now exchanging",
-		"original_spiffe_id", jwt.ID.String(),
+		"original_spiffe_id", spiffeJWT.ID.String(),
 		"audience", req.Audience)
 
-	// Exchange JWT via the exchange service
-	exchangeResp, err := s.exchangeJWT(ctx, jwt.Marshal())
+	// Exchange JWT via the exchange service (RFC 8693)
+	exchangeResp, err := s.exchangeJWT(ctx, spiffeJWT.Marshal())
 	if err != nil {
 		slog.Error("Failed to exchange JWT",
-			"original_spiffe_id", jwt.ID.String(),
+			"original_spiffe_id", spiffeJWT.ID.String(),
 			"error", err,
 			"remote_addr", r.RemoteAddr)
 		http.Error(w, fmt.Sprintf("Failed to exchange JWT: %v", err), http.StatusInternalServerError)
 		return
 	}
 
+	// Extract the new SPIFFE ID from the exchanged JWT's subject claim
+	newSpiffeID, err := extractSubjectFromJWT(exchangeResp.AccessToken)
+	if err != nil {
+		slog.Error("Failed to extract SPIFFE ID from exchanged JWT",
+			"error", err,
+			"remote_addr", r.RemoteAddr)
+		http.Error(w, "Failed to process exchanged JWT", http.StatusInternalServerError)
+		return
+	}
+
 	resp := IdentityResponse{
-		Token:     exchangeResp.Token,
-		ExpiresAt: exchangeResp.ExpiresAt,
-		SpiffeID:  exchangeResp.SpiffeID,
+		Token:     exchangeResp.AccessToken,
+		ExpiresAt: exchangeResp.Expiry,
+		SpiffeID:  newSpiffeID,
 	}
 
 	slog.Info("Successfully exchanged JWT",
-		"original_spiffe_id", jwt.ID.String(),
-		"new_spiffe_id", exchangeResp.SpiffeID,
-		"expires_at", exchangeResp.ExpiresAt,
+		"original_spiffe_id", spiffeJWT.ID.String(),
+		"new_spiffe_id", newSpiffeID,
 		"remote_addr", r.RemoteAddr)
 
 	w.Header().Set("Content-Type", "application/json")

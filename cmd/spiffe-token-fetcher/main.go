@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -13,20 +11,35 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
+	"golang.org/x/oauth2"
 )
 
-// ExchangeRequest represents a request to the exchange service.
-type ExchangeRequest struct {
-	JWT string `json:"jwt"`
-}
+// RFC 8693 OAuth 2.0 Token Exchange constants.
+const (
+	grantTypeTokenExchange = "urn:ietf:params:oauth:grant-type:token-exchange"
+	tokenTypeJWT           = "urn:ietf:params:oauth:token-type:jwt"
+)
 
-// ExchangeResponse represents a response from the exchange service.
-type ExchangeResponse struct {
-	Token     string    `json:"token"`
-	ExpiresAt time.Time `json:"expires_at"`
-	SpiffeID  string    `json:"spiffe_id"`
+// extractSubjectFromJWT extracts the subject claim from a JWT without validation.
+func extractSubjectFromJWT(token string) (string, error) {
+	parsedJWT, err := jwt.ParseSigned(token, []jose.SignatureAlgorithm{
+		jose.RS256, jose.RS384, jose.RS512,
+		jose.ES256, jose.ES384, jose.ES512,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to parse JWT: %w", err)
+	}
+
+	var claims jwt.Claims
+	if err := parsedJWT.UnsafeClaimsWithoutVerification(&claims); err != nil {
+		return "", fmt.Errorf("failed to extract claims: %w", err)
+	}
+
+	return claims.Subject, nil
 }
 
 // parseSocketPath validates and parses the socket URL
@@ -84,47 +97,29 @@ func fetchJWTWithRetry(ctx context.Context, jwtSource *workloadapi.JWTSource, au
 	return nil, fmt.Errorf("failed to fetch JWT after %d attempts: %w", maxRetries, lastErr)
 }
 
-// exchangeJWT exchanges a JWT via the exchange service.
-func exchangeJWT(ctx context.Context, httpClient *http.Client, exchangeServiceURL, token string) (*ExchangeResponse, error) {
-	reqBody := ExchangeRequest{
-		JWT: token,
+// exchangeJWT performs an RFC 8693 token exchange using the oauth2 library.
+func exchangeJWT(ctx context.Context, httpClient *http.Client, tokenEndpoint, subjectToken string) (*oauth2.Token, error) {
+	conf := &oauth2.Config{
+		Endpoint: oauth2.Endpoint{
+			TokenURL: tokenEndpoint,
+		},
 	}
 
-	reqBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal exchange request: %w", err)
-	}
+	ctx = context.WithValue(ctx, oauth2.HTTPClient, httpClient)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, exchangeServiceURL+"/v1/exchange", bytes.NewReader(reqBytes))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create exchange request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to call exchange service: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("exchange service returned status %d", resp.StatusCode)
-	}
-
-	var exchangeResp ExchangeResponse
-	if err := json.NewDecoder(resp.Body).Decode(&exchangeResp); err != nil {
-		return nil, fmt.Errorf("failed to decode exchange response: %w", err)
-	}
-
-	return &exchangeResp, nil
+	return conf.Exchange(ctx, "",
+		oauth2.SetAuthURLParam("grant_type", grantTypeTokenExchange),
+		oauth2.SetAuthURLParam("subject_token", subjectToken),
+		oauth2.SetAuthURLParam("subject_token_type", tokenTypeJWT),
+	)
 }
 
 // exchangeJWTWithRetry exchanges a JWT via the exchange service with retry logic.
-func exchangeJWTWithRetry(ctx context.Context, httpClient *http.Client, exchangeServiceURL, token string, maxRetries int) (*ExchangeResponse, error) {
+func exchangeJWTWithRetry(ctx context.Context, httpClient *http.Client, exchangeServiceURL, token string, maxRetries int) (*oauth2.Token, error) {
 	var lastErr error
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		resp, err := exchangeJWT(ctx, httpClient, exchangeServiceURL, token)
+		resp, err := exchangeJWT(ctx, httpClient, exchangeServiceURL+"/v1/exchange", token)
 		if err == nil {
 			return resp, nil
 		}
@@ -211,7 +206,7 @@ func main() {
 		}
 
 		// Fetch JWT SVID with retry logic
-		jwt, err := fetchJWTWithRetry(ctx, jwtSource, *audience, *maxRetries)
+		spiffeJWT, err := fetchJWTWithRetry(ctx, jwtSource, *audience, *maxRetries)
 		if err != nil {
 			log.Fatalf("Unable to fetch JWT SVID after %d attempts: %v", *maxRetries, err)
 		}
@@ -221,16 +216,22 @@ func main() {
 			log.Printf("Exchanging JWT via %s", *exchangeServiceURL)
 		}
 
-		exchangeResp, err := exchangeJWTWithRetry(ctx, httpClient, *exchangeServiceURL, jwt.Marshal(), *maxRetries)
+		exchangeResp, err := exchangeJWTWithRetry(ctx, httpClient, *exchangeServiceURL, spiffeJWT.Marshal(), *maxRetries)
 		if err != nil {
 			log.Fatalf("Failed to exchange JWT: %v", err)
 		}
 
-		tokenData := exchangeResp.Token
-		expiryTime := exchangeResp.ExpiresAt
+		tokenData := exchangeResp.AccessToken
+		expiryTime := exchangeResp.Expiry
 
 		if *verbose {
-			log.Printf("Exchanged JWT for identity: %s -> %s", jwt.ID, exchangeResp.SpiffeID)
+			// Extract the new SPIFFE ID from the exchanged JWT
+			newSpiffeID, err := extractSubjectFromJWT(tokenData)
+			if err != nil {
+				log.Printf("Warning: could not extract SPIFFE ID from exchanged JWT: %v", err)
+				newSpiffeID = "(unknown)"
+			}
+			log.Printf("Exchanged JWT for identity: %s -> %s", spiffeJWT.ID, newSpiffeID)
 		}
 
 		// Write JWT to file

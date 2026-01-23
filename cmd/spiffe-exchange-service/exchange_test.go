@@ -301,7 +301,7 @@ func TestHandleJWKS(t *testing.T) {
 	}
 }
 
-func TestHandleExchange_InvalidRequests(t *testing.T) {
+func TestHandleTokenExchange_InvalidRequests(t *testing.T) {
 	keyStore := newMockKeyStore()
 	server := &ExchangeServer{
 		keyStore:   keyStore,
@@ -313,30 +313,42 @@ func TestHandleExchange_InvalidRequests(t *testing.T) {
 		contentType string
 		body        string
 		wantStatus  int
+		wantError   string
 	}{
 		{
 			name:        "wrong content type",
-			contentType: "text/plain",
+			contentType: "application/json",
 			body:        `{"jwt":"test"}`,
 			wantStatus:  http.StatusUnsupportedMediaType,
+			wantError:   "invalid_request",
 		},
 		{
-			name:        "invalid json",
-			contentType: "application/json",
-			body:        `{invalid}`,
+			name:        "missing grant_type",
+			contentType: "application/x-www-form-urlencoded",
+			body:        "subject_token=test&subject_token_type=urn:ietf:params:oauth:token-type:jwt",
 			wantStatus:  http.StatusBadRequest,
+			wantError:   "unsupported_grant_type",
 		},
 		{
-			name:        "empty jwt",
-			contentType: "application/json",
-			body:        `{"jwt":""}`,
+			name:        "wrong grant_type",
+			contentType: "application/x-www-form-urlencoded",
+			body:        "grant_type=client_credentials&subject_token=test&subject_token_type=urn:ietf:params:oauth:token-type:jwt",
 			wantStatus:  http.StatusBadRequest,
+			wantError:   "unsupported_grant_type",
 		},
 		{
-			name:        "missing jwt field",
-			contentType: "application/json",
-			body:        `{}`,
+			name:        "missing subject_token",
+			contentType: "application/x-www-form-urlencoded",
+			body:        "grant_type=urn:ietf:params:oauth:grant-type:token-exchange&subject_token_type=urn:ietf:params:oauth:token-type:jwt",
 			wantStatus:  http.StatusBadRequest,
+			wantError:   "invalid_request",
+		},
+		{
+			name:        "wrong subject_token_type",
+			contentType: "application/x-www-form-urlencoded",
+			body:        "grant_type=urn:ietf:params:oauth:grant-type:token-exchange&subject_token=test&subject_token_type=urn:ietf:params:oauth:token-type:access_token",
+			wantStatus:  http.StatusBadRequest,
+			wantError:   "invalid_request",
 		},
 	}
 
@@ -346,10 +358,19 @@ func TestHandleExchange_InvalidRequests(t *testing.T) {
 			req.Header.Set("Content-Type", tt.contentType)
 			rr := httptest.NewRecorder()
 
-			server.handleExchange(rr, req)
+			server.handleTokenExchange(rr, req)
 
 			if rr.Code != tt.wantStatus {
-				t.Errorf("status = %d, want %d", rr.Code, tt.wantStatus)
+				t.Errorf("status = %d, want %d, body: %s", rr.Code, tt.wantStatus, rr.Body.String())
+			}
+
+			// Verify error response format
+			var errResp TokenExchangeErrorResponse
+			if err := json.NewDecoder(rr.Body).Decode(&errResp); err != nil {
+				t.Fatalf("failed to decode error response: %v", err)
+			}
+			if errResp.Error != tt.wantError {
+				t.Errorf("error = %q, want %q", errResp.Error, tt.wantError)
 			}
 		})
 	}

@@ -155,7 +155,7 @@ Fetcher -[#green]-> SpireCSI : 1. FetchJWTSVID
 SpireCSI -[#green]-> SpireAgent : 2. Workload API
 SpireAgent -[#green]--> SpireCSI
 SpireCSI -[#green]--> Fetcher : 3. JWT SVID
-Fetcher -[#green]-> GW1 : 4. POST /v1/exchange
+Fetcher -[#green]-> GW1 : 4. POST /v1/exchange\n(RFC 8693)
 GW1 -[#green]-> Exchange
 Exchange -[#green]--> Fetcher : 5. Exchanged JWT
 Fetcher -[#green]-> TokenVol : 6. Write token to file
@@ -284,7 +284,7 @@ participant "Exchange Service\n(via Exchange CSI)" as Exchange
 App -> Meta : POST /v1/metadata/identity
 Meta -> Agent : FetchJWTSVID\n(workload API socket)
 Agent --> Meta : JWT SVID
-Meta -> Exchange : POST /v1/exchange\n(Unix socket)
+Meta -> Exchange : POST /v1/exchange\n(RFC 8693, Unix socket)
 Exchange --> Meta : Exchanged JWT
 Meta --> App : {"token": "...", "spiffe_id": "..."}
 @enduml
