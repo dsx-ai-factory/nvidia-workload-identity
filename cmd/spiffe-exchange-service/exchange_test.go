@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +9,9 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
+
+	"spiffe-jwt-issuer/cmd/spiffe-exchange-service/keystore"
+	"spiffe-jwt-issuer/cmd/spiffe-exchange-service/keystore/memory"
 )
 
 func TestParsePathComponents(t *testing.T) {
@@ -154,7 +156,7 @@ func TestJWKS_UsesFullHostForKeyLookup(t *testing.T) {
 	// Regression test: JWKS handler was extracting only tenant prefix,
 	// looking for keys under "tenant1.nvidia.com" instead of "tenant1.sjc-1.internal.nvidia.com"
 
-	store := NewInMemoryKeyStore(ES256KeyGenerator{})
+	store := memory.New(keystore.ES256KeyGenerator{})
 	server := &ExchangeServer{
 		keyStore:   store,
 		baseDomain: "nvidia.com",
@@ -163,10 +165,11 @@ func TestJWKS_UsesFullHostForKeyLookup(t *testing.T) {
 
 	// Pre-create a key for the full trust domain (simulating what transformSpiffeID does)
 	fullDomain := "tenant1.sjc-1.internal.nvidia.com"
-	_, expectedKID, _, err := store.GetOrCreateKey(fullDomain)
+	dk, err := store.GetOrCreateKey(fullDomain)
 	if err != nil {
 		t.Fatalf("failed to create key: %v", err)
 	}
+	expectedKID := dk.KeyID
 
 	// Make JWKS request with full domain as Host header
 	req := httptest.NewRequest("GET", "/.well-known/jwks.json", nil)
@@ -199,107 +202,37 @@ func TestJWKS_UsesFullHostForKeyLookup(t *testing.T) {
 	}
 }
 
-func TestInMemoryKeyStore_GetOrCreateKey(t *testing.T) {
-	store := NewInMemoryKeyStore(ES256KeyGenerator{})
-
-	// First call should create a key
-	signer1, kid1, alg1, err := store.GetOrCreateKey("domain1")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if signer1 == nil {
-		t.Error("signer should not be nil")
-	}
-	if kid1 == "" {
-		t.Error("key ID should not be empty")
-	}
-	if alg1 != jose.ES256 {
-		t.Errorf("algorithm = %v, want ES256", alg1)
-	}
-
-	// Second call should return the same key
-	signer2, kid2, alg2, err := store.GetOrCreateKey("domain1")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if kid1 != kid2 {
-		t.Error("key ID should be the same on second call")
-	}
-	if signer1 != signer2 {
-		t.Error("signer should be the same on second call")
-	}
-	if alg1 != alg2 {
-		t.Error("algorithm should be the same on second call")
-	}
-
-	// Different domain should get a different key
-	_, kid3, _, err := store.GetOrCreateKey("domain2")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if kid1 == kid3 {
-		t.Error("different domains should have different keys")
-	}
-}
-
-func TestInMemoryKeyStore_GetKeys(t *testing.T) {
-	store := NewInMemoryKeyStore(ES256KeyGenerator{})
-
-	// GetKeys should create a key if none exist
-	keys, err := store.GetKeys("domain1")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(keys) != 1 {
-		t.Errorf("got %d keys, want 1", len(keys))
-	}
-
-	// Verify the key matches what GetOrCreateKey returns
-	signer, kid, alg, err := store.GetOrCreateKey("domain1")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if keys[0].KeyID != kid {
-		t.Error("GetKeys key ID should match GetOrCreateKey")
-	}
-	if keys[0].Signer != signer {
-		t.Error("GetKeys signer should match GetOrCreateKey")
-	}
-	if keys[0].Algorithm != alg {
-		t.Error("GetKeys algorithm should match GetOrCreateKey")
-	}
-}
-
-// mockKeyStore implements KeyStore for testing handlers
+// mockKeyStore implements keystore.KeyStore for testing handlers
 type mockKeyStore struct {
-	keys map[string]*DomainKey
+	keys   map[string]keystore.DomainKey
+	keygen keystore.KeyGenerator
 }
 
 func newMockKeyStore() *mockKeyStore {
-	return &mockKeyStore{keys: make(map[string]*DomainKey)}
+	return &mockKeyStore{
+		keys:   make(map[string]keystore.DomainKey),
+		keygen: keystore.ES256KeyGenerator{},
+	}
 }
 
-func (m *mockKeyStore) GetOrCreateKey(trustDomain string) (crypto.Signer, KeyID, jose.SignatureAlgorithm, error) {
+func (m *mockKeyStore) GetOrCreateKey(trustDomain string) (keystore.DomainKey, error) {
 	if dk, ok := m.keys[trustDomain]; ok {
-		return dk.Signer, dk.KeyID, dk.Algorithm, nil
+		return dk, nil
 	}
-	gen := ES256KeyGenerator{}
-	signer, alg, err := gen.GenerateKey()
+	dk, err := m.keygen.GenerateKey()
 	if err != nil {
-		return nil, "", "", err
+		return keystore.DomainKey{}, err
 	}
-	kid := generateKeyID(signer.Public())
-	m.keys[trustDomain] = &DomainKey{Signer: signer, KeyID: kid, Algorithm: alg}
-	return signer, kid, alg, nil
+	m.keys[trustDomain] = dk
+	return dk, nil
 }
 
-func (m *mockKeyStore) GetKeys(trustDomain string) ([]DomainKey, error) {
-	_, _, _, err := m.GetOrCreateKey(trustDomain)
+func (m *mockKeyStore) GetKeys(trustDomain string) ([]keystore.DomainKey, error) {
+	dk, err := m.GetOrCreateKey(trustDomain)
 	if err != nil {
 		return nil, err
 	}
-	dk := m.keys[trustDomain]
-	return []DomainKey{*dk}, nil
+	return []keystore.DomainKey{dk}, nil
 }
 
 func TestHandleJWKS(t *testing.T) {
@@ -422,18 +355,25 @@ func TestHandleExchange_InvalidRequests(t *testing.T) {
 	}
 }
 
+func must[T any](value T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return value
+}
+
 func TestGenerateKeyID(t *testing.T) {
-	gen := ES256KeyGenerator{}
+	gen := keystore.ES256KeyGenerator{}
 
 	// Generate two different keys
-	signer1, _, _ := gen.GenerateKey()
-	signer2, _, _ := gen.GenerateKey()
+	dk1 := must(gen.GenerateKey())
+	dk2 := must(gen.GenerateKey())
 
-	kid1 := generateKeyID(signer1.Public())
-	kid2 := generateKeyID(signer2.Public())
+	kid1 := keystore.GenerateKeyID(dk1.Signer.Public())
+	kid2 := keystore.GenerateKeyID(dk2.Signer.Public())
 
 	// Same key should produce same ID
-	kid1Again := generateKeyID(signer1.Public())
+	kid1Again := keystore.GenerateKeyID(dk1.Signer.Public())
 	if kid1 != kid1Again {
 		t.Error("same key should produce same key ID")
 	}

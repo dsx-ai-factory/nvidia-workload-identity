@@ -1,4 +1,4 @@
-package main
+package postgres
 
 import (
 	"bytes"
@@ -9,9 +9,11 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"testing"
+
+	"spiffe-jwt-issuer/cmd/spiffe-exchange-service/keystore"
 )
 
-func TestKeyEncryptor_RoundTrip(t *testing.T) {
+func TestEncryptor_RoundTrip(t *testing.T) {
 	// Generate a valid 32-byte key
 	keyBytes := make([]byte, 32)
 	if _, err := rand.Read(keyBytes); err != nil {
@@ -19,7 +21,7 @@ func TestKeyEncryptor_RoundTrip(t *testing.T) {
 	}
 	keyB64 := base64.StdEncoding.EncodeToString(keyBytes)
 
-	encryptor, err := NewKeyEncryptor(keyB64)
+	encryptor, err := NewEncryptor(keyB64)
 	if err != nil {
 		t.Fatalf("failed to create encryptor: %v", err)
 	}
@@ -81,7 +83,7 @@ func TestKeyEncryptor_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestKeyEncryptor_DifferentCiphertexts(t *testing.T) {
+func TestEncryptor_DifferentCiphertexts(t *testing.T) {
 	// Ensure each encryption produces different ciphertext (due to random nonce)
 	keyBytes := make([]byte, 32)
 	if _, err := rand.Read(keyBytes); err != nil {
@@ -89,7 +91,7 @@ func TestKeyEncryptor_DifferentCiphertexts(t *testing.T) {
 	}
 	keyB64 := base64.StdEncoding.EncodeToString(keyBytes)
 
-	encryptor, err := NewKeyEncryptor(keyB64)
+	encryptor, err := NewEncryptor(keyB64)
 	if err != nil {
 		t.Fatalf("failed to create encryptor: %v", err)
 	}
@@ -111,7 +113,7 @@ func TestKeyEncryptor_DifferentCiphertexts(t *testing.T) {
 	}
 }
 
-func TestKeyEncryptor_InvalidKey(t *testing.T) {
+func TestEncryptor_InvalidKey(t *testing.T) {
 	tests := []struct {
 		name   string
 		keyB64 string
@@ -132,7 +134,7 @@ func TestKeyEncryptor_InvalidKey(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := NewKeyEncryptor(tc.keyB64)
+			_, err := NewEncryptor(tc.keyB64)
 			if err == nil {
 				t.Error("expected error for invalid key")
 			}
@@ -140,14 +142,14 @@ func TestKeyEncryptor_InvalidKey(t *testing.T) {
 	}
 }
 
-func TestKeyEncryptor_DecryptInvalid(t *testing.T) {
+func TestEncryptor_DecryptInvalid(t *testing.T) {
 	keyBytes := make([]byte, 32)
 	if _, err := rand.Read(keyBytes); err != nil {
 		t.Fatalf("failed to generate key: %v", err)
 	}
 	keyB64 := base64.StdEncoding.EncodeToString(keyBytes)
 
-	encryptor, err := NewKeyEncryptor(keyB64)
+	encryptor, err := NewEncryptor(keyB64)
 	if err != nil {
 		t.Fatalf("failed to create encryptor: %v", err)
 	}
@@ -176,7 +178,7 @@ func TestKeyEncryptor_DecryptInvalid(t *testing.T) {
 	}
 }
 
-func TestKeyEncryptor_WrongKey(t *testing.T) {
+func TestEncryptor_WrongKey(t *testing.T) {
 	// Encrypt with one key, try to decrypt with another
 	keyBytes1 := make([]byte, 32)
 	keyBytes2 := make([]byte, 32)
@@ -187,8 +189,8 @@ func TestKeyEncryptor_WrongKey(t *testing.T) {
 		t.Fatalf("failed to generate key2: %v", err)
 	}
 
-	encryptor1, _ := NewKeyEncryptor(base64.StdEncoding.EncodeToString(keyBytes1))
-	encryptor2, _ := NewKeyEncryptor(base64.StdEncoding.EncodeToString(keyBytes2))
+	encryptor1, _ := NewEncryptor(base64.StdEncoding.EncodeToString(keyBytes1))
+	encryptor2, _ := NewEncryptor(base64.StdEncoding.EncodeToString(keyBytes2))
 
 	ciphertext, _ := encryptor1.Encrypt([]byte("secret"))
 
@@ -198,13 +200,13 @@ func TestKeyEncryptor_WrongKey(t *testing.T) {
 	}
 }
 
-func TestKeyEncryptor_PKCS8RoundTrip(t *testing.T) {
+func TestEncryptor_PKCS8RoundTrip(t *testing.T) {
 	// Generate encryption key
 	encKeyBytes := make([]byte, 32)
 	if _, err := rand.Read(encKeyBytes); err != nil {
 		t.Fatalf("failed to generate encryption key: %v", err)
 	}
-	encryptor, err := NewKeyEncryptor(base64.StdEncoding.EncodeToString(encKeyBytes))
+	encryptor, err := NewEncryptor(base64.StdEncoding.EncodeToString(encKeyBytes))
 	if err != nil {
 		t.Fatalf("failed to create encryptor: %v", err)
 	}
@@ -215,7 +217,7 @@ func TestKeyEncryptor_PKCS8RoundTrip(t *testing.T) {
 		t.Fatalf("failed to generate key: %v", err)
 	}
 
-	// Serialize using PKCS8 (same as postgres_keystore.go)
+	// Serialize using PKCS8
 	pkcs8Bytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
 	if err != nil {
 		t.Fatalf("failed to marshal PKCS8: %v", err)
@@ -249,15 +251,15 @@ func TestKeyEncryptor_PKCS8RoundTrip(t *testing.T) {
 	}
 }
 
-func TestPostgresConfig_DSN(t *testing.T) {
+func TestConfig_DSN(t *testing.T) {
 	tests := []struct {
 		name     string
-		cfg      PostgresConfig
+		cfg      Config
 		expected string
 	}{
 		{
 			name: "explicit sslmode",
-			cfg: PostgresConfig{
+			cfg: Config{
 				Host:     "localhost",
 				Port:     5432,
 				Database: "testdb",
@@ -269,7 +271,7 @@ func TestPostgresConfig_DSN(t *testing.T) {
 		},
 		{
 			name: "default sslmode",
-			cfg: PostgresConfig{
+			cfg: Config{
 				Host:     "localhost",
 				Port:     5432,
 				Database: "testdb",
@@ -289,8 +291,8 @@ func TestPostgresConfig_DSN(t *testing.T) {
 	}
 }
 
-func TestNewPostgresKeyStore_InvalidEncryptionKey(t *testing.T) {
-	cfg := PostgresConfig{
+func TestNew_InvalidEncryptionKey(t *testing.T) {
+	cfg := Config{
 		Host:     "localhost",
 		Port:     5432,
 		Database: "testdb",
@@ -298,7 +300,7 @@ func TestNewPostgresKeyStore_InvalidEncryptionKey(t *testing.T) {
 		Password: "testpass",
 	}
 
-	_, err := NewPostgresKeyStore(context.Background(), cfg, "invalid-key", ES256KeyGenerator{})
+	_, err := New(context.Background(), cfg, "invalid-key", keystore.ES256KeyGenerator{})
 	if err == nil {
 		t.Error("expected error for invalid encryption key")
 	}

@@ -20,6 +20,11 @@ import (
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
+
+	"spiffe-jwt-issuer/cmd/spiffe-exchange-service/keystore"
+	"spiffe-jwt-issuer/cmd/spiffe-exchange-service/keystore/memory"
+	"spiffe-jwt-issuer/cmd/spiffe-exchange-service/keystore/postgres"
+	"spiffe-jwt-issuer/cmd/spiffe-exchange-service/keystore/cached"
 )
 
 // ExchangeRequest represents a request to exchange a SPIFFE JWT.
@@ -36,14 +41,14 @@ type ExchangeResponse struct {
 
 // ExchangeServer handles SPIFFE JWT exchange operations.
 type ExchangeServer struct {
-	keyStore   KeyStore
+	keyStore   keystore.KeyStore
 	jwtSource  *workloadapi.JWTSource
 	region     string
 	baseDomain string
 }
 
 // NewExchangeServer creates a new exchange server using the SPIFFE Workload API.
-func NewExchangeServer(ctx context.Context, keyStore KeyStore, socketPath, region, baseDomain string) (*ExchangeServer, error) {
+func NewExchangeServer(ctx context.Context, keyStore keystore.KeyStore, socketPath, region, baseDomain string) (*ExchangeServer, error) {
 	opts := []workloadapi.JWTSourceOption{}
 	if socketPath != "" {
 		opts = append(opts, workloadapi.WithClientOptions(workloadapi.WithAddr(socketPath)))
@@ -137,19 +142,19 @@ func transformSpiffeID(originalID spiffeid.ID, region, baseDomain string) (spiff
 // resignJWT re-signs a JWT with a new subject, preserving all other claims.
 func (s *ExchangeServer) resignJWT(originalClaims map[string]any, newSubject spiffeid.ID) (string, error) {
 	trustDomain := newSubject.TrustDomain().Name()
-	key, keyID, alg, err := s.keyStore.GetOrCreateKey(trustDomain)
+	dk, err := s.keyStore.GetOrCreateKey(trustDomain)
 	if err != nil {
 		return "", fmt.Errorf("failed to get key: %w", err)
 	}
 
-	slog.Info("resigning JWT", "trustDomain", trustDomain, "newSubject", newSubject, "kid", keyID)
+	slog.Info("resigning JWT", "trustDomain", trustDomain, "newSubject", newSubject, "kid", dk.KeyID)
 
 	signerKey := jose.SigningKey{
-		Algorithm: alg,
-		Key:       key,
+		Algorithm: dk.Algorithm,
+		Key:       dk.Signer,
 	}
 	signerOpts := &jose.SignerOptions{}
-	signerOpts.WithHeader(jose.HeaderKey("kid"), keyID)
+	signerOpts.WithHeader(jose.HeaderKey("kid"), dk.KeyID)
 
 	signer, err := jose.NewSigner(signerKey, signerOpts)
 	if err != nil {
@@ -347,12 +352,12 @@ func main() {
 	ctx := context.Background()
 
 	// Create the appropriate KeyStore backend
-	var keyStore KeyStore
+	var ks keystore.KeyStore
 
 	switch *keystoreBackend {
 	case "in-memory":
 		slog.Info("Using in-memory keystore backend")
-		keyStore = NewInMemoryKeyStore(ES256KeyGenerator{})
+		ks = memory.New(keystore.ES256KeyGenerator{})
 	case "postgres":
 		if *encryptionKeyB64 == "" {
 			slog.Error("--encryption-key is required for postgres backend")
@@ -363,7 +368,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		pgConfig := PostgresConfig{
+		pgConfig := postgres.Config{
 			Host:     *pgHost,
 			Port:     *pgPort,
 			Database: *pgDatabase,
@@ -379,19 +384,19 @@ func main() {
 			"user", pgConfig.User,
 			"sslmode", pgConfig.SSLMode)
 
-		pgStore, err := NewPostgresKeyStore(ctx, pgConfig, *encryptionKeyB64, ES256KeyGenerator{})
+		pgStore, err := postgres.New(ctx, pgConfig, *encryptionKeyB64, keystore.ES256KeyGenerator{})
 		if err != nil {
 			slog.Error("Failed to create postgres keystore", "error", err)
 			os.Exit(1)
 		}
-		keyStore = pgStore
+		ks = cached.New(pgStore, cached.DefaultTTL)
 		slog.Info("Using postgres keystore backend")
 	default:
 		slog.Error("Unknown keystore backend", "backend", *keystoreBackend)
 		os.Exit(1)
 	}
 
-	if closer, ok := keyStore.(io.Closer); ok {
+	if closer, ok := ks.(io.Closer); ok {
 		defer closer.Close()
 	}
 
@@ -403,7 +408,7 @@ func main() {
 		"keystore_backend", *keystoreBackend,
 		"log_level", level.String())
 
-	server, err := NewExchangeServer(ctx, keyStore, *socketPath, *region, *baseDomain)
+	server, err := NewExchangeServer(ctx, ks, *socketPath, *region, *baseDomain)
 	if err != nil {
 		slog.Error("Failed to create exchange server", "error", err)
 		os.Exit(1)

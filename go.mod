@@ -7,6 +7,7 @@ require (
 	github.com/go-jose/go-jose/v4 v4.1.3
 	github.com/google/cel-go v0.26.1
 	github.com/google/nftables v0.3.0
+	github.com/jellydator/ttlcache/v3 v3.4.0
 	github.com/lib/pq v1.10.9
 	github.com/openbao/openbao/sdk/v2 v2.4.0
 	github.com/spiffe/go-spiffe/v2 v2.6.0
