@@ -55,17 +55,21 @@ func TestIdentityRequest_Validation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/v1/metadata/identity", strings.NewReader(tt.body))
-			if tt.contentType != "" {
-				req.Header.Set("Content-Type", tt.contentType)
-			}
-			req.RemoteAddr = "10.0.0.1:12345"
-			rr := httptest.NewRecorder()
+			// Test both API versions
+			endpoints := []string{"/latest/meta-data/identity", "/2009-04-04/meta-data/identity"}
+			for _, endpoint := range endpoints {
+				req := httptest.NewRequest(http.MethodPost, endpoint, strings.NewReader(tt.body))
+				if tt.contentType != "" {
+					req.Header.Set("Content-Type", tt.contentType)
+				}
+				req.RemoteAddr = "10.0.0.1:12345"
+				rr := httptest.NewRecorder()
 
-			server.handleIdentity(rr, req)
+				server.handleIdentity(rr, req)
 
-			if rr.Code != tt.wantStatus {
-				t.Errorf("status = %d, want %d, body: %s", rr.Code, tt.wantStatus, rr.Body.String())
+				if rr.Code != tt.wantStatus {
+					t.Errorf("endpoint %s: status = %d, want %d, body: %s", endpoint, rr.Code, tt.wantStatus, rr.Body.String())
+				}
 			}
 		})
 	}

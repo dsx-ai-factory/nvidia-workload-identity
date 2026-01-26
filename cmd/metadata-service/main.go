@@ -143,7 +143,7 @@ func (s *MetadataServer) exchangeJWT(ctx context.Context, token string) (*oauth2
 	return resp, nil
 }
 
-// handleIdentity handles POST requests to /v1/metadata/identity
+// handleIdentity handles POST requests to /{latest|2009-04-04}/meta-data/identity
 func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) {
 	body := http.MaxBytesReader(w, r.Body, 1024*1024)
 	defer body.Close()
@@ -297,7 +297,9 @@ func main() {
 		httpClient:      httpClient,
 	}
 
-	http.HandleFunc("POST /v1/metadata/identity", server.handleIdentity)
+	// Handle both latest and 2009-04-04 API versions for EC2-style metadata service
+	http.HandleFunc("POST /latest/meta-data/identity", server.handleIdentity)
+	http.HandleFunc("POST /2009-04-04/meta-data/identity", server.handleIdentity)
 	http.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		slog.Debug("Health check", "remote_addr", r.RemoteAddr)
 		w.WriteHeader(http.StatusOK)

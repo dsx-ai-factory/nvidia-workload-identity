@@ -73,9 +73,9 @@ parse_jwt_response() {
 
 # Test metadata service JWT endpoint
 test_jwt_endpoint() {
-    log_test "Testing JWT endpoint at ${MDS_IP}:80/v1/metadata/identity..."
+    log_test "Testing JWT endpoint at ${MDS_IP}:80/latest/meta-data/identity..."
     
-    local curl_cmd="curl -v -X POST http://${MDS_IP}/v1/metadata/identity -H 'Content-Type: application/json' -d '{\"audience\": \"${TEST_AUDIENCE}\"}' --max-time 10"
+    local curl_cmd="curl -v -X POST http://${MDS_IP}/latest/meta-data/identity -H 'Content-Type: application/json' -d '{\"audience\": \"${TEST_AUDIENCE}\"}' --max-time 10"
     
     local response
     if response=$(exec_in_vm "$curl_cmd" 60); then
@@ -176,7 +176,7 @@ verify_metadata_access() {
         echo
         echo "  virtctl console ${VM_NAME} -n ${NAMESPACE} --context ${CONTEXT}"
         echo "  # Then run inside VM:"
-        echo "  curl -X POST http://${MDS_IP}/v1/metadata/identity \\"
+        echo "  curl -X POST http://${MDS_IP}/latest/meta-data/identity \\"
         echo "    -H 'Content-Type: application/json' \\"
         echo "    -d '{\"audience\": \"${TEST_AUDIENCE}\"}'"
         echo
@@ -219,7 +219,7 @@ display_vm_info() {
     echo "  Credentials: ubuntu / ubuntu"
     echo
     echo "Test MDS from inside VM:"
-    echo "  curl -X POST http://${MDS_IP}/v1/metadata/identity \\"
+    echo "  curl -X POST http://${MDS_IP}/latest/meta-data/identity \\"
     echo "    -H 'Content-Type: application/json' \\"
     echo "    -d '{\"audience\": \"${TEST_AUDIENCE}\"}'"
 }

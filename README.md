@@ -231,7 +231,7 @@ SPIRE1 -[#blue]-> GW2 : Fetch SPIRE bundle\n(federation)
 GW2 -[#blue]-> SPIRE2
 
 ' VM to metadata sidecar flow
-VM -[#green]-> MetaSidecar : 1. POST /v1/metadata/identity\n(via nftables MAC rewrite)
+VM -[#green]-> MetaSidecar : 1. POST /latest/meta-data/identity\n(via nftables MAC rewrite)
 MetaSidecar -[#green]-> SpireCSI : 2. FetchJWTSVID
 SpireCSI -[#green]-> SpireAgent : 3. Workload API
 SpireAgent -[#green]--> SpireCSI
@@ -281,7 +281,7 @@ participant "Metadata Sidecar\n169.254.169.254" as Meta
 participant "SPIRE Agent\n(via SPIRE CSI)" as Agent
 participant "Exchange Service\n(via Exchange CSI)" as Exchange
 
-App -> Meta : POST /v1/metadata/identity
+App -> Meta : POST /latest/meta-data/identity
 Meta -> Agent : FetchJWTSVID\n(workload API socket)
 Agent --> Meta : JWT SVID
 Meta -> Exchange : POST /v1/exchange\n(RFC 8693, Unix socket)
@@ -308,7 +308,7 @@ The MDS Network Setup DaemonSet configures each VMI pod's network namespace to r
 ### HTTP API
 
 ```bash
-curl -X POST http://169.254.169.254/v1/metadata/identity \
+curl -X POST http://169.254.169.254/latest/meta-data/identity \
   -H "Content-Type: application/json" \
   -d '{"audience": "spiffe://tenant1.sjc-1.vmaas.nvidia.com"}'
 ```
