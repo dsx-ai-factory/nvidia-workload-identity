@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
@@ -34,9 +35,9 @@ type IdentityRequest struct {
 }
 
 type IdentityResponse struct {
-	Token     string    `json:"token"`
-	ExpiresAt time.Time `json:"expires_at"`
-	SpiffeID  string    `json:"spiffe_id"`
+	Token     string `json:"token"`
+	ExpiresIn int64  `json:"expires_in"` // Seconds until expiration (OAuth2 RFC 6749)
+	SpiffeID  string `json:"spiffe_id"`
 }
 
 type MetadataServer struct {
@@ -138,12 +139,36 @@ func (s *MetadataServer) exchangeJWT(ctx context.Context, token string) (*oauth2
 
 	slog.Info("Successfully received exchange response",
 		"new_spiffe_id", newSpiffeID,
-		"expires_at", resp.Expiry)
+		"expiry", resp.Expiry)
 
 	return resp, nil
 }
 
-// handleIdentity handles POST requests to /{latest|2009-04-04}/meta-data/identity
+// determineResponseFormat parses the Accept header and returns the appropriate content type.
+// Defaults to "application/json" if no Accept header is provided or no supported type is found.
+func determineResponseFormat(acceptHeader string) string {
+	// Parse Accept header - it may be a comma-separated list with quality values
+	// e.g., "text/plain, application/json" or "text/plain;q=0.9, application/json"
+	acceptTypes := strings.SplitSeq(acceptHeader, ",")
+	for acceptType := range acceptTypes {
+		mediaType, _, err := mime.ParseMediaType(acceptType)
+		if err != nil {
+			// Skip invalid media types
+			continue
+		}
+
+		if mediaType == "text/plain" {
+			return "text/plain"
+		}
+		if mediaType == "application/json" {
+			return "application/json"
+		}
+	}
+	// Default to JSON if no supported type found or only JSON was found
+	return "application/json"
+}
+
+// handleIdentity handles PUT requests to /{latest|2009-04-04}/meta-data/identity
 func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) {
 	body := http.MaxBytesReader(w, r.Body, 1024*1024)
 	defer body.Close()
@@ -152,7 +177,8 @@ func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) 
 		"remote_addr", r.RemoteAddr,
 		"method", r.Method,
 		"path", r.URL.Path,
-		"content_type", r.Header.Get("Content-Type"))
+		"content_type", r.Header.Get("Content-Type"),
+		"accept", r.Header.Get("Accept"))
 
 	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mediaType != "application/json" {
 		slog.Warn("Invalid content type",
@@ -224,25 +250,48 @@ func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) 
 
 	resp := IdentityResponse{
 		Token:     exchangeResp.AccessToken,
-		ExpiresAt: exchangeResp.Expiry,
+		ExpiresIn: exchangeResp.ExpiresIn,
 		SpiffeID:  newSpiffeID,
 	}
 
 	slog.Info("Successfully exchanged JWT",
 		"original_spiffe_id", spiffeJWT.ID.String(),
 		"new_spiffe_id", newSpiffeID,
+		"expires_in", exchangeResp.ExpiresIn,
 		"remote_addr", r.RemoteAddr)
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		slog.Error("Failed to encode response",
-			"error", err,
+	// Determine response format based on Accept header
+	responseFormat := determineResponseFormat(r.Header.Get("Accept"))
+	w.Header().Set("Content-Type", responseFormat)
+
+	// Preserialize response body so we can send the Content-Length header
+	var responseBody []byte
+	if responseFormat == "text/plain" {
+		responseBody = []byte(exchangeResp.AccessToken)
+	} else {
+		var marshalErr error
+		responseBody, marshalErr = json.Marshal(resp)
+		if marshalErr != nil {
+			slog.Error("Failed to marshal JSON response",
+				"error", marshalErr,
+				"remote_addr", r.RemoteAddr)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(responseBody)))
+	if _, writeErr := w.Write(responseBody); writeErr != nil {
+		slog.Error("Failed to write response",
+			"error", writeErr,
 			"remote_addr", r.RemoteAddr)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	slog.Debug("Response sent successfully", "remote_addr", r.RemoteAddr)
+	slog.Debug("Response sent successfully",
+		"format", responseFormat,
+		"remote_addr", r.RemoteAddr)
 }
 
 func main() {
@@ -298,8 +347,8 @@ func main() {
 	}
 
 	// Handle both latest and 2009-04-04 API versions for EC2-style metadata service
-	http.HandleFunc("POST /latest/meta-data/identity", server.handleIdentity)
-	http.HandleFunc("POST /2009-04-04/meta-data/identity", server.handleIdentity)
+	http.HandleFunc("PUT /latest/meta-data/identity", server.handleIdentity)
+	http.HandleFunc("PUT /2009-04-04/meta-data/identity", server.handleIdentity)
 	http.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		slog.Debug("Health check", "remote_addr", r.RemoteAddr)
 		w.WriteHeader(http.StatusOK)

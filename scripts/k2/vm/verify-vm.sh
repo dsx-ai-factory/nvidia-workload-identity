@@ -51,11 +51,11 @@ parse_jwt_response() {
     
     # Parse JSON fields
     local token
-    local expires_at
+    local expires_in
     local spiffe_id
     
     token=$(echo "$json_response" | jq -r '.token // empty' 2>/dev/null)
-    expires_at=$(echo "$json_response" | jq -r '.expires_at // empty' 2>/dev/null)
+    expires_in=$(echo "$json_response" | jq -r '.expires_in // empty' 2>/dev/null)
     spiffe_id=$(echo "$json_response" | jq -r '.spiffe_id // empty' 2>/dev/null)
     
     if [[ -z "$token" ]]; then
@@ -75,7 +75,7 @@ parse_jwt_response() {
 test_jwt_endpoint() {
     log_test "Testing JWT endpoint at ${MDS_IP}:80/latest/meta-data/identity..."
     
-    local curl_cmd="curl -v -X POST http://${MDS_IP}/latest/meta-data/identity -H 'Content-Type: application/json' -d '{\"audience\": \"${TEST_AUDIENCE}\"}' --max-time 10"
+    local curl_cmd="curl -v -X PUT http://${MDS_IP}/latest/meta-data/identity -H 'Content-Type: application/json' -H 'Accept: application/json' -d '{\"audience\": \"${TEST_AUDIENCE}\"}' --max-time 10"
     
     local response
     if response=$(exec_in_vm "$curl_cmd" 60); then
@@ -176,8 +176,9 @@ verify_metadata_access() {
         echo
         echo "  virtctl console ${VM_NAME} -n ${NAMESPACE} --context ${CONTEXT}"
         echo "  # Then run inside VM:"
-        echo "  curl -X POST http://${MDS_IP}/latest/meta-data/identity \\"
+        echo "  curl -X PUT http://${MDS_IP}/latest/meta-data/identity \\"
         echo "    -H 'Content-Type: application/json' \\"
+        echo "    -H 'Accept: application/json' \\"
         echo "    -d '{\"audience\": \"${TEST_AUDIENCE}\"}'"
         echo
         return 0
@@ -219,8 +220,15 @@ display_vm_info() {
     echo "  Credentials: ubuntu / ubuntu"
     echo
     echo "Test MDS from inside VM:"
-    echo "  curl -X POST http://${MDS_IP}/latest/meta-data/identity \\"
+    echo "  curl -X PUT http://${MDS_IP}/latest/meta-data/identity \\"
     echo "    -H 'Content-Type: application/json' \\"
+    echo "    -H 'Accept: application/json' \\"
+    echo "    -d '{\"audience\": \"${TEST_AUDIENCE}\"}'"
+    echo
+    echo "  # Or get plain text token:"
+    echo "  curl -X PUT http://${MDS_IP}/latest/meta-data/identity \\"
+    echo "    -H 'Content-Type: application/json' \\"
+    echo "    -H 'Accept: text/plain' \\"
     echo "    -d '{\"audience\": \"${TEST_AUDIENCE}\"}'"
 }
 

@@ -201,15 +201,24 @@ func extractAudience(token string) ([]string, error) {
 
 // writeTokenError writes an RFC 8693 compliant error response.
 func writeTokenError(w http.ResponseWriter, statusCode int, errorCode, description string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(statusCode)
 	resp := TokenExchangeErrorResponse{
 		Error:            errorCode,
 		ErrorDescription: description,
 	}
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		slog.Error("Failed to encode error response", "error", err)
+
+	// Preserialize response body so we can send the Content-Length header
+	responseBody, err := json.Marshal(resp)
+	if err != nil {
+		slog.Error("Failed to marshal error response", "error", err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(responseBody)))
+	w.WriteHeader(statusCode)
+	if _, err := w.Write(responseBody); err != nil {
+		slog.Error("Failed to write error response", "error", err)
 	}
 }
 
@@ -306,10 +315,19 @@ func (s *ExchangeServer) handleTokenExchange(w http.ResponseWriter, r *http.Requ
 
 	slog.Info("Successfully exchanged JWT", "new_spiffe_id", newID.String(), "expires_in", expiresIn)
 
+	// Preserialize response body so we can send the Content-Length header
+	responseBody, err := json.Marshal(resp)
+	if err != nil {
+		slog.Error("Failed to marshal JSON response", "error", err)
+		writeTokenError(w, http.StatusInternalServerError, "server_error", "Failed to encode response")
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		slog.Error("Failed to encode response", "error", err)
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(responseBody)))
+	if _, err := w.Write(responseBody); err != nil {
+		slog.Error("Failed to write response", "error", err)
 	}
 }
 
@@ -344,9 +362,18 @@ func (s *ExchangeServer) handleJWKS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Preserialize response body so we can send the Content-Length header
+	responseBody, err := json.Marshal(jwks)
+	if err != nil {
+		slog.Error("Failed to marshal JWKS", "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(jwks); err != nil {
-		slog.Error("Failed to encode JWKS", "error", err)
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(responseBody)))
+	if _, err := w.Write(responseBody); err != nil {
+		slog.Error("Failed to write JWKS response", "error", err)
 	}
 }
 
