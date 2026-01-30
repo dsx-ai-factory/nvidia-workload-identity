@@ -61,6 +61,52 @@ verify_token_format() {
     fi
 }
 
+verify_token_expiry() {
+    log_test "Verifying token expiry is at most 5 minutes..."
+    
+    local token
+    token=$(kubectl exec "${POD_NAME}" -c nginx -n "${NAMESPACE}" --context "${CONTEXT}" -- \
+        cat /var/run/secrets/nvidia.com/spiffe/token 2>/dev/null)
+    
+    # Extract payload (second part of JWT)
+    local payload_b64
+    payload_b64=$(echo "$token" | cut -d. -f2)
+    
+    # Add padding if needed and decode
+    local payload
+    payload=$(echo "$payload_b64" | tr '_-' '/+' | awk '{
+        l = length($0)
+        pad = (4 - l % 4) % 4
+        for (i = 0; i < pad; i++) $0 = $0 "="
+        print
+    }' | base64 -d 2>/dev/null)
+    
+    local exp iat
+    exp=$(echo "$payload" | jq -r '.exp' 2>/dev/null)
+    iat=$(echo "$payload" | jq -r '.iat' 2>/dev/null)
+    
+    if [[ -z "$exp" || "$exp" == "null" ]]; then
+        log_error "Token missing exp claim"
+        return 1
+    fi
+    
+    if [[ -z "$iat" || "$iat" == "null" ]]; then
+        log_error "Token missing iat claim"
+        return 1
+    fi
+    
+    local ttl=$((exp - iat))
+    local max_ttl=300  # 5 minutes in seconds
+    
+    if [[ $ttl -le $max_ttl ]]; then
+        log_success "Token TTL is ${ttl}s (max allowed: ${max_ttl}s)"
+        return 0
+    else
+        log_error "Token TTL is ${ttl}s, exceeds maximum of ${max_ttl}s (5 minutes)"
+        return 1
+    fi
+}
+
 verify_bao_auth() {
     log_test "Testing authentication to OpenBao..."
     
@@ -151,6 +197,7 @@ main() {
     verify_pod_running || ((failed++))
     verify_token_exists || ((failed++))
     verify_token_format || ((failed++))
+    verify_token_expiry || ((failed++))
     verify_bao_auth || ((failed++))
     verify_secret_access || ((failed++))
     

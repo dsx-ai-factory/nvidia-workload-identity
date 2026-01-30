@@ -47,11 +47,16 @@ spec:
             secretKeyRef:
               name: postgres-app
               key: password
-        - name: EXCHANGE_KEY_ENCRYPTION_KEY_B64
+        - name: EXCHANGE_ENCRYPTION_KEYSET
           valueFrom:
             secretKeyRef:
-              name: exchange-encryption-key
-              key: EXCHANGE_KEY_ENCRYPTION_KEY_B64
+              name: exchange-encryption-keyset
+              key: EXCHANGE_ENCRYPTION_KEYSET
+        - name: EXCHANGE_ACTIVE_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: exchange-encryption-keyset
+              key: EXCHANGE_ACTIVE_KEY_ID
         resources:
           requests:
             cpu: 100m

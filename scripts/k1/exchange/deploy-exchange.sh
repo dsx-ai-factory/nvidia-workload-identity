@@ -49,27 +49,41 @@ copy_postgres_secret() {
     log_success "PostgreSQL credentials copied"
 }
 
-create_encryption_key_secret() {
-    log_info "Ensuring encryption key secret exists..."
+create_encryption_keyset_secret() {
+    log_info "Ensuring encryption keyset secret exists..."
     
     ensure_namespace
     
     # Check if secret already exists
-    if kubectl get secret exchange-encryption-key -n "${NAMESPACE}" --context "${CONTEXT}" &>/dev/null; then
-        log_info "Encryption key secret already exists"
+    if kubectl get secret exchange-encryption-keyset -n "${NAMESPACE}" --context "${CONTEXT}" &>/dev/null; then
+        log_info "Encryption keyset secret already exists"
         return 0
     fi
     
-    # Generate a random 32-byte key and base64 encode it
-    local key_b64
-    key_b64=$(openssl rand -base64 32)
+    # Generate a key ID based on current date (format: mk-YYYY-MM)
+    local key_id="mk-$(date +%Y-%m)"
     
-    kubectl create secret generic exchange-encryption-key \
+    # Generate a random 32-byte key and base64url encode it (no padding, URL-safe)
+    local key_bytes
+    key_bytes=$(openssl rand 32)
+    local key_b64url
+    key_b64url=$(echo -n "$key_bytes" | base64 | tr '+/' '-_' | tr -d '=')
+    
+    # Create JWKS with one symmetric key
+    # Format: {"keys":[{"kty":"oct","kid":"mk-YYYY-MM","k":"<base64url-key>","alg":"A256GCM","use":"enc"}]}
+    local jwks
+    jwks=$(cat <<EOF
+{"keys":[{"kty":"oct","kid":"${key_id}","k":"${key_b64url}","alg":"A256GCM","use":"enc"}]}
+EOF
+)
+    
+    kubectl create secret generic exchange-encryption-keyset \
         -n "${NAMESPACE}" \
         --context "${CONTEXT}" \
-        --from-literal=EXCHANGE_KEY_ENCRYPTION_KEY_B64="${key_b64}"
+        --from-literal=EXCHANGE_ENCRYPTION_KEYSET="${jwks}" \
+        --from-literal=EXCHANGE_ACTIVE_KEY_ID="${key_id}"
     
-    log_success "Encryption key secret created"
+    log_success "Encryption keyset secret created with key ID: ${key_id}"
 }
 
 deploy_exchange() {
@@ -77,7 +91,7 @@ deploy_exchange() {
     
     # Ensure secrets exist before deploying
     copy_postgres_secret
-    create_encryption_key_secret
+    create_encryption_keyset_secret
     
     kubectl apply -f "${SCRIPT_DIR}/exchange-service.yaml" \
         --context "${CONTEXT}"

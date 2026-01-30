@@ -161,9 +161,12 @@ This project demonstrates SPIFFE JWT authentication with OpenBao's CEL (Common E
 - Use CloudNativePG operator (CNCF Sandbox) for PostgreSQL deployment on k1
 - Operator installed via Helm chart (`cnpg/cloudnative-pg`) in `cnpg-system` namespace
 - Database cluster (`Cluster` CRD) deployed in `postgres-system` namespace
-- Keyset table created via `postInitSQL` in cluster spec
-- AES-256-GCM encryption for private key material before storage
-- Encryption key provided via `EXCHANGE_KEY_ENCRYPTION_KEY_B64` env var (base64-encoded 32-byte key)
+- Table `domain_keys` stores encrypted signing keys per trust domain
+- Signing keys encrypted as JWE using master encryption keyset
+- Master keyset provided via `EXCHANGE_ENCRYPTION_KEYSET` env var (JWKS format)
+- Active key for new encryptions specified via `EXCHANGE_ACTIVE_KEY_ID` env var
+- `master_key_id` column stores which master key encrypted each row (enables rotation queries)
+- Key rotation: add new key to JWKS, update active key ID, restart service
 - CloudNativePG creates `postgres-app` secret with credentials, copied to `spiffe-exchange` namespace
 - Service endpoint: `postgres-rw.postgres-system.svc.cluster.local`
 - Postgres is a dependency of `exchange-service` target in Makefile

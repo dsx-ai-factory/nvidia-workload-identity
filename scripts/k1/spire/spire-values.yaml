@@ -11,6 +11,8 @@ global:
       commonName: "SPIRE Server CA"
 
 spire-server:
+  defaultX509SvidTTL: "5m"
+  defaultJwtSvidTTL: "5m"
   # Mount k2's CA for federation bundle endpoint TLS validation
   extraVolumes:
     - name: k2-federation-ca

@@ -4,15 +4,10 @@ package postgres
 import (
 	"context"
 	"crypto"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
 	"crypto/x509"
 	"database/sql"
-	"encoding/base64"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"time"
 
@@ -23,11 +18,11 @@ import (
 )
 
 // KeyStore implements keystore.KeyStore with encrypted storage in PostgreSQL.
-// Keys are encrypted with AES-256-GCM before being stored.
+// Domain signing keys are encrypted as JWE using a master encryption keyset.
 type KeyStore struct {
 	db        *sql.DB
 	keygen    keystore.KeyGenerator
-	encryptor *Encryptor
+	encryptor *keystore.JWKSEncryptor
 }
 
 // Config holds connection parameters for PostgreSQL.
@@ -51,13 +46,12 @@ func (c Config) DSN() string {
 }
 
 // New creates a new Postgres-backed key store.
-// The encryptionKeyB64 must be a base64-encoded 32-byte key for AES-256-GCM.
-func New(ctx context.Context, cfg Config, encryptionKeyB64 string, keygen keystore.KeyGenerator) (*KeyStore, error) {
-	encryptor, err := NewEncryptor(encryptionKeyB64)
-	if err != nil {
-		return nil, fmt.Errorf("invalid encryption key: %w", err)
-	}
-
+//
+// Parameters:
+//   - cfg: PostgreSQL connection configuration
+//   - encryptor: JWKSEncryptor for encrypting/decrypting domain keys
+//   - keygen: Generator for domain signing keys
+func New(ctx context.Context, cfg Config, encryptor *keystore.JWKSEncryptor, keygen keystore.KeyGenerator) (*KeyStore, error) {
 	db, err := sql.Open("postgres", cfg.DSN())
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
@@ -82,58 +76,62 @@ func (s *KeyStore) Close() error {
 	return s.db.Close()
 }
 
-// keysetRow represents a row in the keysets table.
-type keysetRow struct {
-	TrustDomain     string
-	KeyID           string
-	Algorithm       string
-	EncryptedKeyset []byte // AES-256-GCM encrypted PKCS8 private key bytes
-	IsActive        bool
-	CreatedAt       time.Time
+// domainKeyRow represents a row in the domain_keys table.
+// Each row stores a single signing key for a trust domain, encrypted as JWE.
+type domainKeyRow struct {
+	TrustDomain  string
+	KeyID        string
+	Algorithm    string
+	EncryptedKey string // JWE compact serialization of PKCS8-encoded private key
+	MasterKeyID  string // Key ID of the master key used to encrypt this row
+	IsActive     bool
+	CreatedAt    time.Time
 }
 
-// generateKey creates a new active signing key and returns it as a keysetRow ready for insertion.
-func (s *KeyStore) generateKey(trustDomain string) (*keysetRow, keystore.DomainKey, error) {
+// generateKey creates a new active signing key and returns it as a domainKeyRow ready for insertion.
+func (s *KeyStore) generateKey(trustDomain string) (*domainKeyRow, keystore.DomainKey, error) {
 	dk, err := s.keygen.GenerateKey()
 	if err != nil {
 		return nil, keystore.DomainKey{}, fmt.Errorf("failed to generate key: %w", err)
 	}
 
-	encrypted, err := s.encryptKey(dk.Signer)
+	jwe, masterKeyID, err := s.encryptKey(dk.Signer)
 	if err != nil {
 		return nil, keystore.DomainKey{}, err
 	}
 
-	row := &keysetRow{
-		TrustDomain:     trustDomain,
-		KeyID:           string(dk.KeyID),
-		Algorithm:       string(dk.Algorithm),
-		EncryptedKeyset: encrypted,
-		IsActive:        true,
-		CreatedAt:       time.Now().UTC(),
+	row := &domainKeyRow{
+		TrustDomain:  trustDomain,
+		KeyID:        string(dk.KeyID),
+		Algorithm:    string(dk.Algorithm),
+		EncryptedKey: jwe,
+		MasterKeyID:  masterKeyID,
+		IsActive:     true,
+		CreatedAt:    time.Now().UTC(),
 	}
 
 	return row, dk, nil
 }
 
-// encryptKey serializes a signing key to PKCS8 and encrypts it for storage.
-func (s *KeyStore) encryptKey(signer crypto.Signer) ([]byte, error) {
+// encryptKey serializes a signing key to PKCS8 and encrypts it as JWE.
+// Returns the JWE compact serialization and the master key ID used.
+func (s *KeyStore) encryptKey(signer crypto.Signer) (string, string, error) {
 	pkcs8Bytes, err := x509.MarshalPKCS8PrivateKey(signer)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal private key: %w", err)
+		return "", "", fmt.Errorf("failed to marshal private key: %w", err)
 	}
 
-	encrypted, err := s.encryptor.Encrypt(pkcs8Bytes)
+	jwe, keyID, err := s.encryptor.Encrypt(pkcs8Bytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to encrypt key: %w", err)
+		return "", "", fmt.Errorf("failed to encrypt key: %w", err)
 	}
 
-	return encrypted, nil
+	return jwe, keyID, nil
 }
 
-// decryptKey decrypts and parses a signing key from a keysetRow.
-func (s *KeyStore) decryptKey(row *keysetRow) (keystore.DomainKey, error) {
-	pkcs8Bytes, err := s.encryptor.Decrypt(row.EncryptedKeyset)
+// decryptKey decrypts and parses a signing key from a domainKeyRow.
+func (s *KeyStore) decryptKey(row *domainKeyRow) (keystore.DomainKey, error) {
+	pkcs8Bytes, err := s.encryptor.Decrypt(row.EncryptedKey)
 	if err != nil {
 		return keystore.DomainKey{}, fmt.Errorf("failed to decrypt key: %w", err)
 	}
@@ -176,10 +174,10 @@ func (s *KeyStore) GetOrCreateKey(trustDomain string) (keystore.DomainKey, error
 
 	// Insert with ON CONFLICT DO NOTHING - the partial unique index ensures only one active key.
 	result, err := s.db.Exec(`
-		INSERT INTO keysets (trust_domain, key_id, algorithm, encrypted_keyset, is_active, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO domain_keys (trust_domain, key_id, algorithm, encrypted_key, master_key_id, is_active, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT DO NOTHING`,
-		row.TrustDomain, row.KeyID, row.Algorithm, row.EncryptedKeyset, row.IsActive, row.CreatedAt)
+		row.TrustDomain, row.KeyID, row.Algorithm, row.EncryptedKey, row.MasterKeyID, row.IsActive, row.CreatedAt)
 	if err != nil {
 		return keystore.DomainKey{}, fmt.Errorf("failed to insert key: %w", err)
 	}
@@ -198,18 +196,18 @@ func (s *KeyStore) GetOrCreateKey(trustDomain string) (keystore.DomainKey, error
 		return dk, nil
 	}
 
-	slog.Info("Created new active key for trust domain", "trustDomain", trustDomain, "keyID", row.KeyID)
+	slog.Info("Created new active key for trust domain", "trustDomain", trustDomain, "keyID", row.KeyID, "masterKeyID", row.MasterKeyID)
 	return dk, nil
 }
 
 // getActiveKey retrieves the active signing key from the database.
 func (s *KeyStore) getActiveKey(trustDomain string) (keystore.DomainKey, error) {
-	row := &keysetRow{}
+	row := &domainKeyRow{}
 	err := s.db.QueryRow(`
-		SELECT trust_domain, key_id, algorithm, encrypted_keyset, is_active, created_at
-		FROM keysets
+		SELECT trust_domain, key_id, algorithm, encrypted_key, master_key_id, is_active, created_at
+		FROM domain_keys
 		WHERE trust_domain = $1 AND is_active = TRUE`,
-		trustDomain).Scan(&row.TrustDomain, &row.KeyID, &row.Algorithm, &row.EncryptedKeyset, &row.IsActive, &row.CreatedAt)
+		trustDomain).Scan(&row.TrustDomain, &row.KeyID, &row.Algorithm, &row.EncryptedKey, &row.MasterKeyID, &row.IsActive, &row.CreatedAt)
 	if err != nil {
 		return keystore.DomainKey{}, err
 	}
@@ -227,8 +225,8 @@ func (s *KeyStore) GetKeys(trustDomain string) ([]keystore.DomainKey, error) {
 	}
 
 	rows, err := s.db.Query(`
-		SELECT trust_domain, key_id, algorithm, encrypted_keyset, is_active, created_at
-		FROM keysets
+		SELECT trust_domain, key_id, algorithm, encrypted_key, master_key_id, is_active, created_at
+		FROM domain_keys
 		WHERE trust_domain = $1
 		ORDER BY created_at DESC`,
 		trustDomain)
@@ -239,8 +237,8 @@ func (s *KeyStore) GetKeys(trustDomain string) ([]keystore.DomainKey, error) {
 
 	var keys []keystore.DomainKey
 	for rows.Next() {
-		row := &keysetRow{}
-		if err := rows.Scan(&row.TrustDomain, &row.KeyID, &row.Algorithm, &row.EncryptedKeyset, &row.IsActive, &row.CreatedAt); err != nil {
+		row := &domainKeyRow{}
+		if err := rows.Scan(&row.TrustDomain, &row.KeyID, &row.Algorithm, &row.EncryptedKey, &row.MasterKeyID, &row.IsActive, &row.CreatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan key row: %w", err)
 		}
 
@@ -256,62 +254,4 @@ func (s *KeyStore) GetKeys(trustDomain string) ([]keystore.DomainKey, error) {
 	}
 
 	return keys, nil
-}
-
-// Encryptor handles AES-256-GCM encryption/decryption.
-type Encryptor struct {
-	gcm cipher.AEAD
-}
-
-// NewEncryptor creates a new encryptor from a base64-encoded 32-byte key.
-func NewEncryptor(keyB64 string) (*Encryptor, error) {
-	key, err := base64.StdEncoding.DecodeString(keyB64)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode base64 key: %w", err)
-	}
-
-	if len(key) != 32 {
-		return nil, fmt.Errorf("key must be 32 bytes, got %d", len(key))
-	}
-
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create cipher: %w", err)
-	}
-
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create GCM: %w", err)
-	}
-
-	return &Encryptor{gcm: gcm}, nil
-}
-
-// Encrypt encrypts plaintext using AES-256-GCM.
-// The returned ciphertext includes the nonce prepended.
-func (e *Encryptor) Encrypt(plaintext []byte) ([]byte, error) {
-	nonce := make([]byte, e.gcm.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return nil, fmt.Errorf("failed to generate nonce: %w", err)
-	}
-
-	ciphertext := e.gcm.Seal(nonce, nonce, plaintext, nil)
-	return ciphertext, nil
-}
-
-// Decrypt decrypts ciphertext that was encrypted with Encrypt.
-// Expects the nonce to be prepended to the ciphertext.
-func (e *Encryptor) Decrypt(ciphertext []byte) ([]byte, error) {
-	nonceSize := e.gcm.NonceSize()
-	if len(ciphertext) < nonceSize {
-		return nil, fmt.Errorf("ciphertext too short")
-	}
-
-	nonce, ciphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
-	plaintext, err := e.gcm.Open(nil, nonce, ciphertext, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt: %w", err)
-	}
-
-	return plaintext, nil
 }

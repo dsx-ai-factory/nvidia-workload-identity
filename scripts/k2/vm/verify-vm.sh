@@ -36,6 +36,44 @@ exec_in_vm() {
     return $?
 }
 
+# Check token expiry from JWT claims
+check_token_expiry() {
+    local token="$1"
+    local max_ttl=300  # 5 minutes in seconds
+    
+    # Extract payload (second part of JWT)
+    local payload_b64
+    payload_b64=$(echo "$token" | cut -d. -f2)
+    
+    # Add padding if needed and decode
+    local payload
+    payload=$(echo "$payload_b64" | tr '_-' '/+' | awk '{
+        l = length($0)
+        pad = (4 - l % 4) % 4
+        for (i = 0; i < pad; i++) $0 = $0 "="
+        print
+    }' | base64 -d 2>/dev/null)
+    
+    local exp iat
+    exp=$(echo "$payload" | jq -r '.exp' 2>/dev/null)
+    iat=$(echo "$payload" | jq -r '.iat' 2>/dev/null)
+    
+    if [[ -z "$exp" || "$exp" == "null" || -z "$iat" || "$iat" == "null" ]]; then
+        log_error "Token missing exp or iat claim"
+        return 1
+    fi
+    
+    local ttl=$((exp - iat))
+    
+    if [[ $ttl -le $max_ttl ]]; then
+        log_success "Token TTL is ${ttl}s (max allowed: ${max_ttl}s)"
+        return 0
+    else
+        log_error "Token TTL is ${ttl}s, exceeds maximum of ${max_ttl}s (5 minutes)"
+        return 1
+    fi
+}
+
 # Parse and display JWT response
 parse_jwt_response() {
     local response="$1"
@@ -68,7 +106,10 @@ parse_jwt_response() {
     echo "Response:"
     echo "$json_response" | jq . 2>/dev/null || echo "$json_response"
     
-    return 0
+    # Also verify token expiry
+    check_token_expiry "$token"
+    
+    return $?
 }
 
 # Test metadata service JWT endpoint

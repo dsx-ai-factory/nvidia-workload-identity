@@ -3,7 +3,9 @@ package postgres
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/base64"
+	"fmt"
 	"testing"
 	"time"
 
@@ -64,13 +66,21 @@ func setupPostgresContainer(t *testing.T, ctx context.Context) (Config, func()) 
 	return cfg, cleanup
 }
 
-func generateEncryptionKey(t *testing.T) string {
+// generateEncryptor generates a JWKSEncryptor with one symmetric key.
+func generateEncryptor(t *testing.T) *keystore.JWKSEncryptor {
 	t.Helper()
 	keyBytes := make([]byte, 32)
 	if _, err := rand.Read(keyBytes); err != nil {
 		t.Fatalf("failed to generate encryption key: %v", err)
 	}
-	return base64.StdEncoding.EncodeToString(keyBytes)
+	keyB64URL := base64.RawURLEncoding.EncodeToString(keyBytes)
+	keyID := fmt.Sprintf("test-key-%d", time.Now().UnixNano())
+	jwks := fmt.Sprintf(`{"keys":[{"kty":"oct","kid":"%s","k":"%s","alg":"A256GCM","use":"enc"}]}`, keyID, keyB64URL)
+	encryptor, err := keystore.NewJWKSEncryptor(jwks, keyID)
+	if err != nil {
+		t.Fatalf("failed to create encryptor: %v", err)
+	}
+	return encryptor
 }
 
 func TestKeyStore_Integration_GetOrCreateKey(t *testing.T) {
@@ -79,8 +89,8 @@ func TestKeyStore_Integration_GetOrCreateKey(t *testing.T) {
 	cfg, cleanup := setupPostgresContainer(t, ctx)
 	defer cleanup()
 
-	encryptionKey := generateEncryptionKey(t)
-	store, err := New(ctx, cfg, encryptionKey, keystore.ES256KeyGenerator{})
+	encryptor := generateEncryptor(t)
+	store, err := New(ctx, cfg, encryptor, keystore.ES256KeyGenerator{})
 	if err != nil {
 		t.Fatalf("failed to create keystore: %v", err)
 	}
@@ -132,11 +142,11 @@ func TestKeyStore_Integration_Persistence(t *testing.T) {
 	cfg, cleanup := setupPostgresContainer(t, ctx)
 	defer cleanup()
 
-	encryptionKey := generateEncryptionKey(t)
+	encryptor := generateEncryptor(t)
 	trustDomain := "persistent.example.com"
 
 	// Create first store instance and generate a key
-	store1, err := New(ctx, cfg, encryptionKey, keystore.ES256KeyGenerator{})
+	store1, err := New(ctx, cfg, encryptor, keystore.ES256KeyGenerator{})
 	if err != nil {
 		t.Fatalf("failed to create first keystore: %v", err)
 	}
@@ -149,7 +159,7 @@ func TestKeyStore_Integration_Persistence(t *testing.T) {
 	store1.Close()
 
 	// Create second store instance (simulating application restart)
-	store2, err := New(ctx, cfg, encryptionKey, keystore.ES256KeyGenerator{})
+	store2, err := New(ctx, cfg, encryptor, keystore.ES256KeyGenerator{})
 	if err != nil {
 		t.Fatalf("failed to create second keystore: %v", err)
 	}
@@ -172,8 +182,8 @@ func TestKeyStore_Integration_GetKeys(t *testing.T) {
 	cfg, cleanup := setupPostgresContainer(t, ctx)
 	defer cleanup()
 
-	encryptionKey := generateEncryptionKey(t)
-	store, err := New(ctx, cfg, encryptionKey, keystore.ES256KeyGenerator{})
+	encryptor := generateEncryptor(t)
+	store, err := New(ctx, cfg, encryptor, keystore.ES256KeyGenerator{})
 	if err != nil {
 		t.Fatalf("failed to create keystore: %v", err)
 	}
@@ -206,8 +216,8 @@ func TestKeyStore_Integration_ConcurrentAccess(t *testing.T) {
 	cfg, cleanup := setupPostgresContainer(t, ctx)
 	defer cleanup()
 
-	encryptionKey := generateEncryptionKey(t)
-	store, err := New(ctx, cfg, encryptionKey, keystore.ES256KeyGenerator{})
+	encryptor := generateEncryptor(t)
+	store, err := New(ctx, cfg, encryptor, keystore.ES256KeyGenerator{})
 	if err != nil {
 		t.Fatalf("failed to create keystore: %v", err)
 	}
@@ -260,8 +270,8 @@ func TestKeyStore_Integration_MultipleDomains(t *testing.T) {
 	cfg, cleanup := setupPostgresContainer(t, ctx)
 	defer cleanup()
 
-	encryptionKey := generateEncryptionKey(t)
-	store, err := New(ctx, cfg, encryptionKey, keystore.ES256KeyGenerator{})
+	encryptor := generateEncryptor(t)
+	store, err := New(ctx, cfg, encryptor, keystore.ES256KeyGenerator{})
 	if err != nil {
 		t.Fatalf("failed to create keystore: %v", err)
 	}
@@ -300,9 +310,9 @@ func TestKeyStore_Integration_WrongEncryptionKey(t *testing.T) {
 
 	trustDomain := "wrongkey.example.com"
 
-	// Create a key with one encryption key
-	encryptionKey1 := generateEncryptionKey(t)
-	store1, err := New(ctx, cfg, encryptionKey1, keystore.ES256KeyGenerator{})
+	// Create a key with one encryption keyset
+	encryptor1 := generateEncryptor(t)
+	store1, err := New(ctx, cfg, encryptor1, keystore.ES256KeyGenerator{})
 	if err != nil {
 		t.Fatalf("failed to create first keystore: %v", err)
 	}
@@ -313,9 +323,9 @@ func TestKeyStore_Integration_WrongEncryptionKey(t *testing.T) {
 	}
 	store1.Close()
 
-	// Try to read with a different encryption key (new store instance, no cache)
-	encryptionKey2 := generateEncryptionKey(t)
-	store2, err := New(ctx, cfg, encryptionKey2, keystore.ES256KeyGenerator{})
+	// Try to read with a different encryption keyset
+	encryptor2 := generateEncryptor(t)
+	store2, err := New(ctx, cfg, encryptor2, keystore.ES256KeyGenerator{})
 	if err != nil {
 		t.Fatalf("failed to create second keystore: %v", err)
 	}
@@ -328,14 +338,53 @@ func TestKeyStore_Integration_WrongEncryptionKey(t *testing.T) {
 	}
 }
 
+func TestKeyStore_Integration_MasterKeyIDStored(t *testing.T) {
+	ctx := context.Background()
+
+	cfg, cleanup := setupPostgresContainer(t, ctx)
+	defer cleanup()
+
+	encryptor := generateEncryptor(t)
+	store, err := New(ctx, cfg, encryptor, keystore.ES256KeyGenerator{})
+	if err != nil {
+		t.Fatalf("failed to create keystore: %v", err)
+	}
+	defer store.Close()
+
+	trustDomain := "masterkeyid.example.com"
+
+	_, err = store.GetOrCreateKey(trustDomain)
+	if err != nil {
+		t.Fatalf("GetOrCreateKey failed: %v", err)
+	}
+
+	// Query the database directly to verify master_key_id is stored
+	db, err := sql.Open("postgres", cfg.DSN())
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	var storedMasterKeyID string
+	err = db.QueryRow(`SELECT master_key_id FROM domain_keys WHERE trust_domain = $1`, trustDomain).Scan(&storedMasterKeyID)
+	if err != nil {
+		t.Fatalf("failed to query master_key_id: %v", err)
+	}
+
+	expectedMasterKeyID := encryptor.ActiveKeyID()
+	if storedMasterKeyID != expectedMasterKeyID {
+		t.Errorf("master_key_id = %q, want %q", storedMasterKeyID, expectedMasterKeyID)
+	}
+}
+
 func TestKeyStore_Integration_Interface(t *testing.T) {
 	ctx := context.Background()
 
 	cfg, cleanup := setupPostgresContainer(t, ctx)
 	defer cleanup()
 
-	encryptionKey := generateEncryptionKey(t)
-	store, err := New(ctx, cfg, encryptionKey, keystore.ES256KeyGenerator{})
+	encryptor := generateEncryptor(t)
+	store, err := New(ctx, cfg, encryptor, keystore.ES256KeyGenerator{})
 	if err != nil {
 		t.Fatalf("failed to create keystore: %v", err)
 	}

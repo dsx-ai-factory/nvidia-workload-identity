@@ -11,6 +11,8 @@ global:
       commonName: "SPIRE Server CA"
 
 spire-server:
+  defaultX509SvidTTL: "5m"
+  defaultJwtSvidTTL: "5m"
   controllerManager:
     identities:
       clusterSPIFFEIDs:

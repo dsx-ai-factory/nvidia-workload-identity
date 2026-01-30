@@ -105,18 +105,39 @@ The exchange service:
 
 ### Key Storage
 
-The exchange service supports two keyset storage backends:
+The exchange service supports two storage backends for domain signing keys:
 
 **In-Memory (default for local dev):** Keys are generated on first use and lost on restart. Use `--keystore-backend=in-memory`.
 
-**PostgreSQL (production):** Keys are encrypted with AES-256-GCM and persisted in PostgreSQL via CloudNativePG operator. Use `--keystore-backend=postgres`.
+**PostgreSQL (production):** Keys are encrypted as JWE and persisted in PostgreSQL via CloudNativePG operator. Use `--keystore-backend=postgres`.
 
 Required configuration for Postgres backend:
 - `--pg-host`, `--pg-port`, `--pg-database`, `--pg-user`: Connection parameters
 - `EXCHANGE_PG_PASSWORD`: Database password (from CloudNativePG's `postgres-app` secret)
-- `EXCHANGE_KEY_ENCRYPTION_KEY_B64`: Base64-encoded 32-byte AES key for encrypting stored keys
+- `EXCHANGE_ENCRYPTION_KEYSET`: JWKS containing symmetric keys for encryption
+- `EXCHANGE_ACTIVE_KEY_ID`: Key ID of the active key for new encryptions
 
-Generate encryption key: `openssl rand -base64 32`
+**JWKS Format:**
+```json
+{
+  "keys": [
+    {
+      "kty": "oct",
+      "kid": "mk-2025-01",
+      "k": "<base64url-encoded-32-byte-key>",
+      "alg": "A256GCM",
+      "use": "enc"
+    }
+  ]
+}
+```
+
+**Key Rotation:**
+1. Generate new 32-byte key, base64url-encode, add to JWKS with new kid
+2. Update `EXCHANGE_ACTIVE_KEY_ID` to new kid
+3. Update Kubernetes secret and restart service
+4. Old keys remain in JWKS for decrypting existing data
+5. Query `SELECT * FROM domain_keys WHERE master_key_id = 'old-kid'` to find keys to re-encrypt
 
 ### JWKS Endpoint
 

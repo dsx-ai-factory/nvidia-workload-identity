@@ -396,8 +396,9 @@ func main() {
 		pgPassword = flag.String("pg-password", getEnvOrDefault("EXCHANGE_PG_PASSWORD", ""), "PostgreSQL password")
 		pgSSLMode  = flag.String("pg-sslmode", getEnvOrDefault("EXCHANGE_PG_SSLMODE", "disable"), "PostgreSQL SSL mode")
 
-		// Encryption key for Postgres backend (base64-encoded 32-byte key)
-		encryptionKeyB64 = flag.String("encryption-key", getEnvOrDefault("EXCHANGE_KEY_ENCRYPTION_KEY_B64", ""), "Base64-encoded 32-byte encryption key for keyset storage")
+		// Encryption keyset for Postgres backend (JWKS format)
+		encryptionKeyset = flag.String("encryption-keyset", getEnvOrDefault("EXCHANGE_ENCRYPTION_KEYSET", ""), "JWKS containing symmetric keys (kty: oct, alg: A256GCM) for domain key encryption")
+		activeKeyID      = flag.String("active-key-id", getEnvOrDefault("EXCHANGE_ACTIVE_KEY_ID", ""), "Key ID of the active key for new encryptions")
 	)
 	flag.Parse()
 
@@ -438,12 +439,22 @@ func main() {
 		slog.Info("Using in-memory keystore backend")
 		ks = memory.New(keystore.ES256KeyGenerator{})
 	case "postgres":
-		if *encryptionKeyB64 == "" {
-			slog.Error("--encryption-key is required for postgres backend")
+		if *encryptionKeyset == "" {
+			slog.Error("--encryption-keyset is required for postgres backend")
+			os.Exit(1)
+		}
+		if *activeKeyID == "" {
+			slog.Error("--active-key-id is required for postgres backend")
 			os.Exit(1)
 		}
 		if *pgPassword == "" {
 			slog.Error("--pg-password is required for postgres backend")
+			os.Exit(1)
+		}
+
+		encryptor, err := keystore.NewJWKSEncryptor(*encryptionKeyset, *activeKeyID)
+		if err != nil {
+			slog.Error("Failed to create encryption keyset", "error", err)
 			os.Exit(1)
 		}
 
@@ -461,9 +472,10 @@ func main() {
 			"port", pgConfig.Port,
 			"database", pgConfig.Database,
 			"user", pgConfig.User,
-			"sslmode", pgConfig.SSLMode)
+			"sslmode", pgConfig.SSLMode,
+			"activeKeyID", *activeKeyID)
 
-		pgStore, err := postgres.New(ctx, pgConfig, *encryptionKeyB64, keystore.ES256KeyGenerator{})
+		pgStore, err := postgres.New(ctx, pgConfig, encryptor, keystore.ES256KeyGenerator{})
 		if err != nil {
 			slog.Error("Failed to create postgres keystore", "error", err)
 			os.Exit(1)
