@@ -116,7 +116,7 @@ parse_jwt_response() {
 test_jwt_endpoint() {
     log_test "Testing JWT endpoint at ${MDS_IP}:80/latest/meta-data/identity..."
     
-    local curl_cmd="curl -v -X PUT http://${MDS_IP}/latest/meta-data/identity -H 'Content-Type: application/json' -H 'Accept: application/json' -d '{\"audience\": \"${TEST_AUDIENCE}\"}' --max-time 10"
+    local curl_cmd="curl -v -G 'http://${MDS_IP}/latest/meta-data/identity' --data-urlencode 'aud=${TEST_AUDIENCE}' -H 'Metadata: true' -H 'Accept: application/json' --max-time 10"
     
     local response
     if response=$(exec_in_vm "$curl_cmd" 60); then
@@ -217,10 +217,7 @@ verify_metadata_access() {
         echo
         echo "  virtctl console ${VM_NAME} -n ${NAMESPACE} --context ${CONTEXT}"
         echo "  # Then run inside VM:"
-        echo "  curl -X PUT http://${MDS_IP}/latest/meta-data/identity \\"
-        echo "    -H 'Content-Type: application/json' \\"
-        echo "    -H 'Accept: application/json' \\"
-        echo "    -d '{\"audience\": \"${TEST_AUDIENCE}\"}'"
+        echo "  curl -G -H 'Metadata: true' 'http://${MDS_IP}/latest/meta-data/identity' --data-urlencode 'aud=${TEST_AUDIENCE}'"
         echo
         return 0
     fi
@@ -261,16 +258,10 @@ display_vm_info() {
     echo "  Credentials: ubuntu / ubuntu"
     echo
     echo "Test MDS from inside VM:"
-    echo "  curl -X PUT http://${MDS_IP}/latest/meta-data/identity \\"
-    echo "    -H 'Content-Type: application/json' \\"
-    echo "    -H 'Accept: application/json' \\"
-    echo "    -d '{\"audience\": \"${TEST_AUDIENCE}\"}'"
+    echo "  curl -G -H 'Metadata: true' 'http://${MDS_IP}/latest/meta-data/identity' --data-urlencode 'aud=${TEST_AUDIENCE}'"
     echo
     echo "  # Or get plain text token:"
-    echo "  curl -X PUT http://${MDS_IP}/latest/meta-data/identity \\"
-    echo "    -H 'Content-Type: application/json' \\"
-    echo "    -H 'Accept: text/plain' \\"
-    echo "    -d '{\"audience\": \"${TEST_AUDIENCE}\"}'"
+    echo "  curl -G -H 'Metadata: true' -H 'Accept: text/plain' 'http://${MDS_IP}/latest/meta-data/identity' --data-urlencode 'aud=${TEST_AUDIENCE}'"
 }
 
 main() {

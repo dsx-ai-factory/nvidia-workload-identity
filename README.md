@@ -252,7 +252,7 @@ SPIRE1 -[#blue]-> GW2 : Fetch SPIRE bundle\n(federation)
 GW2 -[#blue]-> SPIRE2
 
 ' VM to metadata sidecar flow
-VM -[#green]-> MetaSidecar : 1. PUT /latest/meta-data/identity\n(via nftables MAC rewrite)
+VM -[#green]-> MetaSidecar : 1. GET /latest/meta-data/identity?aud=...\n(via nftables MAC rewrite)
 MetaSidecar -[#green]-> SpireCSI : 2. FetchJWTSVID
 SpireCSI -[#green]-> SpireAgent : 3. Workload API
 SpireAgent -[#green]--> SpireCSI
@@ -302,7 +302,7 @@ participant "Metadata Sidecar\n169.254.169.254" as Meta
 participant "SPIRE Agent\n(via SPIRE CSI)" as Agent
 participant "Exchange Service\n(via Exchange CSI)" as Exchange
 
-App -> Meta : PUT /latest/meta-data/identity
+App -> Meta : GET /latest/meta-data/identity?aud=...
 Meta -> Agent : FetchJWTSVID\n(workload API socket)
 Agent --> Meta : JWT SVID
 Meta -> Exchange : POST /v1/exchange\n(RFC 8693, Unix socket)
@@ -332,10 +332,8 @@ The metadata service supports both JSON and plain text responses based on the `A
 
 **JSON Response** (default or `Accept: application/json`):
 ```bash
-curl -X PUT http://169.254.169.254/latest/meta-data/identity \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json" \
-  -d '{"audience": "spiffe://tenant1.sjc-1.vmaas.nvidia.com"}'
+curl -G -H "Metadata: true" http://169.254.169.254/latest/meta-data/identity \
+  --data-urlencode "aud=spiffe://tenant1.sjc-1.vmaas.nvidia.com"
 ```
 
 ```json

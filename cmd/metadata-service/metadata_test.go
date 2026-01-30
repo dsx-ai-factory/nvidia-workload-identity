@@ -2,48 +2,44 @@ package main
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"syscall"
 	"testing"
 )
 
 func TestIdentityRequest_Validation(t *testing.T) {
 	tests := []struct {
-		name        string
-		body        string
-		contentType string
-		wantStatus  int
+		name           string
+		query          string
+		metadataHeader string
+		wantStatus     int
 	}{
 		{
-			name:        "missing content type",
-			body:        `{"audience":"test"}`,
-			contentType: "",
-			wantStatus:  http.StatusUnsupportedMediaType,
+			name:           "missing Metadata header",
+			query:          "?aud=test",
+			metadataHeader: "",
+			wantStatus:     http.StatusBadRequest,
 		},
 		{
-			name:        "wrong content type",
-			body:        `{"audience":"test"}`,
-			contentType: "text/plain",
-			wantStatus:  http.StatusUnsupportedMediaType,
+			name:           "invalid Metadata header",
+			query:          "?aud=test",
+			metadataHeader: "false",
+			wantStatus:     http.StatusBadRequest,
 		},
 		{
-			name:        "invalid json",
-			body:        `{invalid}`,
-			contentType: "application/json",
-			wantStatus:  http.StatusBadRequest,
+			name:           "missing aud parameter",
+			query:          "",
+			metadataHeader: "true",
+			wantStatus:     http.StatusBadRequest,
 		},
 		{
-			name:        "empty audience",
-			body:        `{"audience":""}`,
-			contentType: "application/json",
-			wantStatus:  http.StatusBadRequest,
-		},
-		{
-			name:        "missing audience field",
-			body:        `{}`,
-			contentType: "application/json",
-			wantStatus:  http.StatusBadRequest,
+			name:           "empty aud parameter",
+			query:          "?aud=",
+			metadataHeader: "true",
+			wantStatus:     http.StatusBadRequest,
 		},
 	}
 
@@ -58,9 +54,9 @@ func TestIdentityRequest_Validation(t *testing.T) {
 			// Test both API versions
 			endpoints := []string{"/latest/meta-data/identity", "/2009-04-04/meta-data/identity"}
 			for _, endpoint := range endpoints {
-				req := httptest.NewRequest(http.MethodPut, endpoint, strings.NewReader(tt.body))
-				if tt.contentType != "" {
-					req.Header.Set("Content-Type", tt.contentType)
+				req := httptest.NewRequest(http.MethodGet, endpoint+tt.query, nil)
+				if tt.metadataHeader != "" {
+					req.Header.Set("Metadata", tt.metadataHeader)
 				}
 				req.RemoteAddr = "10.0.0.1:12345"
 				rr := httptest.NewRecorder()
@@ -75,17 +71,113 @@ func TestIdentityRequest_Validation(t *testing.T) {
 	}
 }
 
-func TestIdentityRequest_JSONParsing(t *testing.T) {
-	validJSON := `{"audience":"spiffe://example.org"}`
-
-	var req IdentityRequest
-	err := json.Unmarshal([]byte(validJSON), &req)
-	if err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
+func TestIdentityRequest_RejectsForwardedRequests(t *testing.T) {
+	tests := []struct {
+		name   string
+		header string
+		value  string
+	}{
+		{
+			name:   "Forwarded header",
+			header: "Forwarded",
+			value:  "for=192.0.2.60;proto=http;by=203.0.113.43",
+		},
+		{
+			name:   "X-Forwarded-For header",
+			header: "X-Forwarded-For",
+			value:  "192.0.2.60",
+		},
+		{
+			name:   "X-Forwarded-Host header",
+			header: "X-Forwarded-Host",
+			value:  "example.com",
+		},
+		{
+			name:   "X-Forwarded-Proto header",
+			header: "X-Forwarded-Proto",
+			value:  "https",
+		},
 	}
 
-	if req.Audience != "spiffe://example.org" {
-		t.Errorf("audience = %q, want %q", req.Audience, "spiffe://example.org")
+	server := &MetadataServer{
+		exchangeSocket:  "/nonexistent/exchange.sock",
+		spireSocketPath: "/nonexistent/socket",
+		httpClient:      http.DefaultClient,
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/latest/meta-data/identity?aud=test", nil)
+			req.Header.Set("Metadata", "true")
+			req.Header.Set(tt.header, tt.value)
+			req.RemoteAddr = "10.0.0.1:12345"
+			rr := httptest.NewRecorder()
+
+			server.handleIdentity(rr, req)
+
+			if rr.Code != http.StatusForbidden {
+				t.Errorf("status = %d, want %d", rr.Code, http.StatusForbidden)
+			}
+			if !strings.Contains(rr.Body.String(), "Forwarded requests not allowed") {
+				t.Errorf("body = %q, want to contain 'Forwarded requests not allowed'", rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestIsForwardedRequest(t *testing.T) {
+	tests := []struct {
+		name    string
+		headers map[string]string
+		want    bool
+	}{
+		{
+			name:    "no headers",
+			headers: map[string]string{},
+			want:    false,
+		},
+		{
+			name:    "unrelated headers",
+			headers: map[string]string{"Content-Type": "application/json", "Accept": "text/plain"},
+			want:    false,
+		},
+		{
+			name:    "Forwarded header",
+			headers: map[string]string{"Forwarded": "for=192.0.2.60"},
+			want:    true,
+		},
+		{
+			name:    "X-Forwarded-For header",
+			headers: map[string]string{"X-Forwarded-For": "192.0.2.60"},
+			want:    true,
+		},
+		{
+			name:    "X-Forwarded-Host header",
+			headers: map[string]string{"X-Forwarded-Host": "example.com"},
+			want:    true,
+		},
+		{
+			name:    "X-Forwarded-Proto header",
+			headers: map[string]string{"X-Forwarded-Proto": "https"},
+			want:    true,
+		},
+		{
+			name:    "multiple forwarding headers",
+			headers: map[string]string{"X-Forwarded-For": "192.0.2.60", "X-Forwarded-Proto": "https"},
+			want:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := http.Header{}
+			for k, v := range tt.headers {
+				h.Set(k, v)
+			}
+			if got := isForwardedRequest(h); got != tt.want {
+				t.Errorf("isForwardedRequest() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -197,5 +289,109 @@ func TestAcceptHeaderParsing(t *testing.T) {
 				t.Errorf("responseFormat = %q, want %q", responseFormat, tt.wantFormat)
 			}
 		})
+	}
+}
+
+func TestTTLListener_SetsTTLOnAcceptedConnections(t *testing.T) {
+	// Create a TCP listener on a random port
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to create listener: %v", err)
+	}
+	defer ln.Close()
+
+	// Wrap with ttlListener
+	ttlLn := &ttlListener{Listener: ln}
+
+	// Channel to receive the TTL value from the accepted connection
+	ttlChan := make(chan int, 1)
+	errChan := make(chan error, 1)
+
+	go func() {
+		conn, err := ttlLn.Accept()
+		if err != nil {
+			errChan <- err
+			return
+		}
+		defer conn.Close()
+
+		// Read the TTL value from the connection
+		tcpConn, ok := conn.(*net.TCPConn)
+		if !ok {
+			errChan <- nil
+			ttlChan <- -1
+			return
+		}
+
+		rawConn, err := tcpConn.SyscallConn()
+		if err != nil {
+			errChan <- err
+			return
+		}
+
+		var ttl int
+		var controlErr error
+		rawConn.Control(func(fd uintptr) {
+			ttl, controlErr = syscall.GetsockoptInt(int(fd), syscall.IPPROTO_IP, syscall.IP_TTL)
+		})
+		if controlErr != nil {
+			errChan <- controlErr
+			return
+		}
+
+		errChan <- nil
+		ttlChan <- ttl
+	}()
+
+	// Connect to the listener
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatalf("failed to dial: %v", err)
+	}
+	defer conn.Close()
+
+	// Wait for the accept goroutine to finish
+	if err := <-errChan; err != nil {
+		t.Fatalf("accept goroutine error: %v", err)
+	}
+
+	ttl := <-ttlChan
+	if ttl != 1 {
+		t.Errorf("TTL = %d, want 1", ttl)
+	}
+}
+
+func TestTTLListener_PassesThroughAddr(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to create listener: %v", err)
+	}
+	defer ln.Close()
+
+	ttlLn := &ttlListener{Listener: ln}
+
+	// Addr should pass through to the underlying listener
+	if ttlLn.Addr().String() != ln.Addr().String() {
+		t.Errorf("Addr() = %q, want %q", ttlLn.Addr().String(), ln.Addr().String())
+	}
+}
+
+func TestTTLListener_PassesThroughClose(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to create listener: %v", err)
+	}
+
+	ttlLn := &ttlListener{Listener: ln}
+
+	// Close should pass through
+	if err := ttlLn.Close(); err != nil {
+		t.Errorf("Close() error = %v", err)
+	}
+
+	// Verify the underlying listener is closed
+	_, err = ln.Accept()
+	if err == nil {
+		t.Error("expected Accept to fail after Close")
 	}
 }

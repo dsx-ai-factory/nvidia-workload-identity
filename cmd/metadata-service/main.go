@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
@@ -30,8 +31,34 @@ const (
 	defaultSpireSocketPath = "/var/run/secrets/spire.io/spire-agent.sock"
 )
 
-type IdentityRequest struct {
-	Audience string `json:"audience"`
+// ttlListener wraps a net.Listener and sets IP TTL=1 on accepted connections.
+// This ensures response packets cannot traverse more than one network hop.
+type ttlListener struct {
+	net.Listener
+}
+
+func (l *ttlListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		if rawConn, err := tcpConn.SyscallConn(); err == nil {
+			rawConn.Control(func(fd uintptr) {
+				// Set IP_TTL for IPv4
+				if err := syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IP, syscall.IP_TTL, 1); err != nil {
+					slog.Debug("Failed to set IP_TTL", "error", err)
+				}
+				// Set IPV6_UNICAST_HOPS for IPv6
+				if err := syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IPV6, syscall.IPV6_UNICAST_HOPS, 1); err != nil {
+					slog.Debug("Failed to set IPV6_UNICAST_HOPS", "error", err)
+				}
+			})
+		}
+	}
+
+	return conn, nil
 }
 
 type IdentityResponse struct {
@@ -65,13 +92,13 @@ func extractSubjectFromJWT(token string) (string, error) {
 }
 
 // fetchJWT fetches a JWT SVID from the local SPIRE workload API
-func (s *MetadataServer) fetchJWT(ctx context.Context, audience string) (*jwtsvid.SVID, error) {
+func (s *MetadataServer) fetchJWT(ctx context.Context, audiences []string) (*jwtsvid.SVID, error) {
 	socketAddr := fmt.Sprintf("unix://%s", s.spireSocketPath)
 
 	slog.Debug("Creating JWT source",
 		"socket_path", s.spireSocketPath,
 		"socket_addr", socketAddr,
-		"audience", audience)
+		"audiences", audiences)
 
 	jwtSource, err := workloadapi.NewJWTSource(ctx, workloadapi.WithClientOptions(
 		workloadapi.WithAddr(socketAddr),
@@ -84,21 +111,27 @@ func (s *MetadataServer) fetchJWT(ctx context.Context, audience string) (*jwtsvi
 	}
 	defer jwtSource.Close()
 
-	slog.Debug("Fetching JWT SVID", "audience", audience)
+	slog.Debug("Fetching JWT SVID", "audiences", audiences)
+
+	var extraAudiences []string
+	if len(audiences) > 1 {
+		extraAudiences = audiences[1:]
+	}
 
 	jwt, err := jwtSource.FetchJWTSVID(ctx, jwtsvid.Params{
-		Audience: audience,
+		Audience:       audiences[0],
+		ExtraAudiences: extraAudiences,
 	})
 	if err != nil {
 		slog.Error("Failed to fetch JWT SVID",
-			"audience", audience,
+			"audiences", audiences,
 			"error", err)
 		return nil, fmt.Errorf("failed to fetch JWT: %w", err)
 	}
 
 	slog.Info("Successfully fetched JWT from SPIRE",
 		"spiffe_id", jwt.ID.String(),
-		"audience", audience,
+		"audiences", audiences,
 		"expiry", jwt.Expiry)
 
 	return jwt, nil
@@ -168,53 +201,60 @@ func determineResponseFormat(acceptHeader string) string {
 	return "application/json"
 }
 
-// handleIdentity handles PUT requests to /{latest|2009-04-04}/meta-data/identity
-func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) {
-	body := http.MaxBytesReader(w, r.Body, 1024*1024)
-	defer body.Close()
+// isForwardedRequest returns true if the request contains forwarding headers,
+// indicating it came through a proxy rather than directly from a client.
+func isForwardedRequest(h http.Header) bool {
+	return h.Get("Forwarded") != "" ||
+		h.Get("X-Forwarded-For") != "" ||
+		h.Get("X-Forwarded-Host") != "" ||
+		h.Get("X-Forwarded-Proto") != ""
+}
 
+// handleIdentity handles GET requests to /{latest|2009-04-04}/meta-data/identity?aud=<audience>
+// Multiple aud parameters can be provided; the first is the primary audience,
+// and additional ones are included as extra audiences in the JWT.
+func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Received identity request",
 		"remote_addr", r.RemoteAddr,
 		"method", r.Method,
 		"path", r.URL.Path,
-		"content_type", r.Header.Get("Content-Type"),
 		"accept", r.Header.Get("Accept"))
 
-	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mediaType != "application/json" {
-		slog.Warn("Invalid content type",
-			"content_type", r.Header.Get("Content-Type"),
-			"remote_addr", r.RemoteAddr)
-		http.Error(w, "Invalid content type", http.StatusUnsupportedMediaType)
+	// Reject forwarded requests - metadata service must only accept direct connections
+	if isForwardedRequest(r.Header) {
+		slog.Warn("Rejecting forwarded request", "remote_addr", r.RemoteAddr)
+		http.Error(w, "Forwarded requests not allowed", http.StatusForbidden)
 		return
 	}
 
-	var req IdentityRequest
-	if err := json.NewDecoder(body).Decode(&req); err != nil {
-		slog.Warn("Failed to decode request body",
-			"error", err,
-			"remote_addr", r.RemoteAddr)
-		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+	// Require Metadata: true header to prevent SSRF attacks
+	if r.Header.Get("Metadata") != "true" {
+		slog.Warn("Missing or invalid Metadata header", "remote_addr", r.RemoteAddr)
+		http.Error(w, "Metadata: true header is required", http.StatusBadRequest)
+		return
+	}
+
+	// Parse audiences from query parameters (URL decoding is handled automatically)
+	// First aud is primary, additional ones are extra audiences
+	audiences := r.URL.Query()["aud"]
+	if len(audiences) == 0 || audiences[0] == "" {
+		slog.Warn("Missing audience in request", "remote_addr", r.RemoteAddr)
+		http.Error(w, "aud query parameter is required", http.StatusBadRequest)
 		return
 	}
 
 	slog.Debug("Parsed identity request",
-		"audience", req.Audience,
+		"audiences", audiences,
 		"remote_addr", r.RemoteAddr)
-
-	if req.Audience == "" {
-		slog.Warn("Missing audience in request", "remote_addr", r.RemoteAddr)
-		http.Error(w, "Audience is required", http.StatusBadRequest)
-		return
-	}
 
 	ctx := r.Context()
 
 	// Fetch JWT from local SPIRE socket
 	slog.Info("Fetching JWT from local SPIRE socket",
-		"audience", req.Audience,
+		"audiences", audiences,
 		"socket_path", s.spireSocketPath)
 
-	spiffeJWT, err := s.fetchJWT(ctx, req.Audience)
+	spiffeJWT, err := s.fetchJWT(ctx, audiences)
 	if err != nil {
 		slog.Error("Failed to fetch JWT from SPIRE",
 			"error", err,
@@ -225,7 +265,7 @@ func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) 
 
 	slog.Info("Fetched JWT, now exchanging",
 		"original_spiffe_id", spiffeJWT.ID.String(),
-		"audience", req.Audience)
+		"audiences", audiences)
 
 	// Exchange JWT via the exchange service (RFC 8693)
 	exchangeResp, err := s.exchangeJWT(ctx, spiffeJWT.Marshal())
@@ -347,16 +387,25 @@ func main() {
 	}
 
 	// Handle both latest and 2009-04-04 API versions for EC2-style metadata service
-	http.HandleFunc("PUT /latest/meta-data/identity", server.handleIdentity)
-	http.HandleFunc("PUT /2009-04-04/meta-data/identity", server.handleIdentity)
+	http.HandleFunc("GET /latest/meta-data/identity", server.handleIdentity)
+	http.HandleFunc("GET /2009-04-04/meta-data/identity", server.handleIdentity)
 	http.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		slog.Debug("Health check", "remote_addr", r.RemoteAddr)
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, "OK")
 	})
 
-	slog.Info("Starting HTTP server", "listen_addr", *listenAddr)
-	if err := http.ListenAndServe(*listenAddr, nil); err != nil {
+	ln, err := net.Listen("tcp", *listenAddr)
+	if err != nil {
+		slog.Error("Failed to create listener", "error", err)
+		panic(err)
+	}
+
+	// Wrap listener to set TTL=1 on all connections
+	ttlLn := &ttlListener{Listener: ln}
+
+	slog.Info("Starting HTTP server", "listen_addr", *listenAddr, "ip_ttl", 1)
+	if err := http.Serve(ttlLn, nil); err != nil {
 		slog.Error("HTTP server failed", "error", err)
 		panic(err)
 	}
