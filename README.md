@@ -21,9 +21,12 @@ skinparam packageStyle rectangle
 
 package "k1 Cluster" as K1 {
   [SPIRE Server] as SPIRE1
-  [OpenBao] as Bao
   [Exchange Service] as Exchange
   [Envoy Gateway] as GW1
+}
+
+package "External Services" as External {
+  [OpenBao] as Bao
 }
 
 package "k2 Cluster" as K2 {
@@ -51,15 +54,15 @@ VMIPod -[#green]-> GW1 : Exchange JWT\n(Exchange CSI)
 GW1 -[#green]-> Exchange
 
 ' Workloads to Bao
-Pod -[#orange]-> GW1 : Authenticate
-VMIPod -[#orange]-> GW1 : Authenticate
-GW1 -[#orange]-> Bao
+Pod -[#orange]-> Bao : Authenticate
+VMIPod -[#orange]-> Bao : Authenticate
 
 ' SPIRE Agent to Server
 SpireAgent --> SPIRE2 : Attestation
 
 ' OpenBao JWKS validation
-Bao -[#purple]--> Exchange : Fetch JWKS\n(*.{region}.{service}.nvidia.com)
+Bao -[#purple]-> GW1 : Fetch JWKS\n(*.{region}.{service}.nvidia.com)
+GW1 -[#purple]-> Exchange
 
 ' Exchange validates incoming JWTs
 Exchange --> SPIRE1 : Fetch SPIFFE bundle\n(validate k2 JWTs)
@@ -155,9 +158,12 @@ Regular pods use the spiffe-token-fetcher sidecar to fetch and refresh SPIFFE JW
 skinparam packageStyle rectangle
 
 package "k1 Cluster" as K1 {
-  [OpenBao] as Bao
   [Exchange Service] as Exchange
   [Envoy Gateway] as GW1
+}
+
+package "External Services" as External {
+  [OpenBao] as Bao
 }
 
 package "k2 Cluster" as K2 {
@@ -185,8 +191,7 @@ Fetcher -[#green]-> TokenVol : 6. Write token to file
 App -[#gray]-> TokenVol : Read token
 
 ' App to Bao
-App -[#orange]-> GW1 : 7. Authenticate to Bao
-GW1 -[#orange]-> Bao
+App -[#orange]-> Bao : 7. Authenticate to Bao
 
 @enduml
 ```
@@ -221,9 +226,12 @@ skinparam packageStyle rectangle
 
 package "k1 Cluster" as K1 {
   [SPIRE Server] as SPIRE1
-  [OpenBao] as Bao
   [Exchange Service] as Exchange
   [Envoy Gateway] as GW1
+}
+
+package "External Services" as External {
+  [OpenBao] as Bao
 }
 
 package "k2 Cluster" as K2 {
@@ -265,8 +273,7 @@ Exchange -[#green]--> MetaSidecar : 6. Exchanged JWT
 MetaSidecar -[#green]--> VM : 7. {"token": "..."}
 
 ' VM to Bao flow (authenticate)
-VM -[#orange]-> GW1 : 8. Authenticate to Bao
-GW1 -[#orange]-> Bao
+VM -[#orange]-> Bao : 8. Authenticate to Bao
 
 ' SPIRE Agent to Server
 SpireAgent --> SPIRE2 : Attestation
@@ -275,7 +282,8 @@ SpireAgent --> SPIRE2 : Attestation
 MDSNetwork ..[#gray].> VMIPod : Configure nftables\n(veth, routes, MAC rewrite)
 
 ' OpenBao JWKS validation
-Bao -[#purple]--> Exchange : Fetch JWKS\n(*.{region}.{service}.nvidia.com)
+Bao -[#purple]-> GW1 : Fetch JWKS\n(*.{region}.{service}.nvidia.com)
+GW1 -[#purple]-> Exchange
 
 ' Exchange validates incoming JWTs
 Exchange --> SPIRE1 : Fetch SPIFFE bundle\n(validate k2 JWTs)
@@ -344,7 +352,9 @@ curl -G -H "Metadata: true" http://169.254.169.254/latest/meta-data/identity \
 }
 ```
 
-## OpenBao CEL Integration
+## External Services
+
+### OpenBao CEL Integration
 
 CEL program parses SPIFFE ID components for dynamic policy assignment:
 
@@ -362,11 +372,14 @@ Assigned policies: `spiffe-authenticated`, `tenant-tenant1`, `region-sjc-1`, `se
 @startuml OpenBao Auth
 participant "Workload" as App
 participant "OpenBao" as Bao
+participant "Envoy Gateway" as GW1
 participant "Exchange Service\n(JWKS)" as Exchange
 
 App -> Bao : POST /v1/auth/jwt/cel/login\nAuthorization: Bearer <JWT>
-Bao -> Exchange : GET /.well-known/jwks.json\nHost: tenant1.sjc-1.vmaas.nvidia.com
-Exchange --> Bao : {"keys": [...]}
+Bao -> GW1 : GET /.well-known/jwks.json\nHost: tenant1.sjc-1.vmaas.nvidia.com
+GW1 -> Exchange
+Exchange --> GW1 : {"keys": [...]}
+GW1 --> Bao
 
 Bao -> Bao : Validate JWT signature
 Bao -> Bao : Parse SPIFFE ID:\ntenant, region, service, resource_type
