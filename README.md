@@ -206,7 +206,7 @@ Each control plane cluster (cpc-N-k1) runs an independent exchange service with 
 
 The event bus uses a hub-and-spoke topology: each shard's leaf connects to the central hub in CSC, which replicates retained messages across all connected nodes. The exchange service in CSC subscribes to the keyset topic pattern and aggregates all published keysets in memory, maintaining a unified view of public keys across all shards.
 
-When OpenBao validates a JWT, it fetches the JWKS from the CSC exchange service using the tenant as a subdomain in the Host header (e.g., `Host: tenant1.exchange.csc.nvidia.com`). The CSC exchange service returns a merged keyset containing public keys from all shards for that tenant. This allows workloads from any shard to authenticate against a central OpenBao instance, regardless of which shard's exchange service signed their JWT.
+When OpenBao validates a JWT, it fetches the JWKS from the CSC exchange service using the tenant as a subdomain in the Host header (e.g., `Host: tenant1.exchange.csc.nvidia.com`). The CSC exchange service returns a merged keyset containing public keys from all shards for that tenant. This allows workloads from any shard to authenticate against a central OpenBao instance, regardless of which shard's exchange service signed their JWT without having to understand Latinum’s shard setup. The issuer field of each CPC exchange service all shares the same domain (e.g., `Host: tenant1.exchange.csc.nvidia.com`), and does not indicate the source shard despite each shard having a different signing key as the exposed public keyset is unified.
 
 Key benefits:
 - **Shard isolation**: Each CPC operates independently with its own key storage
