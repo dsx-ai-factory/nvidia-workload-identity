@@ -146,6 +146,74 @@ Required configuration for Postgres backend:
 
 Exchange service serves `/.well-known/jwks.json` for each tenant domain. CoreDNS wildcard rewrite routes `*.{region}.{service}.nvidia.com` to the exchange service per service, enabling OpenBao to fetch JWKS for any tenant.
 
+## Latinum Sharding Model
+
+Sharded deployment architecture for the exchange service across control plane clusters within a datacenter.
+
+```plantuml
+@startuml Latinum Sharding Model
+
+skinparam packageStyle rectangle
+skinparam linetype ortho
+
+package "cpc-1-k1 (Shard 1)" as CPC1 {
+  [Exchange Service] as Ex1
+  database "PostgreSQL" as PG1
+  [Event Bus Leaf] as Leaf1
+  Ex1 --> PG1 : store keys
+  Ex1 --> Leaf1 : publish keysets\n(MQTT)
+}
+
+package "cpc-2-k1 (Shard 2)" as CPC2 {
+  [Exchange Service] as Ex2
+  database "PostgreSQL" as PG2
+  [Event Bus Leaf] as Leaf2
+  Ex2 --> PG2 : store keys
+  Ex2 --> Leaf2 : publish keysets\n(MQTT)
+}
+
+package "cpc-3-k1 (Shard 3)" as CPC3 {
+  [Exchange Service] as Ex3
+  database "PostgreSQL" as PG3
+  [Event Bus Leaf] as Leaf3
+  Ex3 --> PG3 : store keys
+  Ex3 --> Leaf3 : publish keysets\n(MQTT)
+}
+
+package "CSC (Common Services Cluster)" as CSC {
+  [Event Bus Hub] as Hub
+  [Exchange Service\n(Aggregator)] as ExCSC
+  collections "Unified Keysets\n(in-memory)" as Keysets
+  ExCSC --> Hub : subscribe
+  ExCSC --> Keysets : aggregate
+}
+
+' Leaf to Hub connections
+Leaf1 -[#blue]-> Hub
+Leaf2 -[#blue]-> Hub
+Leaf3 -[#blue]-> Hub
+
+' OpenBao fetches from CSC
+[OpenBao] as Bao
+Bao -[#purple]-> ExCSC : GET /.well-known/jwks.json\nHost: {tenant}.{csc-gateway-domain}
+
+@enduml
+```
+
+### How It Works
+
+Each control plane cluster (cpc-N-k1) runs an independent exchange service with its own PostgreSQL database for key storage. When a new signing key is generated for a tenant domain, the exchange service publishes its public key to the local event bus leaf using retained MQTT messages on a topic like `spiffe-exchange/v1/pub-keysets/tenant/{tenant_domain}/kid/{kid}`. Messages have TTLs and are republished periodically to ensure availability.
+
+The event bus uses a hub-and-spoke topology: each shard's leaf connects to the central hub in CSC, which replicates retained messages across all connected nodes. The exchange service in CSC subscribes to the keyset topic pattern and aggregates all published keysets in memory, maintaining a unified view of public keys across all shards.
+
+When OpenBao validates a JWT, it fetches the JWKS from the CSC exchange service using the tenant as a subdomain in the Host header (e.g., `Host: tenant1.exchange.csc.nvidia.com`). The CSC exchange service returns a merged keyset containing public keys from all shards for that tenant. This allows workloads from any shard to authenticate against a central OpenBao instance, regardless of which shard's exchange service signed their JWT.
+
+Key benefits:
+- **Shard isolation**: Each CPC operates independently with its own key storage
+- **Eventual consistency**: Keysets propagate through the event bus without direct cross-shard communication
+- **Unified validation**: Single JWKS endpoint serves keys from all shards
+- **Retained messages**: New CSC instances or restarts immediately receive current keysets
+
 ## Pod Workload Architecture
 
 Regular pods use the spiffe-token-fetcher sidecar to fetch and refresh SPIFFE JWTs.
