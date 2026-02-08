@@ -1,0 +1,3 @@
+{{- if .Values.enabled }}
+# TODO: add VM support DaemonSets (metadata-service, mds-network-setup, exchange-proxy-csi).
+{{- end }}

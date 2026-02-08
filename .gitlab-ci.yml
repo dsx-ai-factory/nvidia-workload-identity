@@ -1,6 +1,12 @@
 include:
   - project: cds/cicd-pipelines
-    ref: 1.42.7
+    ref: 1.42.8
     file: /pipelines/ncp/dsx/dsx-spiffe-ci-pipeline.yml
+# trigger: dummy update
+
+variables:
+  NGC_HELM_PATH: "0837451325059433/components-dev"
+  NGC_DSX_COMPONENTS_PUSH_KEY: "$NGC_REGISTRY_TOKEN"
+  PIPELINE_TRIGGER: "1"
 # dummy commit to trigger pipeline
 # trigger: update

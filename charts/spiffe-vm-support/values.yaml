@@ -1,0 +1,21 @@
+enabled: false
+
+namespace: dsx-spiffe
+
+metadataService:
+  image:
+    repository: nvcr.io/0837451325059433/components-dev/metadata-service
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+
+mdsNetworkSetup:
+  image:
+    repository: nvcr.io/0837451325059433/components-dev/mds-network-setup
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+
+exchangeProxyCsi:
+  image:
+    repository: nvcr.io/0837451325059433/components-dev/exchange-proxy-csi
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
