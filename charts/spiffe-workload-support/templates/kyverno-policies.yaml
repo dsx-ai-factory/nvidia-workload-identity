@@ -1,0 +1,3 @@
+{{- if .Values.enabled }}
+# TODO: add Kyverno policies for sidecar injection.
+{{- end }}
