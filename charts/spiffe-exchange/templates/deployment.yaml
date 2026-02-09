@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Chart.Name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: {{ .Chart.Name }}
+spec:
+  replicas: {{ .Values.replicas | default 1 }}
+  selector:
+    matchLabels:
+      app: {{ .Chart.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Chart.Name }}
+    spec:
+      serviceAccountName: {{ default (printf "%s-sa" .Chart.Name) .Values.serviceAccount.name }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: {{ .Chart.Name }}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.service.port }}
+          name: http
+        args:
+        - --listen=:{{ .Values.service.port }}
+        - --socket=unix:///var/run/secrets/spire.io/spire-agent.sock
+        {{- with .Values.exchange }}
+        - --region={{ .region | default "sjc-1" }}
+        - --base-domain={{ .baseDomain | default "nvidia.com" }}
+        - --log-level={{ .logLevel | default "info" }}
+        - --keystore-backend={{ .keystoreBackend | default "postgres" }}
+        - --pg-host={{ .pgHost | default "postgres-rw.postgres-system.svc.cluster.local" }}
+        - --pg-port={{ .pgPort | default "5432" }}
+        - --pg-database={{ .pgDatabase | default "exchange" }}
+        - --pg-user={{ .pgUser | default "exchange" }}
+        {{- end }}
+        env:
+        - name: EXCHANGE_PG_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.exchange.pgPasswordSecret | default "postgres-app" }}
+              key: {{ .Values.exchange.pgPasswordKey | default "password" }}
+        - name: EXCHANGE_ENCRYPTION_KEYSET
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.exchange.encryptionKeysetSecret | default "exchange-encryption-keyset" }}
+              key: EXCHANGE_ENCRYPTION_KEYSET
+        - name: EXCHANGE_ACTIVE_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.exchange.encryptionKeysetSecret | default "exchange-encryption-keyset" }}
+              key: EXCHANGE_ACTIVE_KEY_ID
+        {{- with .Values.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        volumeMounts:
+        - name: spiffe-csi
+          mountPath: /var/run/secrets/spire.io
+          readOnly: true
+        startupProbe:
+          httpGet:
+            path: /health
+            port: {{ .Values.service.port }}
+          periodSeconds: 1
+          failureThreshold: 30
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: {{ .Values.service.port }}
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: {{ .Values.service.port }}
+          periodSeconds: 10
+      volumes:
+      - name: spiffe-csi
+        csi:
+          driver: csi.spiffe.io
+          readOnly: true
