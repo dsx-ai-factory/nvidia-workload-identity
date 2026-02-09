@@ -1,0 +1,58 @@
+{{- if .Values.encryptionKeyset.autoGenerate }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Chart.Name }}-init-keyset
+  namespace: {{ .Values.namespace }}
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+  labels:
+    app: {{ .Chart.Name }}
+    component: init-keyset
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app: {{ .Chart.Name }}
+        component: init-keyset
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: {{ default (printf "%s-sa" .Chart.Name) .Values.serviceAccount.name }}
+      containers:
+      - name: init-keyset
+        image: bitnami/kubectl:latest
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          SECRET_NAME="{{ .Values.exchange.encryptionKeysetSecret }}"
+          NAMESPACE="{{ .Values.namespace }}"
+
+          # Check if secret already exists
+          if kubectl get secret "$SECRET_NAME" -n "$NAMESPACE" 2>/dev/null; then
+            echo "Secret $SECRET_NAME already exists, skipping generation."
+            exit 0
+          fi
+
+          echo "Generating encryption keyset..."
+
+          # Generate key ID based on current date
+          KEY_ID="mk-$(date +%Y-%m)"
+
+          # Generate random 32-byte key, base64url encode (no padding)
+          KEY_B64URL=$(head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=')
+
+          # Create JWKS with one symmetric key
+          JWKS="{\"keys\":[{\"kty\":\"oct\",\"kid\":\"${KEY_ID}\",\"k\":\"${KEY_B64URL}\",\"alg\":\"A256GCM\",\"use\":\"enc\"}]}"
+
+          # Create the secret
+          kubectl create secret generic "$SECRET_NAME" \
+            -n "$NAMESPACE" \
+            --from-literal=EXCHANGE_ENCRYPTION_KEYSET="$JWKS" \
+            --from-literal=EXCHANGE_ACTIVE_KEY_ID="$KEY_ID"
+
+          echo "Encryption keyset secret created with key ID: $KEY_ID"
+{{- end }}
