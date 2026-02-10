@@ -7,9 +7,9 @@
 # -- Global values shared across all subcharts
 global:
   installAndUpgradeHooks:
-    # Disable pre-install/pre-upgrade hooks (incompatible with ArgoCD on first install).
-    # See VMAAS-951 for future hook support.
-    enabled: false
+    # Re-enabled: umbrella chart bundles CRDs + SPIRE in single release,
+    # so hooks can reference CRDs within the same sync cycle.
+    enabled: true
   spire:
     # -- SPIFFE trust domain (MUST override per cluster)
     trustDomain: "dsx.nvidia.com"
