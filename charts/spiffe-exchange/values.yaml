@@ -41,8 +41,8 @@ dbMigration:
   # This creates the domain_keys table if it doesn't exist (idempotent).
   enabled: true
   image:
-    repository: docker.io/bitnami/postgresql
-    tag: "16"
+    repository: docker.io/postgres
+    tag: "16-alpine"
     pullPolicy: IfNotPresent
 
 encryptionKeyset:
