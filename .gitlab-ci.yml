@@ -1,6 +1,6 @@
 include:
   - project: cds/cicd-pipelines
-    ref: 1.42.9
+    ref: 1.42.10
     file: /pipelines/ncp/dsx/dsx-spiffe-ci-pipeline.yml
 # trigger: dummy update
 
