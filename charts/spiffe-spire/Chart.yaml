@@ -1,0 +1,16 @@
+apiVersion: v2
+name: spiffe-spire
+description: Umbrella Helm chart wrapping official SPIRE server, agent, CRDs, and CSI driver
+type: application
+version: 0.1.0
+appVersion: "0.27.1"
+
+dependencies:
+  - name: spire-crds
+    version: "0.5.0"
+    repository: "https://spiffe.github.io/helm-charts-hardened/"
+    condition: spire-crds.enabled
+  - name: spire
+    version: "0.27.1"
+    repository: "https://spiffe.github.io/helm-charts-hardened/"
+    condition: spire.enabled

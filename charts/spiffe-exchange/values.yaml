@@ -36,6 +36,15 @@ exchange:
   pgPasswordKey: password
   encryptionKeysetSecret: exchange-encryption-keyset
 
+dbMigration:
+  # Run DB schema migration as init container before exchange service starts.
+  # This creates the domain_keys table if it doesn't exist (idempotent).
+  enabled: true
+  image:
+    repository: docker.io/bitnami/postgresql
+    tag: "16"
+    pullPolicy: IfNotPresent
+
 encryptionKeyset:
   # Auto-generate the encryption keyset secret via init Job if it doesn't exist
   autoGenerate: true

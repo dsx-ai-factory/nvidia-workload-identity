@@ -20,6 +20,40 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if .Values.dbMigration.enabled }}
+      initContainers:
+      - name: db-migration
+        image: "{{ .Values.dbMigration.image.repository }}:{{ .Values.dbMigration.image.tag }}"
+        imagePullPolicy: {{ .Values.dbMigration.image.pullPolicy | default "IfNotPresent" }}
+        command: ["sh", "-c"]
+        args:
+        - |
+          until pg_isready -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER"; do
+            echo "Waiting for PostgreSQL at $PG_HOST:$PG_PORT..."
+            sleep 2
+          done
+          echo "Running database migration..."
+          PGPASSWORD="$PG_PASSWORD" psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DATABASE" -f /migrations/init-schema.sql
+          echo "Migration complete."
+        env:
+        - name: PG_HOST
+          value: {{ .Values.exchange.pgHost | quote }}
+        - name: PG_PORT
+          value: {{ .Values.exchange.pgPort | default "5432" | quote }}
+        - name: PG_USER
+          value: {{ .Values.exchange.pgUser | default "exchange" | quote }}
+        - name: PG_DATABASE
+          value: {{ .Values.exchange.pgDatabase | default "exchange" | quote }}
+        - name: PG_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.exchange.pgPasswordSecret | default "postgres-app" }}
+              key: {{ .Values.exchange.pgPasswordKey | default "password" }}
+        volumeMounts:
+        - name: db-migration
+          mountPath: /migrations
+          readOnly: true
+      {{- end }}
       containers:
       - name: {{ .Chart.Name }}
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -85,3 +119,8 @@ spec:
         csi:
           driver: csi.spiffe.io
           readOnly: true
+      {{- if .Values.dbMigration.enabled }}
+      - name: db-migration
+        configMap:
+          name: {{ .Chart.Name }}-db-migration
+      {{- end }}

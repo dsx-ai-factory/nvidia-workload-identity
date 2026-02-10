@@ -1,0 +1,13 @@
+SPIFFE SPIRE has been deployed.
+
+Trust Domain: {{ .Values.global.spire.trustDomain }}
+Cluster Name: {{ .Values.global.spire.clusterName }}
+
+Components:
+  - SPIRE CRDs: {{ if (index .Values "spire-crds" "enabled") }}enabled{{ else }}disabled{{ end }}
+  - SPIRE Server + Agent: {{ if .Values.spire.enabled }}enabled{{ else }}disabled{{ end }}
+  - SPIFFE CSI Driver: {{ if (index .Values "spire" "spiffe-csi-driver" "enabled") }}enabled{{ else }}disabled{{ end }}
+
+To verify:
+  kubectl get pods -n {{ .Release.Namespace }}
+  kubectl get clusterspiffeids
