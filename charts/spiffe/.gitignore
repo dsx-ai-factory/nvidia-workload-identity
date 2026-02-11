@@ -1,0 +1,2 @@
+# Downloaded dependency charts (rebuilt by helm dependency build / helm package --dependency-update)
+charts/

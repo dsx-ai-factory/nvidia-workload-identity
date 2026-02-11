@@ -1,0 +1,131 @@
+# Full SPIFFE stack — single chart for all SPIFFE workload identity components.
+# Override global.spire.trustDomain and global.spire.clusterName per cluster.
+
+# -- Global values shared across all subcharts
+global:
+  # -- Image tag for SPIFFE components (set to chart version when deploying)
+  imageTag: ""
+  installAndUpgradeHooks:
+    enabled: true
+  spire:
+    # -- SPIFFE trust domain (MUST override per cluster)
+    trustDomain: "dsx.nvidia.com"
+    # -- Cluster name for SPIRE registration
+    clusterName: "dsx-cluster"
+    # -- JWT issuer URI (defaults to spiffe://trustDomain)
+    jwtIssuer: ""
+    caSubject:
+      country: "US"
+      organization: "NVIDIA"
+      commonName: "SPIRE Server CA"
+
+# ============================================================
+# SPIRE (server, agent, CRDs, CSI driver)
+# ============================================================
+spiffe-spire:
+  enabled: true
+  spire-crds:
+    enabled: true
+  spire:
+    enabled: true
+    spire-server:
+      defaultX509SvidTTL: "1h"
+      defaultJwtSvidTTL: "5m"
+      controllerManager:
+        identities:
+          clusterSPIFFEIDs:
+            exchange-service:
+              podSelector:
+                matchLabels:
+                  app: spiffe-exchange
+              namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: "{{ .Release.Namespace }}"
+              spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/ns/{{ .PodMeta.Namespace }}/sa/{{ .PodSpec.ServiceAccountName }}"
+            pod-workloads:
+              podSelector:
+                matchExpressions:
+                - key: spiffe.nvidia.com/tenant
+                  operator: Exists
+                - key: spiffe.nvidia.com/service
+                  operator: Exists
+              spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/tenant/{{ index .PodMeta.Labels \"spiffe.nvidia.com/tenant\" }}/service/{{ index .PodMeta.Labels \"spiffe.nvidia.com/service\" }}/pod/{{ .PodMeta.UID }}"
+      federation:
+        enabled: false
+    spiffe-oidc-discovery-provider:
+      tls:
+        spire:
+          enabled: false
+    spiffe-csi-driver:
+      enabled: true
+
+# ============================================================
+# PostgreSQL (CloudNativePG) for exchange service
+# Requires CNPG operator to be pre-installed on the cluster.
+# ============================================================
+postgres:
+  enabled: true
+  clusterName: spiffe-postgres
+  image: "ghcr.io/cloudnative-pg/postgresql:16"
+  instances: 1
+  database: exchange
+  user: exchange
+  storage:
+    size: 1Gi
+    # storageClass: ""  # uses cluster default
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ============================================================
+# Exchange service (token exchange: SPIFFE JWT → tenant token)
+# ============================================================
+spiffe-exchange:
+  enabled: true
+  image:
+    repository: nvcr.io/0837451325059433/components-dev/spiffe-exchange-service
+    # tag: defaults to Chart.Version (auto-set by CI)
+    pullPolicy: IfNotPresent
+  imagePullSecrets: []
+  exchange:
+    region: sjc-1
+    baseDomain: nvidia.com
+    logLevel: info
+    keystoreBackend: postgres
+    # CNPG service naming: <clusterName>-rw
+    pgHost: "spiffe-postgres-rw"
+    pgPort: "5432"
+    pgDatabase: exchange
+    pgUser: exchange
+    # CNPG secret naming: <clusterName>-app
+    pgPasswordSecret: "spiffe-postgres-app"
+    pgPasswordKey: password
+    encryptionKeysetSecret: exchange-encryption-keyset
+  dbMigration:
+    # Disabled — schema managed by CNPG Cluster CRD (postInitApplicationSQL)
+    enabled: false
+
+# ============================================================
+# Workload support (Kyverno sidecar injection policies)
+# ============================================================
+spiffe-workload-support:
+  enabled: true
+  tokenFetcher:
+    image:
+      repository: nvcr.io/0837451325059433/components-dev/spiffe-token-fetcher
+      tag: "0.1.0"
+      pullPolicy: IfNotPresent
+  policy:
+    namespaceLabelSelector:
+      matchLabels:
+        spiffe.nvidia.com/enabled: "true"
+
+# ============================================================
+# VM support (optional, disabled by default)
+# ============================================================
+spiffe-vm-support:
+  enabled: false
