@@ -6,7 +6,10 @@ global:
   # -- Image tag for SPIFFE components (set to chart version when deploying)
   imageTag: ""
   installAndUpgradeHooks:
-    enabled: true
+    # Disabled: pre-upgrade hook checks for resources (e.g. webhook) that
+    # don't exist on fresh deployments, causing Job failures.
+    # Re-enable only after initial install is complete.
+    enabled: false
   spire:
     # -- SPIFFE trust domain (MUST override per cluster)
     trustDomain: "dsx.nvidia.com"
@@ -35,14 +38,16 @@ spiffe-spire:
         identities:
           clusterSPIFFEIDs:
             exchange-service:
+              # type: raw — skips SPIRE's auto-generated namespaceSelector
+              # which adds NotIn for the release namespace. Required because
+              # exchange runs in the SAME namespace as SPIRE in the umbrella chart.
+              type: raw
               podSelector:
                 matchLabels:
                   app: spiffe-exchange
-              namespaceSelector:
-                matchLabels:
-                  kubernetes.io/metadata.name: "{{ .Release.Namespace }}"
               spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/ns/{{ .PodMeta.Namespace }}/sa/{{ .PodSpec.ServiceAccountName }}"
             pod-workloads:
+              type: raw
               podSelector:
                 matchExpressions:
                 - key: spiffe.nvidia.com/tenant
