@@ -9,12 +9,14 @@ import (
 	"log/slog"
 	"maps"
 	"mime"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
@@ -331,15 +333,20 @@ func (s *ExchangeServer) handleTokenExchange(w http.ResponseWriter, r *http.Requ
 	}
 }
 
+// trustDomainFromHost returns the host without an optional port (e.g. "tenant1.example.com:8080" -> "tenant1.example.com").
+func trustDomainFromHost(host string) string {
+	h, _, err := net.SplitHostPort(host)
+	if err != nil {
+		return host
+	}
+	return h
+}
+
 // handleJWKS handles GET requests to /.well-known/jwks.json.
 func (s *ExchangeServer) handleJWKS(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Received JWKS request", "method", r.Method, "path", r.URL.Path, "host", r.Host, "remote_addr", r.RemoteAddr)
 
-	// Extract trust domain from Host header (strip port if present)
-	trustDomain := r.Host
-	if idx := strings.Index(trustDomain, ":"); idx != -1 {
-		trustDomain = trustDomain[:idx]
-	}
+	trustDomain := trustDomainFromHost(r.Host)
 	if trustDomain == "" {
 		http.Error(w, "Host header required", http.StatusBadRequest)
 		return
@@ -374,6 +381,43 @@ func (s *ExchangeServer) handleJWKS(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(responseBody)))
 	if _, err := w.Write(responseBody); err != nil {
 		slog.Error("Failed to write JWKS response", "error", err)
+	}
+}
+
+// handleOIDCDiscovery handles GET requests to /.well-known/openid-configuration.
+// It returns OIDC provider metadata (issuer, jwks_uri) using the Host header for tenant-scoped discovery.
+func (s *ExchangeServer) handleOIDCDiscovery(w http.ResponseWriter, r *http.Request) {
+	slog.Info("Received OIDC discovery request", "method", r.Method, "path", r.URL.Path, "host", r.Host, "remote_addr", r.RemoteAddr)
+
+	trustDomain := trustDomainFromHost(r.Host)
+	if trustDomain == "" {
+		http.Error(w, "Host header required", http.StatusBadRequest)
+		return
+	}
+
+	scheme := "http"
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		scheme = proto
+	}
+	jwksURL := scheme + "://" + r.Host + "/.well-known/jwks.json"
+
+	cfg := oidc.ProviderConfig{
+		IssuerURL:  "spiffe://" + trustDomain,
+		JWKSURL:    jwksURL,
+		Algorithms: []string{"ES256"},
+	}
+
+	responseBody, err := json.Marshal(cfg)
+	if err != nil {
+		slog.Error("Failed to marshal OIDC discovery", "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(responseBody)))
+	if _, err := w.Write(responseBody); err != nil {
+		slog.Error("Failed to write OIDC discovery response", "error", err)
 	}
 }
 
@@ -508,6 +552,7 @@ func main() {
 
 	http.HandleFunc("POST /v1/exchange", server.handleTokenExchange)
 	http.HandleFunc("GET /.well-known/jwks.json", server.handleJWKS)
+	http.HandleFunc("GET /.well-known/openid-configuration", server.handleOIDCDiscovery)
 	http.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("OK"))

@@ -4,6 +4,7 @@ go 1.25
 
 require (
 	github.com/container-storage-interface/spec v1.11.0
+	github.com/coreos/go-oidc/v3 v3.17.0
 	github.com/go-jose/go-jose/v4 v4.1.3
 	github.com/google/cel-go v0.26.1
 	github.com/google/nftables v0.3.0
@@ -15,6 +16,7 @@ require (
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.40.0
 	github.com/vishvananda/netlink v1.3.1
 	github.com/vishvananda/netns v0.0.5
+	golang.org/x/oauth2 v0.34.0
 	golang.org/x/sys v0.38.0
 	google.golang.org/grpc v1.78.0
 	k8s.io/api v0.31.9
@@ -134,7 +136,6 @@ require (
 	golang.org/x/crypto v0.44.0 // indirect
 	golang.org/x/exp v0.0.0-20250819193227-8b4c13bb791b // indirect
 	golang.org/x/net v0.47.0 // indirect
-	golang.org/x/oauth2 v0.34.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/term v0.37.0 // indirect
 	golang.org/x/text v0.33.0 // indirect

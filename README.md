@@ -142,9 +142,9 @@ Required configuration for Postgres backend:
 4. Old keys remain in JWKS for decrypting existing data
 5. Query `SELECT * FROM domain_keys WHERE master_key_id = 'old-kid'` to find keys to re-encrypt
 
-### JWKS Endpoint
+### JWKS and OIDC Discovery Endpoints
 
-Exchange service serves `/.well-known/jwks.json` for each tenant domain. CoreDNS wildcard rewrite routes `*.{region}.{service}.nvidia.com` to the exchange service per service, enabling OpenBao to fetch JWKS for any tenant.
+Exchange service serves `/.well-known/jwks.json` for each tenant domain. It also serves `/.well-known/openid-configuration` (OIDC discovery). CoreDNS wildcard rewrite routes `*.{region}.{service}.nvidia.com` to the exchange service per service, enabling OpenBao to fetch JWKS for any tenant. OpenBao can be configured with `oidc_discovery_url` (base URL, e.g. `http://tenant1.sjc-1.internal.nvidia.com:8080`) in addition to `jwks_url`.
 
 ## Latinum Sharding Model
 

@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/go-jose/go-jose/v4"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 
@@ -85,6 +87,29 @@ func TestParsePathComponents(t *testing.T) {
 			}
 			if got.ResourceID != tt.wantResourceID {
 				t.Errorf("ResourceID = %q, want %q", got.ResourceID, tt.wantResourceID)
+			}
+		})
+	}
+}
+
+func TestTrustDomainFromHost(t *testing.T) {
+	tests := []struct {
+		name string
+		host string
+		want string
+	}{
+		{"host with port", "tenant1.sjc-1.internal.nvidia.com:8080", "tenant1.sjc-1.internal.nvidia.com"},
+		{"host without port", "tenant1.sjc-1.internal.nvidia.com", "tenant1.sjc-1.internal.nvidia.com"},
+		{"host with 443", "acme.example.com:443", "acme.example.com"},
+		{"localhost with port", "localhost:8080", "localhost"},
+		{"IPv6 with port", "[::1]:8080", "::1"},
+		{"empty host", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := trustDomainFromHost(tt.host)
+			if got != tt.want {
+				t.Errorf("trustDomainFromHost(%q) = %q, want %q", tt.host, got, tt.want)
 			}
 		})
 	}
@@ -299,6 +324,125 @@ func TestHandleJWKS(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandleOIDCDiscovery(t *testing.T) {
+	keyStore := newMockKeyStore()
+	server := &ExchangeServer{
+		keyStore:   keyStore,
+		baseDomain: "nvidia.com",
+		region:     "sjc-1",
+	}
+
+	tests := []struct {
+		name              string
+		host              string
+		wantStatus        int
+		wantIssuer        string
+		wantJWKSURIPrefix string
+	}{
+		{
+			name:              "valid request with port",
+			host:              "tenant1.sjc-1.internal.nvidia.com:8080",
+			wantStatus:        http.StatusOK,
+			wantIssuer:        "spiffe://tenant1.sjc-1.internal.nvidia.com",
+			wantJWKSURIPrefix: "http://tenant1.sjc-1.internal.nvidia.com:8080/.well-known/jwks.json",
+		},
+		{
+			name:              "valid request without port",
+			host:              "tenant1.sjc-1.internal.nvidia.com",
+			wantStatus:        http.StatusOK,
+			wantIssuer:        "spiffe://tenant1.sjc-1.internal.nvidia.com",
+			wantJWKSURIPrefix: "http://tenant1.sjc-1.internal.nvidia.com/.well-known/jwks.json",
+		},
+		{
+			name:       "empty host returns 400",
+			host:       "",
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/.well-known/openid-configuration", nil)
+			req.Host = tt.host
+			rr := httptest.NewRecorder()
+
+			server.handleOIDCDiscovery(rr, req)
+
+			if rr.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d", rr.Code, tt.wantStatus)
+			}
+			if tt.wantStatus != http.StatusOK {
+				return
+			}
+			if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
+				t.Errorf("Content-Type = %q, want application/json", ct)
+			}
+			var cfg oidc.ProviderConfig
+			if err := json.NewDecoder(rr.Body).Decode(&cfg); err != nil {
+				t.Fatalf("decode discovery JSON: %v", err)
+			}
+			if cfg.IssuerURL != tt.wantIssuer {
+				t.Errorf("issuer = %q, want %q", cfg.IssuerURL, tt.wantIssuer)
+			}
+			if tt.wantJWKSURIPrefix != "" && cfg.JWKSURL != tt.wantJWKSURIPrefix {
+				t.Errorf("jwks_uri = %q, want %q", cfg.JWKSURL, tt.wantJWKSURIPrefix)
+			}
+			if len(cfg.Algorithms) != 1 || cfg.Algorithms[0] != "ES256" {
+				t.Errorf("algorithms = %v, want [ES256]", cfg.Algorithms)
+			}
+		})
+	}
+}
+
+// discoveryRoundTripper forwards discovery requests to the handler instead of the network.
+type discoveryRoundTripper struct {
+	server *ExchangeServer
+}
+
+func (d discoveryRoundTripper) RoundTrip(outReq *http.Request) (*http.Response, error) {
+	inReq := httptest.NewRequest(outReq.Method, outReq.URL.RequestURI(), nil)
+	inReq.Host = outReq.URL.Host
+	rr := httptest.NewRecorder()
+	d.server.handleOIDCDiscovery(rr, inReq)
+	return rr.Result(), nil
+}
+
+func TestOIDCClientDiscovery(t *testing.T) {
+	keyStore := newMockKeyStore()
+	server := &ExchangeServer{
+		keyStore:   keyStore,
+		baseDomain: "nvidia.com",
+		region:     "sjc-1",
+	}
+	client := &http.Client{
+		Transport: discoveryRoundTripper{server: server},
+	}
+	ctx := oidc.ClientContext(context.Background(), client)
+	path := "http://tenant1.sjc-1.internal.nvidia.com/.well-known/openid-configuration"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var cfg oidc.ProviderConfig
+	if err := json.NewDecoder(resp.Body).Decode(&cfg); err != nil {
+		t.Fatalf("decode discovery: %v", err)
+	}
+	// ProviderConfig.NewProvider builds a Provider from the document without re-fetching; validates the library accepts our shape.
+	provider := cfg.NewProvider(ctx)
+	if provider == nil {
+		t.Fatal("NewProvider returned nil")
+	}
+	_ = provider.Endpoint()
 }
 
 func TestHandleTokenExchange_InvalidRequests(t *testing.T) {
