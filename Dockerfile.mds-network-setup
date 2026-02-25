@@ -1,5 +1,8 @@
 # Build stage
-FROM golang:1.25 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25 AS builder
+
+ARG TARGETOS
+ARG TARGETARCH
 
 WORKDIR /app
 
@@ -13,7 +16,7 @@ RUN go mod download
 COPY cmd/mds-network-setup/ ./cmd/mds-network-setup/
 
 # Build the binary
-RUN go build -o mds-network-setup ./cmd/mds-network-setup
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o mds-network-setup ./cmd/mds-network-setup
 
 # Final stage
 FROM debian:bookworm-slim
@@ -26,5 +29,4 @@ WORKDIR /root/
 # Copy the binary from builder stage
 COPY --from=builder /app/mds-network-setup .
 
-# Run the daemon
-ENTRYPOINT ["/root/mds-network-setup"]
+ENTRYPOINT ["bash", "-c", "/root/mds-network-setup \"$@\" && sleep infinity", "--"]

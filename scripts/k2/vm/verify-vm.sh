@@ -174,20 +174,7 @@ verify_mds_sidecar() {
         log_error "MDS sidecar not found"
         return 1
     fi
-}
 
-verify_mds_network_setup() {
-    log_test "Checking MDS network setup DaemonSet..."
-    
-    if kubectl get daemonset mds-network-setup -n mds-system --context "${CONTEXT}" \
-        --no-headers 2>/dev/null | grep -q .; then
-        log_success "MDS network setup DaemonSet exists"
-        return 0
-    else
-        log_error "MDS network setup DaemonSet not found"
-        return 1
-    fi
-}
 
 verify_node_labels() {
     log_test "Checking node labels..."
@@ -272,7 +259,6 @@ main() {
     
     verify_vm_running || ((failed++))
     verify_mds_sidecar || ((failed++))
-    verify_mds_network_setup || ((failed++))
     verify_node_labels || ((failed++))
     verify_metadata_access || ((failed++))
     

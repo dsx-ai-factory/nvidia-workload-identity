@@ -311,13 +311,10 @@ package "k2 Cluster" as K2 {
     [Exchange Proxy CSI\nDaemonSet] as ExchangeCSI
   }
   
-  package "mds-system" as MDSNS {
-    [MDS Network Setup\nDaemonSet] as MDSNetwork
-  }
-  
   package "VMI Pod (tenant-tenant1)" as VMIPod {
     [Ubuntu VM] as VM
     [Metadata Sidecar\n169.254.169.254:80] as MetaSidecar
+    [MDS Network Setup Sidecar] as MDSNetworkSetupSidecar
     [SPIRE CSI Socket] as SpireCSI
     [Exchange CSI Socket] as ExchangeSocket
   }
@@ -346,8 +343,8 @@ VM -[#orange]-> Bao : 8. Authenticate to Bao
 ' SPIRE Agent to Server
 SpireAgent --> SPIRE2 : Attestation
 
-' MDS Network Setup configures pod networking
-MDSNetwork ..[#gray].> VMIPod : Configure nftables\n(veth, routes, MAC rewrite)
+' MDS Network Setup Sidecar
+MDSNetworkSetupSidecar ..[#gray].> MetaSidecar : Configure nftables\n(veth, routes, MAC rewrite)
 
 ' OpenBao JWKS validation
 Bao -[#purple]-> GW1 : Fetch JWKS\n(*.{region}.{service}.nvidia.com)
@@ -356,6 +353,7 @@ GW1 -[#purple]-> Exchange
 ' Exchange validates incoming JWTs
 Exchange --> SPIRE1 : Fetch SPIFFE bundle\n(validate k2 JWTs)
 
+
 @enduml
 ```
 
@@ -363,7 +361,7 @@ Exchange --> SPIRE1 : Fetch SPIFFE bundle\n(validate k2 JWTs)
 
 **Metadata Sidecar**: Container running in the VMI pod that serves the metadata API at 169.254.169.254. Directly accesses the SPIRE workload API socket and exchange service socket via CSI drivers.
 
-**MDS Network Setup DaemonSet**: Privileged DaemonSet that configures networking in each VMI pod's namespace to route VM traffic to the metadata sidecar (see [cmd/mds-network-setup/README.md](cmd/mds-network-setup/README.md)).
+**MDS Network Setup Sidecar**: Privileged Sidecar container that configures networking in each VMI pod's namespace to route VM traffic to the metadata sidecar (see [cmd/mds-network-setup/README.md](cmd/mds-network-setup/README.md)).
 
 **Exchange Proxy CSI Driver**: DaemonSet that creates Unix sockets forwarding to the exchange service via socat, mounted into VMI pods for exchange service access without cluster network.
 

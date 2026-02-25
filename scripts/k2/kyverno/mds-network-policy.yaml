@@ -9,11 +9,11 @@ metadata:
     policies.kyverno.io/description: >-
       Injects the metadata-service sidecar into virt-launcher pods with the
       spiffe.nvidia.com/inject-mds annotation. Network setup is handled by the
-      mds-network-setup DaemonSet which runs privileged on each node.
+      mds-network-setup sidecar which runs privileged in the virt-launcher pod.
 spec:
   background: true
   rules:
-  - name: add-mds-sidecar
+  - name: add-mds-sidecars
     match:
       any:
       - resources:
@@ -24,6 +24,14 @@ spec:
       patchStrategicMerge:
         spec:
           containers:
+          - name: mds-network-setup
+            image: mds-network-setup:latest
+            imagePullPolicy: Always
+            securityContext:
+              privileged: true
+              capabilities:
+                add:
+                  - CAP_NET_ADMIN
           - name: metadata-service
             image: metadata-service:latest
             imagePullPolicy: IfNotPresent

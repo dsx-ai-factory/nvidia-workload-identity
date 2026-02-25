@@ -3,7 +3,6 @@
 # This sets up:
 # - Tenant namespace with Primary UDN for VM isolation
 # - Kyverno policies for MDS sidecar injection
-# - Network setup DaemonSet for MDS traffic interception
 
 set -euo pipefail
 
@@ -85,15 +84,6 @@ deploy_mds_network_policy() {
     log_success "MDS Sidecar Policy deployed"
 }
 
-deploy_mds_network_daemonset() {
-    log_info "Deploying MDS Network DaemonSet..."
-    kubectl apply -f "${SCRIPT_DIR}/mds-network-daemonset.yaml" \
-        --context "${CONTEXT}"
-    kubectl rollout status daemonset/mds-network-setup \
-        -n mds-system --timeout=120s --context "${CONTEXT}"
-    log_success "MDS Network DaemonSet deployed"
-}
-
 deploy_exchange_proxy_csi() {
     log_info "Deploying Exchange Proxy CSI..."
     
@@ -111,9 +101,6 @@ display_info() {
     log_success "MDS infrastructure deployment complete"
     echo
     echo "Tenant Namespace: ${TENANT_NAMESPACE}"
-    echo
-    echo "MDS Network Setup DaemonSet:"
-    kubectl get daemonset mds-network-setup -n mds-system --context "${CONTEXT}"
     echo
     echo "Exchange Proxy CSI DaemonSet:"
     kubectl get daemonset exchange-proxy-csi -n exchange-proxy-system --context "${CONTEXT}"
@@ -154,7 +141,6 @@ main() {
             deploy_tenant_namespace
             deploy_tenant_udn
             deploy_mds_network_policy
-            deploy_mds_network_daemonset
             deploy_exchange_proxy_csi
             display_info
             ;;
