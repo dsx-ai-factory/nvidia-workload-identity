@@ -1,6 +1,9 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -143,4 +146,27 @@ func TestCalculateRefreshTime_MinimumEnforced(t *testing.T) {
 	if got != expected {
 		t.Errorf("got = %v, want %v (minimum enforced)", got, expected)
 	}
+}
+
+func TestHealthHandler(t *testing.T) {
+	var ready atomic.Bool
+	handler := healthHandler(&ready)
+
+	t.Run("not ready returns 503", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+		}
+	})
+
+	ready.Store(true)
+
+	t.Run("ready returns 200", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+		if rec.Code != http.StatusOK {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+		}
+	})
 }

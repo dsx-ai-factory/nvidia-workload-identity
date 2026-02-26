@@ -33,11 +33,9 @@ spec:
     - "-verbose=true"
     - "-exchange-service-url=http://gateway.sjc-1.nvidia.com:8080"
     startupProbe:
-      exec:
-        command:
-        - test
-        - -s
-        - /var/run/secrets/nvidia.com/spiffe/token
+      httpGet:
+        path: /healthz
+        port: 8080
       periodSeconds: 1
       failureThreshold: 30
     resources:

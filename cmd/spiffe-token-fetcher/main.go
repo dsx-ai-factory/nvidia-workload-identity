@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
@@ -114,6 +115,17 @@ func exchangeJWT(ctx context.Context, httpClient *http.Client, tokenEndpoint, su
 	)
 }
 
+// healthHandler returns an HTTP handler that reports readiness based on the atomic flag.
+func healthHandler(ready *atomic.Bool) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ready.Load() {
+			w.WriteHeader(http.StatusOK)
+		} else {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+	})
+}
+
 // exchangeJWTWithRetry exchanges a JWT via the exchange service with retry logic.
 func exchangeJWTWithRetry(ctx context.Context, httpClient *http.Client, exchangeServiceURL, token string, maxRetries int) (*oauth2.Token, error) {
 	var lastErr error
@@ -144,12 +156,15 @@ func main() {
 		verbose            = flag.Bool("verbose", true, "Enable verbose logging")
 		exitAfterFetch     = flag.Bool("exit-after-fetch", false, "Exit after fetching the initial JWT (for init container use)")
 		exchangeServiceURL = flag.String("exchange-service-url", "", "URL of the SPIFFE exchange service")
+		healthPort         = flag.Int("health-port", 8080, "Port for the /healthz endpoint")
 	)
 	flag.Parse()
 
 	if *exchangeServiceURL == "" {
 		log.Fatal("--exchange-service-url is required")
 	}
+
+	var ready atomic.Bool
 
 	if *verbose {
 		log.Printf("Starting SPIFFE JWT token fetcher")
@@ -159,7 +174,20 @@ func main() {
 		log.Printf("Max retries: %d", *maxRetries)
 		log.Printf("Exit after fetch: %t", *exitAfterFetch)
 		log.Printf("Exchange service URL: %s", *exchangeServiceURL)
+		log.Printf("Health port: %d", *healthPort)
 	}
+
+	mux := http.NewServeMux()
+	mux.Handle("/healthz", healthHandler(&ready))
+	healthServer := &http.Server{
+		Addr:    fmt.Sprintf(":%d", *healthPort),
+		Handler: mux,
+	}
+	go func() {
+		if err := healthServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Health server failed: %v", err)
+		}
+	}()
 
 	httpClient := &http.Client{
 		Timeout: 30 * time.Second,
@@ -242,6 +270,12 @@ func main() {
 
 		if *verbose {
 			log.Printf("JWT written to %s (%d characters)", *outputPath, len(tokenData))
+		}
+
+		if !ready.Swap(true) {
+			if *verbose {
+				log.Println("Health check is now ready")
+			}
 		}
 
 		// Exit after initial fetch if running as init container
