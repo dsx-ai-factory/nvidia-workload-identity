@@ -1,6 +1,6 @@
 apiVersion: v2
 name: spiffe
-description: Full SPIFFE stack — SPIRE, exchange service, PostgreSQL, workload/VM support
+description: Full SPIFFE stack — SPIRE, exchange service, workload/VM support
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
