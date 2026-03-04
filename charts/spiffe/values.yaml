@@ -65,28 +65,6 @@ spiffe-spire:
       enabled: true
 
 # ============================================================
-# PostgreSQL (CloudNativePG) for exchange service
-# Requires CNPG operator to be pre-installed on the cluster.
-# ============================================================
-postgres:
-  enabled: true
-  clusterName: spiffe-postgres
-  image: "ghcr.io/cloudnative-pg/postgresql:16"
-  instances: 1
-  database: exchange
-  user: exchange
-  storage:
-    size: 1Gi
-    # storageClass: ""  # uses cluster default
-  resources:
-    requests:
-      cpu: 100m
-      memory: 256Mi
-    limits:
-      cpu: 500m
-      memory: 512Mi
-
-# ============================================================
 # Exchange service (token exchange: SPIFFE JWT → tenant token)
 # ============================================================
 spiffe-exchange:
@@ -101,18 +79,20 @@ spiffe-exchange:
     baseDomain: nvidia.com
     logLevel: info
     keystoreBackend: postgres
-    # CNPG service naming: <clusterName>-rw
-    pgHost: "spiffe-postgres-rw"
+    # Shared CNPG cluster: <clusterName>-rw.<namespace>.svc.cluster.local
+    # Override per-environment in dsx-sbom-dev customValues if needed.
+    pgHost: "dsx-shared-pg-cluster-rw.cnpg-shared.svc.cluster.local"
     pgPort: "5432"
-    pgDatabase: exchange
-    pgUser: exchange
-    # CNPG secret naming: <clusterName>-app
-    pgPasswordSecret: "spiffe-postgres-app"
+    pgDatabase: spiffe_exchange
+    pgUser: spiffe_exchange
+    # Secret synced by VaultStaticSecret in the SPIFFE namespace
+    pgPasswordSecret: "spiffe-exchange-db-cred"
     pgPasswordKey: password
     encryptionKeysetSecret: exchange-encryption-keyset
   dbMigration:
-    # Disabled — schema managed by CNPG Cluster CRD (postInitApplicationSQL)
-    enabled: false
+    # Schema managed by migration Job (ArgoCD PostSync hook).
+    # Idempotent — safe to run on every sync.
+    enabled: true
 
 # ============================================================
 # Workload support (Kyverno sidecar injection policies)
