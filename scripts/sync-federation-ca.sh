@@ -30,19 +30,21 @@ sync_ca() {
     
     log_info "Creating CA Secret in k1..."
     
-    # Create namespace if needed
-    kubectl create namespace spire-system --context "${K1_CONTEXT}" --dry-run=client -o yaml | \
-        kubectl apply --context "${K1_CONTEXT}" -f -
-    
-    # Create Secret in k1 with the CA cert
-    kubectl create secret generic "${CA_SECRET_DST}" \
-        --from-literal=ca.crt="${ca_cert}" \
-        -n spire-system \
-        --context "${K1_CONTEXT}" \
-        --dry-run=client -o yaml | \
-        kubectl apply --context "${K1_CONTEXT}" -f -
-    
-    log_success "CA synced from k2 to k1"
+    # Create secret in both namespaces (spire-system for individual deploy,
+    # dsx-spiffe for umbrella chart deploy)
+    for ns in spire-system dsx-spiffe; do
+        kubectl create namespace "$ns" --context "${K1_CONTEXT}" --dry-run=client -o yaml | \
+            kubectl apply --context "${K1_CONTEXT}" -f -
+
+        kubectl create secret generic "${CA_SECRET_DST}" \
+            --from-literal=ca.crt="${ca_cert}" \
+            -n "$ns" \
+            --context "${K1_CONTEXT}" \
+            --dry-run=client -o yaml | \
+            kubectl apply --context "${K1_CONTEXT}" -f -
+    done
+
+    log_success "CA synced from k2 to k1 (spire-system + dsx-spiffe)"
 }
 
 main() {

@@ -14,7 +14,7 @@ source "${PROJECT_ROOT}/scripts/common.sh"
 check_prerequisites() {
     log_info "Checking prerequisites..."
     
-    for cmd in kind kubectl docker helm bao; do
+    for cmd in kind kubectl docker helm; do
         if ! command -v "$cmd" &> /dev/null; then
             log_error "$cmd is not installed"
             exit 1

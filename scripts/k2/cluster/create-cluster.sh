@@ -51,6 +51,16 @@ create_cluster() {
     log_success "Cluster '${CLUSTER_NAME}' created (CNI installation needed)"
 }
 
+tune_node_limits() {
+    log_info "Tuning kernel limits for OVN-Kubernetes..."
+    for node in $(kind get nodes --name "${CLUSTER_NAME}"); do
+        docker exec "$node" sysctl -w fs.inotify.max_user_instances=1024 >/dev/null
+        docker exec "$node" sysctl -w fs.inotify.max_user_watches=1048576 >/dev/null
+        docker exec "$node" sysctl -w fs.file-max=1048576 >/dev/null
+    done
+    log_success "Kernel limits tuned"
+}
+
 install_ovn() {
     # Check if OVN is already installed
     if helm status ovn-kubernetes --kube-context "kind-${CLUSTER_NAME}" &>/dev/null; then
@@ -164,6 +174,7 @@ main() {
         *)
             check_prerequisites
             create_cluster
+            tune_node_limits
             install_ovn
             display_info
             ;;

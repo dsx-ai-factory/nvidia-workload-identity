@@ -1,0 +1,30 @@
+# Shared CNPG cluster for local Kind — mirrors production dsx-shared-pg-cluster.
+# Creates the spiffe_exchange database at bootstrap for simplicity.
+# In production, databases are managed via CNPG Database CRs instead.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: shared-pg-cluster
+  namespace: cnpg-shared
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:16
+
+  bootstrap:
+    initdb:
+      database: spiffe_exchange
+      owner: spiffe_exchange
+
+  storage:
+    size: 1Gi
+    pvcTemplate:
+      accessModes:
+        - ReadWriteOnce
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi

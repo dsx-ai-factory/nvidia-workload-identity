@@ -5,12 +5,116 @@ Demonstrates workloads in k2 obtaining SPIFFE JWTs and using them to authenticat
 ## Quick Start
 
 ```bash
-make clean && make install -j && make test
+# Standalone: deploy SPIFFE stack on a single Kind cluster (~5 min)
+make spiffe-deploy
+make spiffe-verify
+
+# Multi-cluster: full demo with SPIRE federation + OpenBao + workloads
+make install
+make test
+
+# Cleanup
+make spiffe-clean   # standalone
+make clean          # multi-cluster
 ```
 
 ## Prerequisites
 
-Docker, kubectl, Kind, Helm, OpenBao CLI (`bao`), virtctl, jq
+- Docker
+- kubectl, Helm, Kind
+- OpenBao CLI (`bao`) — only for multi-cluster demo (`make bao`)
+
+## Helm Charts
+
+All local deploys use the **umbrella chart** (`charts/spiffe/`), matching the production (dsx-sbom-dev) deployment pattern via ArgoCD.
+
+```
+charts/
+├── spiffe/                     # Umbrella chart (deploys everything below)
+├── spiffe-spire/               # SPIRE server + agent + CRDs + CSI driver
+├── spiffe-exchange/            # Token exchange service
+├── spiffe-workload-support/    # Kyverno policies for sidecar injection
+└── spiffe-vm-support/          # VM metadata support (disabled by default)
+```
+
+### Local vs Production
+
+| Aspect | Local (Kind) | Production (ArgoCD) |
+|--------|-------------|---------------------|
+| Chart source | `helm install` from local `charts/spiffe/` | NGC registry via ArgoCD Application |
+| CRDs | Pre-installed as separate Helm release (Helm CLI ordering limitation) | `ServerSideApply=true` handles ordering |
+| PostgreSQL | Shared CNPG in `cnpg-shared` (same pattern) | Shared CNPG with Database CR + VaultStaticSecret |
+| Images | `docker build` + `kind load` | NGC registry pull |
+| Secrets | Manual `kubectl` copy across namespaces | VaultStaticSecret sync |
+
+## Deploy Modes
+
+### Standalone (production-like, single cluster)
+
+Deploys the umbrella chart with local images. No federation, no OpenBao.
+
+```bash
+make spiffe-deploy     # Kind cluster + CNPG + Kyverno + umbrella chart
+make spiffe-verify     # 10-point smoke test
+make spiffe-clean      # Teardown
+```
+
+Values: `scripts/local-values.yaml`
+
+### Multi-cluster demo
+
+Full demo with SPIRE federation between k1 and k2, exchange service, OpenBao CEL auth.
+
+```bash
+make install           # k1 + k2 (see below)
+make test              # verify-clusters + verify-nginx + verify-vm
+make clean             # Delete both Kind clusters
+```
+
+| Target | What it does |
+|--------|-------------|
+| `make k1` | Kind cluster + MetalLB/Gateway + **SPIFFE umbrella** (k1-values.yaml) + OpenBao |
+| `make k2` | Kind cluster + OVN + KubeVirt + Kyverno + **SPIFFE umbrella** (k2-values.yaml) + workloads |
+
+k1 umbrella chart includes: SPIRE (with federation to k2) + exchange service + workload-support.
+k2 umbrella chart includes: SPIRE only (with bundle endpoint for federation).
+
+## Make Targets
+
+```
+Quick start:
+  spiffe-deploy          Deploy full SPIFFE stack via umbrella chart
+  spiffe-verify          Smoke test: verify SPIFFE stack is healthy
+  spiffe-clean           Uninstall SPIFFE charts
+
+Multi-cluster:
+  install                Complete setup: k1 + k2
+  k1                     Setup k1 with SPIRE + Exchange + OpenBao
+  k2                     Setup k2 with workloads
+  test                   Run integration tests
+  clean                  Remove both Kind clusters
+
+Build:
+  build-images           Build core Docker images (exchange + token-fetcher)
+  build-images-all       Build all images including VM support (requires BuildKit)
+  chart-deps             Build Helm chart dependencies
+
+k1 targets:
+  cluster                Create k1 Kind cluster
+  gateway                Install MetalLB + Envoy Gateway on k1
+  postgres               Deploy shared CNPG cluster on k1
+  spiffe                 Deploy SPIFFE umbrella chart on k1
+  bao                    Deploy OpenBao on k1
+
+k2 targets:
+  k2-cluster             Create k2 Kind cluster with OVN
+  kubevirt               Install KubeVirt and CDI on k2
+  kyverno                Install Kyverno on k2
+  spiffe-k2              Deploy SPIFFE umbrella chart on k2
+  nginx                  Deploy demo nginx on k2
+  metadata-service       Deploy metadata service on k2
+  vm                     Deploy Ubuntu VM on k2
+```
 
 ## Architecture
 
@@ -206,7 +310,7 @@ Each control plane cluster (cpc-N-k1) runs an independent exchange service with 
 
 The event bus uses a hub-and-spoke topology: each shard's leaf connects to the central hub in CSC, which replicates retained messages across all connected nodes. The exchange service in CSC subscribes to the keyset topic pattern and aggregates all published keysets in memory, maintaining a unified view of public keys across all shards.
 
-When OpenBao validates a JWT, it fetches the JWKS from the CSC exchange service using the tenant as a subdomain in the Host header (e.g., `Host: tenant1.exchange.csc.nvidia.com`). The CSC exchange service returns a merged keyset containing public keys from all shards for that tenant. This allows workloads from any shard to authenticate against a central OpenBao instance, regardless of which shard's exchange service signed their JWT without having to understand Latinum’s shard setup. The issuer field of each CPC exchange service all shares the same domain (e.g., `Host: tenant1.exchange.csc.nvidia.com`), and does not indicate the source shard despite each shard having a different signing key as the exposed public keyset is unified.
+When OpenBao validates a JWT, it fetches the JWKS from the CSC exchange service using the tenant as a subdomain in the Host header (e.g., `Host: tenant1.exchange.csc.nvidia.com`). The CSC exchange service returns a merged keyset containing public keys from all shards for that tenant. This allows workloads from any shard to authenticate against a central OpenBao instance, regardless of which shard's exchange service signed their JWT without having to understand Latinum's shard setup. The issuer field of each CPC exchange service all shares the same domain (e.g., `Host: tenant1.exchange.csc.nvidia.com`), and does not indicate the source shard despite each shard having a different signing key as the exposed public keyset is unified.
 
 Key benefits:
 - **Shard isolation**: Each CPC operates independently with its own key storage
@@ -479,34 +583,16 @@ Workloads must have these labels for SPIFFE identity:
 - `spiffe.nvidia.com/tenant`: Tenant identifier (e.g., `tenant1`)
 - `spiffe.nvidia.com/service`: Service name (e.g., `vmaas`, `internal`)
 
-## Make Targets
-
-```bash
-make install -j     # Setup both clusters
-make test           # Run integration tests  
-make clean          # Remove clusters
-make status         # Show component status
-make help           # Show all targets
-```
-
-| k1 | k2 |
-|----|-----|
-| `cluster` | `k2-cluster` |
-| `gateway` | `k2-gateway` |
-| `spire` | `k2-spire` |
-| `exchange-service` | `nginx` |
-| `bao` | `metadata-service` |
-| | `vm` |
-
 ## Troubleshooting
 
 ```bash
 make status           # Component overview
-make verify-nginx     # Test nginx -> OpenBao auth
-make verify-vm        # Test VM -> metadata service
+make spiffe-verify    # Standalone smoke test
+make verify-nginx     # Test nginx -> OpenBao auth (multi-cluster)
+make verify-vm        # Test VM -> metadata service (multi-cluster)
 
 # Logs
-kubectl logs -l app=spiffe-exchange-service -n spiffe-exchange --context kind-k1
+kubectl logs -l app=spiffe-exchange -n dsx-spiffe --context kind-k1
 kubectl logs -n tenant-tenant1 -l kubevirt.io/domain -c metadata-service --context kind-k2
 
 # VM console (ubuntu/ubuntu)

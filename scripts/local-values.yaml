@@ -1,0 +1,70 @@
+# Local Kind values for charts/spiffe/ umbrella chart.
+# Production-like single-cluster deploy on Kind with shared CNPG.
+
+global:
+  imageTag: "latest"
+  installAndUpgradeHooks:
+    enabled: true
+  spire:
+    trustDomain: "local.nvidia.com"
+    clusterName: "k1"
+    jwtIssuer: "spiffe://local.nvidia.com"
+
+spiffe-spire:
+  enabled: true
+  spire-crds:
+    enabled: false  # CRDs installed separately to avoid Helm ordering issues
+  spire:
+    spire-server:
+      controllerManager:
+        identities:
+          clusterSPIFFEIDs:
+            exchange-service:
+              type: raw
+              podSelector:
+                matchLabels:
+                  app: spiffe-exchange
+              spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/ns/{{ .PodMeta.Namespace }}/sa/{{ .PodSpec.ServiceAccountName }}"
+            pod-workloads:
+              type: raw
+              podSelector:
+                matchExpressions:
+                - key: spiffe.nvidia.com/tenant
+                  operator: Exists
+                - key: spiffe.nvidia.com/service
+                  operator: Exists
+              spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/tenant/{{ index .PodMeta.Labels \"spiffe.nvidia.com/tenant\" }}/service/{{ index .PodMeta.Labels \"spiffe.nvidia.com/service\" }}/pod/{{ .PodMeta.UID }}"
+
+spiffe-exchange:
+  enabled: true
+  image:
+    repository: spiffe-exchange-service
+    tag: latest
+    pullPolicy: Never
+  imagePullSecrets: []
+  exchange:
+    region: local
+    baseDomain: nvidia.com
+    logLevel: info
+    keystoreBackend: postgres
+    pgHost: "shared-pg-cluster-rw.cnpg-shared.svc.cluster.local"
+    pgPort: "5432"
+    pgDatabase: spiffe_exchange
+    pgUser: spiffe_exchange
+    pgPasswordSecret: "shared-pg-cluster-app"
+    pgPasswordKey: password
+  dbMigration:
+    enabled: true
+  encryptionKeyset:
+    autoGenerate: true
+
+spiffe-workload-support:
+  enabled: true
+  tokenFetcher:
+    image:
+      repository: spiffe-token-fetcher
+      tag: latest
+      pullPolicy: Never
+
+spiffe-vm-support:
+  enabled: false
