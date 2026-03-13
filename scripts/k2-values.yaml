@@ -1,0 +1,76 @@
+# k2 umbrella chart values — workload cluster (SPIRE only, no exchange)
+# Used by: make spiffe-k2 (multi-cluster demo)
+
+global:
+  installAndUpgradeHooks:
+    enabled: true
+  spire:
+    trustDomain: "k2.sjc-1.nvidia.com"
+    clusterName: "k2"
+    jwtIssuer: "spiffe://k2.sjc-1.nvidia.com"
+
+spiffe-spire:
+  enabled: true
+  spire-crds:
+    enabled: false  # CRDs installed separately (Helm ordering)
+  spire:
+    spire-server:
+      defaultX509SvidTTL: "5m"
+      defaultJwtSvidTTL: "5m"
+      controllerManager:
+        identities:
+          clusterSPIFFEIDs:
+            pod-workloads:
+              type: raw
+              podSelector:
+                matchExpressions:
+                - key: spiffe.nvidia.com/tenant
+                  operator: Exists
+                - key: spiffe.nvidia.com/service
+                  operator: Exists
+                - key: kubevirt.io
+                  operator: DoesNotExist
+              spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/tenant/{{ index .PodMeta.Labels \"spiffe.nvidia.com/tenant\" }}/service/{{ index .PodMeta.Labels \"spiffe.nvidia.com/service\" }}/pod/{{ .PodMeta.UID }}"
+            vm-workloads:
+              type: raw
+              podSelector:
+                matchLabels:
+                  kubevirt.io: virt-launcher
+                matchExpressions:
+                - key: spiffe.nvidia.com/tenant
+                  operator: Exists
+                - key: spiffe.nvidia.com/service
+                  operator: Exists
+              spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/tenant/{{ index .PodMeta.Labels \"spiffe.nvidia.com/tenant\" }}/service/{{ index .PodMeta.Labels \"spiffe.nvidia.com/service\" }}/vm/{{ .PodMeta.UID }}"
+      federation:
+        enabled: true
+        bundleEndpoint:
+          enabled: true
+          port: 8443
+        tls:
+          spire:
+            enabled: false
+          certManager:
+            enabled: true
+            issuer:
+              create: false
+            certificate:
+              dnsNames:
+                - gateway.k2.sjc-1.nvidia.com
+              issuerRef:
+                kind: ClusterIssuer
+                name: ca-issuer
+    spiffe-oidc-discovery-provider:
+      tls:
+        spire:
+          enabled: false
+
+# Exchange runs on k1 only
+spiffe-exchange:
+  enabled: false
+
+spiffe-workload-support:
+  enabled: false
+
+spiffe-vm-support:
+  enabled: false
