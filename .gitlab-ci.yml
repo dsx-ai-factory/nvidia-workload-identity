@@ -10,3 +10,14 @@ variables:
   PIPELINE_TRIGGER: "13"
 # dummy commit to trigger pipeline
 # trigger: update
+
+docker-build:spiffe-exchange-service:
+  variables:
+    DOCKER_IMAGE_NAME: spiffe-exchange-service
+    DOCKERFILE_PATH: Dockerfile.spiffe-exchange-service
+    DOCKER_PLATFORMS: "linux/amd64,linux/arm64"
+
+docker-push-ngc:spiffe-exchange-service:
+  variables:
+    DOCKER_IMAGE_NAME: spiffe-exchange-service
+    DOCKER_PLATFORMS: "linux/amd64,linux/arm64"
