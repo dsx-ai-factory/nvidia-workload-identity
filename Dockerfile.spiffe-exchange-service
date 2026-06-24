@@ -1,5 +1,8 @@
 # Build stage
-FROM golang:1.25 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25 AS builder
+
+ARG TARGETOS
+ARG TARGETARCH
 
 WORKDIR /app
 
@@ -12,14 +15,14 @@ RUN go mod download
 # Copy source code
 COPY cmd/spiffe-exchange-service/ ./cmd/spiffe-exchange-service/
 
-# Build the binary
-RUN go build -o spiffe-exchange-service ./cmd/spiffe-exchange-service
+# Build the binary (cross-compiled for the target arch)
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o spiffe-exchange-service ./cmd/spiffe-exchange-service
 
 # Final stage
 FROM debian:bookworm-slim
 
-# Install ca-certificates for TLS
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+# ca-certificates for TLS (copied from builder; no RUN to keep the stage emulation-free)
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
 WORKDIR /root/
 
