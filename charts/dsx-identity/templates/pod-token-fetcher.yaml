@@ -1,0 +1,57 @@
+{{- if .Values.podTokenFetcher.enabled }}
+{{- $imageTag := .Values.podTokenFetcher.image.tag | default .Values.global.imageTag | default .Chart.Version -}}
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: inject-dsx-token-fetcher
+  annotations:
+    policies.kyverno.io/title: Inject DSX Token Fetcher
+    policies.kyverno.io/category: SPIFFE
+spec:
+  background: false
+  rules:
+    - name: add-token-fetcher
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              annotations:
+                spiffe.nvidia.com/inject-dsx-token-fetcher: "true"
+              namespaceSelector:
+                {{- toYaml .Values.podTokenFetcher.policy.namespaceLabelSelector | nindent 16 }}
+      mutate:
+        patchStrategicMerge:
+          spec:
+            # Native sidecar: start before app containers and keep refreshing the token.
+            initContainers:
+              - name: dsx-token-fetcher
+                image: "{{ .Values.podTokenFetcher.image.repository }}:{{ $imageTag }}"
+                imagePullPolicy: {{ .Values.podTokenFetcher.image.pullPolicy }}
+                restartPolicy: Always
+                args:
+                  - --socket=unix:///var/run/secrets/spire.io/spire-agent.sock
+                  - --audience={{ .Values.podTokenFetcher.audience }}
+                  - --svid-hint=dsx-pod
+                  - --output={{ .Values.podTokenFetcher.outputPath }}
+                  - --exchange-service-url=http://spiffe-exchange.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.exchange.service.port }}
+                {{- with .Values.podTokenFetcher.startupProbe }}
+                startupProbe:
+                  {{- toYaml . | nindent 18 }}
+                {{- end }}
+                resources:
+                  {{- toYaml .Values.podTokenFetcher.resources | nindent 18 }}
+                volumeMounts:
+                  - name: spiffe-csi
+                    mountPath: /var/run/secrets/spire.io
+                    readOnly: true
+                  - name: dsx-token
+                    mountPath: /var/run/secrets/nvidia.com/dsx
+            volumes:
+              - name: spiffe-csi
+                csi:
+                  driver: csi.spiffe.io
+                  readOnly: true
+              - name: dsx-token
+                emptyDir: {}
+{{- end }}

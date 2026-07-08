@@ -1,0 +1,12 @@
+apiVersion: v2
+name: dsx-identity
+description: DSX identity plane with SPIRE, Exchange, and Pod and VM support
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+dependencies:
+  - name: spire
+    version: "0.27.1"
+    repository: "https://spiffe.github.io/helm-charts-hardened/"
+    condition: spire.enabled

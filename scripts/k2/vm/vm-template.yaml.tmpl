@@ -1,9 +1,33 @@
+# KubeVirt maps this no-RBAC account onto the virt-launcher Pod through the
+# vm-service-account volume below.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: VM_NAME_PLACEHOLDER
+automountServiceAccountToken: false
+---
+apiVersion: e2e.dsx-identity.nvidia.com/v1alpha1
+kind: LaunchLayerSourceFixture
+metadata:
+  name: e2e-vm-source-VM_NAME_PLACEHOLDER
+spec:
+  type: vm
+  tenantID: nca-0000000000000001
+  resourceID: VM_NAME_PLACEHOLDER
+  role: database
+  # This parent must match the VM nodeSelector and its dsx_imds host agent.
+  parentID: k2-worker
+  parentTenantID: nca-0000000000000001
+  holder:
+    namespace: tenant-TENANT_PLACEHOLDER
+    serviceAccount: VM_NAME_PLACEHOLDER
+---
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
 metadata:
   name: VM_NAME_PLACEHOLDER
   labels:
-    app: demo-vm
+    app: e2e-vm
     kubevirt.io/vm: VM_NAME_PLACEHOLDER
     tenant: TENANT_PLACEHOLDER
 spec:
@@ -12,13 +36,17 @@ spec:
     metadata:
       labels:
         kubevirt.io/domain: VM_NAME_PLACEHOLDER
-        app: demo-vm
+        app: e2e-vm
         tenant: TENANT_PLACEHOLDER
-        spiffe.nvidia.com/tenant: tenant1
-        spiffe.nvidia.com/service: vmaas
+        spiffe.nvidia.com/tenant: nca-0000000000000001
+        spiffe.nvidia.com/service: dsx
+        spiffe.nvidia.com/resource-type: vm
+        spiffe.nvidia.com/resource-id: VM_NAME_PLACEHOLDER
       annotations:
-        spiffe.nvidia.com/inject-mds: "true"
+        spiffe.nvidia.com/inject-dsx-imds: "true"
     spec:
+      nodeSelector:
+        kubernetes.io/hostname: k2-worker
       domain:
         cpu:
           cores: 2
@@ -30,9 +58,13 @@ spec:
           - disk:
               bus: virtio
             name: cloudinit
+          - disk:
+              bus: virtio
+              readonly: true
+            # KubeVirt requires a disk target for the serviceAccount volume.
+            name: vm-service-account
           interfaces:
           - name: default
-            # TEMPORARY: Using bridge:{} for Kind cluster compatibility
             bridge: {}
         features:
           acpi:
@@ -55,24 +87,20 @@ spec:
       - cloudInitNoCloud:
           userData: |
             #cloud-config
+            ssh_pwauth: false
             users:
               - name: ubuntu
                 sudo: ALL=(ALL) NOPASSWD:ALL
-                lock_passwd: false
-                plain_text_passwd: ubuntu
+                lock_passwd: true
                 shell: /bin/bash
-            package_update: true
-            packages:
-              - curl
-              - wget
-              - vim
-              - htop
-            runcmd:
-              - systemctl enable ssh
-              - echo "VM ready!" > /var/log/vm-ready.log
+                ssh_authorized_keys:
+                  - SSH_PUBLIC_KEY_PLACEHOLDER
           networkData: |
             version: 2
             ethernets:
               enp1s0:
                 dhcp4: true
         name: cloudinit
+      - name: vm-service-account
+        serviceAccount:
+          serviceAccountName: VM_NAME_PLACEHOLDER

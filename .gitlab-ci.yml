@@ -1,23 +1,382 @@
 include:
   - project: cds/cicd-pipelines
     ref: 2.0.0
-    file: /pipelines/ncp/dsx/dsx-spiffe-ci-pipeline.yml
-# trigger: dummy update
+    file: /templates/pipeline.yml
+  - component: $CI_SERVER_FQDN/cds/cds-components/helm-package@0.14.1
+    inputs:
+      job-name: helm-package-dsx-identity
+      chart-path: charts/dsx-identity
+      chart-version: $NEXT_VERSION
+      extra-repos:
+        - spiffe: https://spiffe.github.io/helm-charts-hardened/
+      extends: [.helm-package, .helm-package-rule]
+  - component: $CI_SERVER_FQDN/cds/cds-components/helm-push-ngc@0.14.1
+    inputs:
+      job-name: helm-push-ngc-dsx-identity
+      package-job: helm-package-dsx-identity
+      ngc-path: $NGC_HELM_PATH
+      ngc-force: true
+      ngc-key: $NGC_DSX_COMPONENTS_PUSH_KEY
+      extends: [.helm-push-ngc, .helm-push-ngc-rule]
 
 variables:
+  VAULT_ADDR: https://prod.vault.nvidia.com
+  VAULT_NAMESPACE: gfn-cds
+  VAULT_NAMESPACE_DUP: gfn-cds
+  VAULT_MOUNT_PATH: auth/jwt/gitlab
+  VAULT_SECRETS_DEST: ./secrets/secrets
+  PUSH_TO_NGC: "true"
+  NGC_REGISTRY_VAULT_KEY: dsx-components-dev
+  NGC_REGISTRY_REQUIRE_STG: "false"
+  NGC_IMAGE_PATH: "nvcr.io/0837451325059433/components-dev"
   NGC_HELM_PATH: "0837451325059433/components-dev"
   NGC_DSX_COMPONENTS_PUSH_KEY: "$NGC_REGISTRY_TOKEN"
+  NEED_SEMANTIC_RELEASE: "true"
+  PULSE_SCAN_VAULT_KEY: dsx
+  SLACK_CHANNEL_ID: C09VC8R4E92
+  SLACK_MESSAGE: |
+    CI pipeline complete.
+    Project: `${CI_PROJECT_NAME}` | Status: `${CI_JOB_STATUS}` | Branch: `${CI_COMMIT_REF_NAME}`
+    Pipeline: <${CI_PIPELINE_URL}|#${CI_PIPELINE_ID}> | By: `${CI_COMMIT_AUTHOR}`
+    Commit: `${CI_COMMIT_TITLE}`
   PIPELINE_TRIGGER: "13"
-# dummy commit to trigger pipeline
-# trigger: update
+  GIT_SUBMODULE_STRATEGY: recursive
+  KIND_VERSION: v0.32.0
+  KIND_DIND_SERVICE_HOST: docker
+  AL2023_KERNEL_IMAGE: public.ecr.aws/amazonlinux/amazonlinux:2023.9.20251110.1
+
+compute-next-release-version:
+  extends:
+    - .compute-next-release-version
+
+commitlint:
+  extends:
+    - .commitlint
+  variables:
+    GIT_DEPTH: "0"
+    GIT_SUBMODULE_STRATEGY: none
+
+.helm-package:
+  before_script:
+    - |
+      if [[ "${NEXT_VERSION:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+        HELM_CHART_VERSION="${NEXT_VERSION}"
+      else
+        HELM_CHART_VERSION="0.0.0-$(git rev-parse --short HEAD)"
+      fi
+      export HELM_CHART_VERSION
+      yq -i '.version = strenv(HELM_CHART_VERSION) | .appVersion = strenv(HELM_CHART_VERSION)' charts/dsx-identity/Chart.yaml
+      ./scripts/setup-helm-repos.sh
+      helm dependency build --skip-refresh charts/dsx-identity
+
+.helm-package-rule:
+  rules:
+    - !reference [.rules-push-or-mr, rules]
+
+.helm-push-ngc-rule:
+  rules:
+    - !reference [.rules-push-or-mr-manual, rules]
+
+.helm-push-ngc:
+  stage: publish
+  extends:
+    - .nvcf-cds-runner-tags
+  variables:
+    NGC_DSX_COMPONENTS_PUSH_KEY: $NGC_REGISTRY_TOKEN
+  needs:
+    - helm-package-dsx-identity
+
+validate:
+  stage: test
+  image: ${NVCF_CICD_IMAGE}
+  extends:
+    - .nvcf-cds-runner-tags
+  script:
+    - make validate
+  rules:
+    - !reference [.rules-push-or-mr, rules]
+
+e2e:
+  # The required E2E gate runs before build/package stages so a failed system
+  # test cannot race artifact publication.
+  stage: test
+  image: ${NVCF_CICD_IMAGE}
+  extends:
+    - .nvcf-cds-runner-large-dind-tags
+    - .dind-service
+  timeout: 4h
+  needs:
+    - validate
+  before_script:
+    - curl -fsSL -o /tmp/kind "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
+    - echo '50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54  /tmp/kind' | sha256sum -c -
+    - install -m 0755 /tmp/kind /usr/local/bin/kind
+    - BAO_CONTAINER_ID=$(docker create quay.io/openbao/openbao:2.4.0)
+    - docker cp "${BAO_CONTAINER_ID}:/bin/bao" /usr/local/bin/bao
+    - docker rm "${BAO_CONTAINER_ID}"
+    - kind version
+    - bao version
+    - docker info
+    # Preload matching AL2023 modules into the host kernel shared by DinD and
+    # Kind before creating clusters.
+    - |
+      docker run --rm --privileged "${AL2023_KERNEL_IMAGE}" sh -ceu '
+        dnf -y -q install kmod "kernel-$(uname -r)"
+        depmod -a "$(uname -r)"
+        modprobe openvswitch
+        modprobe vport-geneve
+        modprobe nft_socket
+        modprobe tun
+        modprobe vhost_net
+        test -d /sys/module/openvswitch
+        test -d /sys/module/nft_socket
+      '
+  script:
+    - make identity-deploy
+    - make identity-verify
+    - make identity-clean
+    - make -j install
+    - make test
+  after_script:
+    - make clean
+  rules:
+    - !reference [.rules-push-or-mr, rules]
+
+.container-build:
+  stage: build
+  extends:
+    - .build-image-dind
+
+docker-build:dsx-token-fetcher:
+  extends: [.container-build]
+  variables:
+    DOCKER_IMAGE_NAME: dsx-token-fetcher
+    DOCKERFILE_PATH: Dockerfile.dsx-token-fetcher
 
 docker-build:spiffe-exchange-service:
+  extends: [.container-build]
   variables:
     DOCKER_IMAGE_NAME: spiffe-exchange-service
     DOCKERFILE_PATH: Dockerfile.spiffe-exchange-service
     DOCKER_PLATFORMS: "linux/amd64,linux/arm64"
 
+docker-build:metadata-service:
+  extends: [.container-build]
+  variables:
+    DOCKER_IMAGE_NAME: metadata-service
+    DOCKERFILE_PATH: Dockerfile.metadata-service
+
+docker-build:dsx-imds-network-setup:
+  extends: [.container-build]
+  variables:
+    DOCKER_IMAGE_NAME: dsx-imds-network-setup
+    DOCKERFILE_PATH: Dockerfile.dsx-imds-network-setup
+
+docker-build:exchange-proxy-csi:
+  extends: [.container-build]
+  variables:
+    DOCKER_IMAGE_NAME: exchange-proxy-csi
+    DOCKERFILE_PATH: Dockerfile.exchange-proxy-csi
+
+docker-build:dsx-identity-controller:
+  extends: [.container-build]
+  variables:
+    DOCKER_IMAGE_NAME: dsx-identity-controller
+    DOCKERFILE_PATH: Dockerfile.dsx-identity-controller
+
+docker-build:dsx-imds-node-attestor-server:
+  extends: [.container-build]
+  variables:
+    DOCKER_IMAGE_NAME: dsx-imds-node-attestor-server
+    DOCKERFILE_PATH: Dockerfile.dsx-imds-node-attestor-server
+
+docker-build:dsx-imds-node-attestor-agent:
+  extends: [.container-build]
+  variables:
+    DOCKER_IMAGE_NAME: dsx-imds-node-attestor-agent
+    DOCKERFILE_PATH: Dockerfile.dsx-imds-node-attestor-agent
+
+pulse-scan:dsx-token-fetcher:
+  extends:
+    - .pulse-scan:container
+  needs:
+    - job: docker-build:dsx-token-fetcher
+      artifacts: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-token-fetcher
+
+pulse-scan:spiffe-exchange-service:
+  extends:
+    - .pulse-scan:container
+  needs:
+    - job: docker-build:spiffe-exchange-service
+      artifacts: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: spiffe-exchange-service
+
+pulse-scan:metadata-service:
+  extends:
+    - .pulse-scan:container
+  needs:
+    - job: docker-build:metadata-service
+      artifacts: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: metadata-service
+
+pulse-scan:dsx-imds-network-setup:
+  extends:
+    - .pulse-scan:container
+  needs:
+    - job: docker-build:dsx-imds-network-setup
+      artifacts: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-imds-network-setup
+
+pulse-scan:exchange-proxy-csi:
+  extends:
+    - .pulse-scan:container
+  needs:
+    - job: docker-build:exchange-proxy-csi
+      artifacts: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: exchange-proxy-csi
+
+pulse-scan:dsx-identity-controller:
+  extends:
+    - .pulse-scan:container
+  needs:
+    - job: docker-build:dsx-identity-controller
+      artifacts: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-identity-controller
+
+pulse-scan:dsx-imds-node-attestor-server:
+  extends:
+    - .pulse-scan:container
+  needs:
+    - job: docker-build:dsx-imds-node-attestor-server
+      artifacts: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-imds-node-attestor-server
+
+pulse-scan:dsx-imds-node-attestor-agent:
+  extends:
+    - .pulse-scan:container
+  needs:
+    - job: docker-build:dsx-imds-node-attestor-agent
+      artifacts: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-imds-node-attestor-agent
+
+docker-push-ngc:dsx-token-fetcher:
+  extends:
+    - .docker-publish
+  needs:
+    - job: docker-build:dsx-token-fetcher
+      artifacts: true
+    - job: pulse-scan:dsx-token-fetcher
+      optional: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-token-fetcher
+
 docker-push-ngc:spiffe-exchange-service:
+  extends:
+    - .docker-publish
+  needs:
+    - job: docker-build:spiffe-exchange-service
+      artifacts: true
+    - job: pulse-scan:spiffe-exchange-service
+      optional: true
+    - compute-next-release-version
   variables:
     DOCKER_IMAGE_NAME: spiffe-exchange-service
     DOCKER_PLATFORMS: "linux/amd64,linux/arm64"
+
+docker-push-ngc:metadata-service:
+  extends:
+    - .docker-publish
+  needs:
+    - job: docker-build:metadata-service
+      artifacts: true
+    - job: pulse-scan:metadata-service
+      optional: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: metadata-service
+
+docker-push-ngc:dsx-imds-network-setup:
+  extends:
+    - .docker-publish
+  needs:
+    - job: docker-build:dsx-imds-network-setup
+      artifacts: true
+    - job: pulse-scan:dsx-imds-network-setup
+      optional: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-imds-network-setup
+
+docker-push-ngc:exchange-proxy-csi:
+  extends:
+    - .docker-publish
+  needs:
+    - job: docker-build:exchange-proxy-csi
+      artifacts: true
+    - job: pulse-scan:exchange-proxy-csi
+      optional: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: exchange-proxy-csi
+
+docker-push-ngc:dsx-identity-controller:
+  extends:
+    - .docker-publish
+  needs:
+    - job: docker-build:dsx-identity-controller
+      artifacts: true
+    - job: pulse-scan:dsx-identity-controller
+      optional: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-identity-controller
+
+docker-push-ngc:dsx-imds-node-attestor-server:
+  extends:
+    - .docker-publish
+  needs:
+    - job: docker-build:dsx-imds-node-attestor-server
+      artifacts: true
+    - job: pulse-scan:dsx-imds-node-attestor-server
+      optional: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-imds-node-attestor-server
+
+docker-push-ngc:dsx-imds-node-attestor-agent:
+  extends:
+    - .docker-publish
+  needs:
+    - job: docker-build:dsx-imds-node-attestor-agent
+      artifacts: true
+    - job: pulse-scan:dsx-imds-node-attestor-agent
+      optional: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-imds-node-attestor-agent
+
+semantic-release:
+  extends:
+    - .semantic-release
+
+slack-notification:
+  extends:
+    - .slack-notification

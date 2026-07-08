@@ -1,3 +1,6 @@
 [submodule "third-party/ovn-kubernetes"]
 	path = third-party/ovn-kubernetes
 	url = https://github.com/ovn-org/ovn-kubernetes.git
+[submodule "third-party/dsx-exchange"]
+	path = third-party/dsx-exchange
+	url = https://github.com/NVIDIA/dsx-exchange.git

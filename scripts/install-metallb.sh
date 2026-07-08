@@ -21,40 +21,11 @@ CONTEXT="kind-${CLUSTER_NAME}"
 
 source "${PROJECT_ROOT}/scripts/common.sh"
 
-MANIFEST_CACHE="/tmp/metallb-${METALLB_VERSION}-manifest.yaml"
-
-get_manifest() {
-    if [[ ! -f "$MANIFEST_CACHE" ]]; then
-        curl -sL "https://raw.githubusercontent.com/metallb/metallb/${METALLB_VERSION}/config/manifests/metallb-native.yaml" > "$MANIFEST_CACHE"
-    fi
-    cat "$MANIFEST_CACHE"
-}
+METALLB_MANIFEST=""
 
 preload_images() {
     log_info "Preloading MetalLB images into cluster..."
-    
-    # Fetch the manifest and extract image references
-    local manifest_output
-    manifest_output=$(get_manifest)
-    
-    # Extract unique image references
-    local images
-    images=$(echo "$manifest_output" | grep -E '^\s+image:\s+' | \
-        awk '{print $2}' | tr -d '"' | sort -u)
-    
-    if [[ -z "$images" ]]; then
-        log_info "No images found in manifest, skipping preload"
-        return 0
-    fi
-    
-    while IFS= read -r img; do
-        [[ -z "$img" ]] && continue
-        if ! "${PROJECT_ROOT}/scripts/kind-load-image.sh" "$img" "${CLUSTER_NAME}"; then
-            log_error "Failed to load image: $img"
-            return 1
-        fi
-    done <<< "$images"
-    
+    preload_manifest_images "${CLUSTER_NAME}" <<<"${METALLB_MANIFEST}"
     log_success "Images preloaded"
 }
 
@@ -68,7 +39,7 @@ get_docker_network_subnet() {
 install_metallb() {
     log_info "Installing MetalLB ${METALLB_VERSION}..."
     
-    get_manifest | kubectl apply -f - --context "${CONTEXT}"
+    kubectl apply -f - --context "${CONTEXT}" <<<"${METALLB_MANIFEST}"
     
     log_info "Waiting for MetalLB controller..."
     kubectl rollout status deployment/controller -n metallb-system \
@@ -117,6 +88,8 @@ display_info() {
 
 main() {
     validate_context_exists "${CONTEXT}"
+    METALLB_MANIFEST=$(curl -fsSL \
+        "https://raw.githubusercontent.com/metallb/metallb/${METALLB_VERSION}/config/manifests/metallb-native.yaml")
     preload_images
     install_metallb
     configure_ip_pool

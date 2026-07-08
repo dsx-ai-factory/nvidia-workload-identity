@@ -15,15 +15,13 @@ RUN go mod download
 
 # Copy source code
 COPY cmd/metadata-service/ ./cmd/metadata-service/
+COPY internal/ ./internal/
 
 # Build the binary
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o metadata-service ./cmd/metadata-service
 
 # Final stage
 FROM debian:bookworm-slim
-
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
-
 
 WORKDIR /root/
 

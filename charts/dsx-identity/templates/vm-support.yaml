@@ -1,0 +1,193 @@
+{{- if .Values.vmSupport.enabled }}
+{{- $imageTag := .Values.global.imageTag | default .Chart.Version -}}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.vmSupport.proxyNamespace }}
+  labels:
+    app.kubernetes.io/name: exchange-proxy-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: exchange-proxy-csi
+  namespace: {{ .Values.vmSupport.proxyNamespace }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: exchange-proxy-csi
+  namespace: {{ .Values.vmSupport.proxyNamespace }}
+  labels:
+    app: exchange-proxy-csi
+spec:
+  selector:
+    matchLabels:
+      app: exchange-proxy-csi
+  template:
+    metadata:
+      labels:
+        app: exchange-proxy-csi
+    spec:
+      serviceAccountName: exchange-proxy-csi
+      containers:
+        - name: exchange-proxy
+          image: "{{ .Values.vmSupport.socat.image.repository }}:{{ .Values.vmSupport.socat.image.tag }}"
+          imagePullPolicy: {{ .Values.vmSupport.socat.image.pullPolicy }}
+          args:
+            # CSI consumers share no supplemental group, so any container UID must connect.
+            - UNIX-LISTEN:/run/exchange-proxy/exchange.sock,fork,mode=0777
+            - TCP:spiffe-exchange.{{ .Release.Namespace }}.svc.cluster.local.:{{ .Values.exchange.service.port }}
+          resources:
+            {{- toYaml .Values.vmSupport.resources.proxy | nindent 12 }}
+          volumeMounts:
+            - name: exchange-socket-dir
+              mountPath: /run/exchange-proxy
+        - name: exchange-proxy-csi
+          image: "{{ .Values.vmSupport.exchangeProxyCsi.image.repository }}:{{ .Values.vmSupport.exchangeProxyCsi.image.tag | default $imageTag }}"
+          imagePullPolicy: {{ .Values.vmSupport.exchangeProxyCsi.image.pullPolicy }}
+          args:
+            - --socket-dir=/run/exchange-proxy
+            - --csi-socket-path=/exchange-proxy-csi/csi.sock
+          env:
+            - name: MY_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          # NodePublishVolume requires bind mounts into kubelet's pod tree.
+          securityContext:
+            privileged: true
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            {{- toYaml .Values.vmSupport.resources.driver | nindent 12 }}
+          volumeMounts:
+            - name: exchange-socket-dir
+              mountPath: /run/exchange-proxy
+              readOnly: true
+            - name: csi-socket-dir
+              mountPath: /exchange-proxy-csi
+            - name: mountpoint-dir
+              mountPath: /var/lib/kubelet/pods
+              mountPropagation: Bidirectional
+        - name: node-driver-registrar
+          image: "{{ .Values.vmSupport.nodeDriverRegistrar.image.repository }}:{{ .Values.vmSupport.nodeDriverRegistrar.image.tag }}"
+          imagePullPolicy: {{ .Values.vmSupport.nodeDriverRegistrar.image.pullPolicy }}
+          args:
+            - --csi-address=/exchange-proxy-csi/csi.sock
+            - --kubelet-registration-path=/var/lib/kubelet/plugins/csi.exchange.nvidia.com/csi.sock
+          resources:
+            {{- toYaml .Values.vmSupport.resources.registrar | nindent 12 }}
+          volumeMounts:
+            - name: csi-socket-dir
+              mountPath: /exchange-proxy-csi
+            - name: kubelet-plugin-registration-dir
+              mountPath: /registration
+      volumes:
+        - name: exchange-socket-dir
+          emptyDir: {}
+        - name: csi-socket-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins/csi.exchange.nvidia.com
+            type: DirectoryOrCreate
+        - name: mountpoint-dir
+          hostPath:
+            path: /var/lib/kubelet/pods
+            type: Directory
+        - name: kubelet-plugin-registration-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins_registry
+            type: Directory
+---
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: csi.exchange.nvidia.com
+spec:
+  attachRequired: false
+  podInfoOnMount: true
+  fsGroupPolicy: None
+  volumeLifecycleModes:
+    - Ephemeral
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: inject-dsx-imds-sidecars
+  annotations:
+    policies.kyverno.io/title: Inject DSX IMDS Sidecars
+    policies.kyverno.io/category: SPIFFE
+spec:
+  background: false
+  rules:
+    - name: add-dsx-imds-sidecars
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              annotations:
+                {{ .Values.vmSupport.policy.annotation }}: "true"
+              namespaceSelector:
+                {{- toYaml .Values.vmSupport.policy.namespaceSelector | nindent 16 }}
+              selector:
+                {{- toYaml .Values.vmSupport.policy.podSelector | nindent 16 }}
+            subjects:
+              - kind: ServiceAccount
+                name: {{ .Values.vmSupport.policy.serviceAccount.name }}
+                namespace: {{ .Values.vmSupport.policy.serviceAccount.namespace }}
+      mutate:
+        patchStrategicMerge:
+          spec:
+            containers:
+              - name: dsx-imds-network-setup
+                image: "{{ .Values.vmSupport.imdsNetworkSetup.image.repository }}:{{ .Values.vmSupport.imdsNetworkSetup.image.tag | default $imageTag }}"
+                imagePullPolicy: {{ .Values.vmSupport.imdsNetworkSetup.image.pullPolicy }}
+                resources:
+                  {{- toYaml .Values.vmSupport.resources.networkSetup | nindent 18 }}
+                securityContext:
+                  runAsUser: 0
+                  runAsNonRoot: false
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                      - ALL
+                    add:
+                      - NET_ADMIN
+              - name: metadata-service
+                image: "{{ .Values.vmSupport.metadataService.image.repository }}:{{ .Values.vmSupport.metadataService.image.tag | default $imageTag }}"
+                imagePullPolicy: {{ .Values.vmSupport.metadataService.image.pullPolicy }}
+                args:
+                  - --listen=:80
+                  - --log-level={{ .Values.vmSupport.policy.logLevel }}
+                  - --svid-hint={{ .Values.vmSupport.policy.svidHint }}
+                  - --exchange-socket=/var/run/secrets/exchange.io/exchange.sock
+                ports:
+                  - name: http
+                    containerPort: 80
+                resources:
+                  {{- toYaml .Values.vmSupport.resources.metadata | nindent 18 }}
+                securityContext:
+                  capabilities:
+                    add:
+                      - NET_BIND_SERVICE
+                volumeMounts:
+                  - name: spiffe-csi
+                    mountPath: /var/run/secrets/spire.io
+                    readOnly: true
+                  - name: exchange-csi
+                    mountPath: /var/run/secrets/exchange.io
+                    readOnly: true
+            volumes:
+              - name: spiffe-csi
+                csi:
+                  # VM identities come from the dsx_imds-attested agent's CSI driver.
+                  driver: upstream.csi.spiffe.io
+                  readOnly: true
+              - name: exchange-csi
+                csi:
+                  driver: csi.exchange.nvidia.com
+                  readOnly: true
+{{- end }}

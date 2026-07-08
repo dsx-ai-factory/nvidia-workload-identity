@@ -1,0 +1,81 @@
+global:
+  eventBus:
+    clusterType: csc
+    cpcIds: []
+    mtls:
+      enabled: false
+    auth:
+      permissions:
+        # Exchange clients use OAuth2. A null value disables anonymous fallback.
+        noauth: null
+        oauth2:
+          spiffe-exchange:
+            azp: spiffe-exchange
+            required_scope: mqtt
+            account: CSC
+            permissions:
+              pub:
+                allow:
+                  # NATS converts MQTT "/" separators to "." before applying subject permissions.
+                  - "spiffe-exchange.>"
+              sub:
+                allow:
+                  - "spiffe-exchange.>"
+    gateway:
+      routes:
+        mqtt:
+          enabled: false
+          kind: TCPRoute
+          gatewayName: k1-gateway
+          gatewayNamespace: envoy-gateway-system
+          sectionName: event-bus-mqtt
+        natsClient:
+          enabled: false
+        natsLeafnode:
+          enabled: false
+        mqttMtls:
+          enabled: false
+    mqttStreams:
+      replicas: 1
+      storage: memory
+      maxAge: "10m"
+
+nats:
+  config:
+    cluster:
+      enabled: false
+      replicas: 1
+    mqtt:
+      merge:
+        stream_replicas: 1
+  container:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+auth-callout:
+  fullnameOverride: auth-callout
+  image:
+    repository: auth-callout
+    tag: "v2.6.0"
+    pullPolicy: Never
+  serviceConfig:
+    jwks:
+      url: http://keycloak-service.dsx-identity.svc.cluster.local:8080/realms/event-bus/protocol/openid-connect/certs
+      issuer: http://keycloak-service.dsx-identity.svc.cluster.local:8080/realms/event-bus
+      audience: dsx-exchange
+    observability:
+      tracing:
+        enabled: false
+  serviceMonitor:
+    enabled: false
+
+surveyor:
+  config:
+    expectedServers: 1
+  serviceMonitor:
+    enabled: false

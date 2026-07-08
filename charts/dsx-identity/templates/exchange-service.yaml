@@ -1,0 +1,17 @@
+{{- if .Values.exchange.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: spiffe-exchange
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: spiffe-exchange
+spec:
+  selector:
+    app: spiffe-exchange
+  ports:
+    - name: http
+      port: {{ .Values.exchange.service.port }}
+      targetPort: {{ .Values.exchange.service.port }}
+  type: {{ .Values.exchange.service.type }}
+{{- end }}

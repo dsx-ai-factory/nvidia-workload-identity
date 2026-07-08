@@ -1,2 +1,0 @@
-spiffe-vm-support chart installed.
-Enable this chart only when VM/KubeVirt support is needed.

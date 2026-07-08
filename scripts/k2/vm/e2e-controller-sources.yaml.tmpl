@@ -1,0 +1,19 @@
+apiVersion: provisioning.dpu.nvidia.com/v1alpha1
+kind: DPU
+metadata:
+  name: DPU_NAME_PLACEHOLDER
+  namespace: TENANT_NAMESPACE_PLACEHOLDER
+---
+apiVersion: e2e.dsx-identity.nvidia.com/v1alpha1
+kind: LaunchLayerSourceFixture
+metadata:
+  name: HOST_SOURCE_NAME_PLACEHOLDER
+  namespace: TENANT_NAMESPACE_PLACEHOLDER
+spec:
+  type: host
+  tenantID: nca-0000000000000001
+  resourceID: HOST_SOURCE_NAME_PLACEHOLDER
+  parentID: DPU_NAME_PLACEHOLDER
+  holder:
+    namespace: dsx-identity
+    serviceAccount: dsx-identity-dsx-imds-agent

@@ -1,8 +1,8 @@
-# Local Kind values for charts/spiffe/ umbrella chart.
-# Production-like single-cluster deploy on Kind with shared CNPG.
+# Local Kind values for the DSX identity umbrella.
+# k1 smoke profile for Kind.
 
 global:
-  imageTag: "latest"
+  imageTag: "0.1.0"
   installAndUpgradeHooks:
     enabled: true
   spire:
@@ -10,61 +10,65 @@ global:
     clusterName: "k1"
     jwtIssuer: "spiffe://local.nvidia.com"
 
-spiffe-spire:
-  enabled: true
-  spire-crds:
-    enabled: false  # CRDs installed separately to avoid Helm ordering issues
-  spire:
-    spire-server:
-      controllerManager:
-        identities:
-          clusterSPIFFEIDs:
-            exchange-service:
-              type: raw
-              podSelector:
-                matchLabels:
-                  app: spiffe-exchange
-              spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/ns/{{ .PodMeta.Namespace }}/sa/{{ .PodSpec.ServiceAccountName }}"
-            pod-workloads:
-              type: raw
-              podSelector:
-                matchExpressions:
-                - key: spiffe.nvidia.com/tenant
-                  operator: Exists
-                - key: spiffe.nvidia.com/service
-                  operator: Exists
-              spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/tenant/{{ index .PodMeta.Labels \"spiffe.nvidia.com/tenant\" }}/service/{{ index .PodMeta.Labels \"spiffe.nvidia.com/service\" }}/pod/{{ .PodMeta.UID }}"
+spire:
+  spire-server:
+    controllerManager:
+      identities:
+        clusterSPIFFEIDs:
+          exchange-service:
+            type: raw
+            podSelector:
+              matchLabels:
+                app: spiffe-exchange
+            spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/ns/{{ .PodMeta.Namespace }}/sa/{{ .PodSpec.ServiceAccountName }}"
+          dsx-pod:
+            type: raw
+            podSelector:
+              matchExpressions:
+              - key: spiffe.nvidia.com/tenant
+                operator: Exists
+              - key: spiffe.nvidia.com/service
+                operator: In
+                values:
+                - dsx
+              - key: spiffe.nvidia.com/resource-type
+                operator: In
+                values:
+                - dpu
+                - host
+                - vm
+              - key: spiffe.nvidia.com/resource-id
+                operator: Exists
+            spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/tenant/{{ index .PodMeta.Labels \"spiffe.nvidia.com/tenant\" }}/service/dsx/{{ index .PodMeta.Labels \"spiffe.nvidia.com/resource-type\" }}/{{ index .PodMeta.Labels \"spiffe.nvidia.com/resource-id\" }}/pod/{{ .PodMeta.UID }}"
 
-spiffe-exchange:
+exchange:
   enabled: true
   image:
     repository: spiffe-exchange-service
-    tag: latest
+    tag: "0.1.0"
     pullPolicy: Never
   imagePullSecrets: []
-  exchange:
-    region: local
-    baseDomain: nvidia.com
-    logLevel: info
-    keystoreBackend: postgres
-    pgHost: "shared-pg-cluster-rw.cnpg-shared.svc.cluster.local"
-    pgPort: "5432"
-    pgDatabase: spiffe_exchange
-    pgUser: spiffe_exchange
-    pgPasswordSecret: "shared-pg-cluster-app"
-    pgPasswordKey: password
-  dbMigration:
-    enabled: true
-  encryptionKeyset:
-    autoGenerate: true
+  jwksURL: http://spiffe-exchange.dsx-identity.svc.cluster.local:8080/.well-known/jwks.json
+  logLevel: info
+  shardID: k1
+  signingKeysetSecret: spiffe-exchange-signing-keyset
+  mqtt:
+    brokerURL: tcp://nats:1883
+    oauth2:
+      tokenURL: http://keycloak-service.dsx-identity.svc.cluster.local:8080/realms/event-bus/protocol/openid-connect/token
+      clientID: spiffe-exchange
+      clientSecretSecret: spiffe-exchange-mqtt-oauth
+      clientSecretKey: client-secret
 
-spiffe-workload-support:
+podTokenFetcher:
   enabled: true
-  tokenFetcher:
-    image:
-      repository: spiffe-token-fetcher
-      tag: latest
-      pullPolicy: Never
+  image:
+    repository: dsx-token-fetcher
+    tag: "0.1.0"
+    pullPolicy: Never
 
-spiffe-vm-support:
+vmSupport:
+  enabled: false
+
+identityController:
   enabled: false

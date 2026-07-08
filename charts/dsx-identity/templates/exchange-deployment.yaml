@@ -1,0 +1,114 @@
+{{- $trustDomain := required "global.spire.trustDomain is required" .Values.global.spire.trustDomain -}}
+{{- $clusterName := required "global.spire.clusterName is required" .Values.global.spire.clusterName -}}
+{{- if .Values.exchange.enabled }}
+{{- $imageTag := .Values.exchange.image.tag | default .Values.global.imageTag | default .Chart.Version -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spiffe-exchange
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: spiffe-exchange
+spec:
+  replicas: {{ .Values.exchange.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: spiffe-exchange
+  template:
+    metadata:
+      labels:
+        app: spiffe-exchange
+    spec:
+      serviceAccountName: spiffe-exchange-sa
+      {{- with .Values.exchange.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: spiffe-exchange
+          image: "{{ .Values.exchange.image.repository }}:{{ $imageTag }}"
+          imagePullPolicy: {{ .Values.exchange.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.exchange.service.port }}
+          args:
+            - --listen=:{{ .Values.exchange.service.port }}
+            - --socket=unix:///var/run/secrets/spire.io/spire-agent.sock
+            - --jwks-url={{ required "exchange.jwksURL is required" .Values.exchange.jwksURL }}
+            - --signing-jwks=/run/secrets/spiffe-exchange/signing-jwks.json
+            - --active-kid=/run/secrets/spiffe-exchange/active-kid
+            - --shard-id={{ required "exchange.shardID is required" .Values.exchange.shardID }}
+            - --mqtt-broker={{ required "exchange.mqtt.brokerURL is required" .Values.exchange.mqtt.brokerURL }}
+            # Pod name keeps every active replica on a separate MQTT session.
+            - --mqtt-client-id=spiffe-exchange-$(POD_NAME)
+            - --public-key-lease-ttl={{ .Values.exchange.publicKeyLeaseTTL }}
+            - --mqtt-oauth-token-url={{ required "exchange.mqtt.oauth2.tokenURL is required" .Values.exchange.mqtt.oauth2.tokenURL }}
+            - --mqtt-oauth-client-id={{ required "exchange.mqtt.oauth2.clientID is required" .Values.exchange.mqtt.oauth2.clientID }}
+            - --mqtt-oauth-client-secret=/run/secrets/spiffe-exchange-mqtt/client-secret
+            - --log-level={{ .Values.exchange.logLevel }}
+          resources:
+            {{- toYaml .Values.exchange.resources | nindent 12 }}
+          volumeMounts:
+            - name: spiffe-csi
+              mountPath: /var/run/secrets/spire.io
+              readOnly: true
+            - name: signing-keyset
+              mountPath: /run/secrets/spiffe-exchange
+              readOnly: true
+            - name: mqtt-oauth
+              mountPath: /run/secrets/spiffe-exchange-mqtt
+              readOnly: true
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          startupProbe:
+            httpGet:
+              path: /live
+              port: {{ .Values.exchange.service.port }}
+            periodSeconds: 1
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: {{ .Values.exchange.service.port }}
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: {{ .Values.exchange.service.port }}
+            periodSeconds: 10
+      volumes:
+        - name: spiffe-csi
+          csi:
+            driver: csi.spiffe.io
+            readOnly: true
+        - name: signing-keyset
+          secret:
+            secretName: {{ required "exchange.signingKeysetSecret is required" .Values.exchange.signingKeysetSecret }}
+            defaultMode: 0400
+        - name: mqtt-oauth
+          secret:
+            secretName: {{ required "exchange.mqtt.oauth2.clientSecretSecret is required" .Values.exchange.mqtt.oauth2.clientSecretSecret }}
+            defaultMode: 0400
+            items:
+              - key: {{ .Values.exchange.mqtt.oauth2.clientSecretKey }}
+                path: client-secret
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: spiffe-exchange
+  namespace: {{ .Release.Namespace }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: spiffe-exchange
+{{- end }}

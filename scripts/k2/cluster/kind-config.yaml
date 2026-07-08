@@ -1,11 +1,11 @@
-# Kind cluster configuration for k2 (secondary cluster)
-# Uses OVN-Kubernetes CNI for UDN support (required by metadata service and VM workloads)
+# Kind cluster configuration for the k2 Data Hall
+# Uses OVN-Kubernetes CNI for UDN support required by metadata-service and VM Pods.
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 name: k2
 nodes:
 - role: control-plane
-  image: kindest/node:v1.31.9
+  image: kindest/node:v1.34.8@sha256:02722c2dedddcfc00febf5d27fbeb9b7b2c14294c82109ff4a85d89ac9ba3256
   kubeadmConfigPatches:
   - |
     kind: InitConfiguration
@@ -13,7 +13,7 @@ nodes:
       kubeletExtraArgs:
         node-labels: "spiffe.io/spire-node=true"
 - role: worker
-  image: kindest/node:v1.31.9
+  image: kindest/node:v1.34.8@sha256:02722c2dedddcfc00febf5d27fbeb9b7b2c14294c82109ff4a85d89ac9ba3256
   kubeadmConfigPatches:
   - |
     kind: JoinConfiguration

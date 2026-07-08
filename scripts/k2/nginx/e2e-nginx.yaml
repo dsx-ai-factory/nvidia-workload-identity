@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dsx-identity-e2e
+  labels:
+    # Kyverno limits Pod token-fetcher injection to explicitly enabled namespaces.
+    spiffe.nvidia.com/enabled: "true"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: e2e-nginx
+  namespace: dsx-identity-e2e
+  annotations:
+    spiffe.nvidia.com/inject-dsx-token-fetcher: "true"
+  labels:
+    app: e2e-nginx
+    spiffe.nvidia.com/tenant: nca-0000000000000001
+    spiffe.nvidia.com/service: dsx
+    spiffe.nvidia.com/resource-type: host
+    spiffe.nvidia.com/resource-id: e2e-nginx
+spec:
+  # Reduce ndots from default 5 to 2 to avoid slow DNS lookups.
+  # With ndots:5, hostnames with <5 dots trigger search suffix expansion,
+  # causing queries to forward to external DNS and timeout before resolving.
+  dnsConfig:
+    options:
+    - name: ndots
+      value: "2"
+  containers:
+  - name: nginx
+    image: nginx:1.27.4-alpine
+    ports:
+    - containerPort: 80
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+    volumeMounts:
+    - name: dsx-token
+      mountPath: /var/run/secrets/nvidia.com/dsx
+      readOnly: true
+  restartPolicy: Never

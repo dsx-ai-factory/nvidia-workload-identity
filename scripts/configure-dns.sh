@@ -1,5 +1,5 @@
 #!/bin/bash
-# configure-dns.sh - Configure cross-cluster DNS for both gateways
+# configure-dns.sh - Resolve the k1 Gateway from the k2 shard.
 
 set -euo pipefail
 
@@ -10,24 +10,16 @@ source "${PROJECT_ROOT}/scripts/common.sh"
 
 K1_CONTEXT="kind-k1"
 K2_CONTEXT="kind-k2"
+CHANGES_MADE=false
 
-# Get k1 gateway IP from Gateway resource
 get_k1_gateway_ip() {
     kubectl get gateway k1-gateway -n envoy-gateway-system \
         -o jsonpath='{.status.addresses[0].value}' \
         --context "${K1_CONTEXT}" 2>/dev/null || echo ""
 }
 
-# Get k2 gateway IP from Gateway resource
-get_k2_gateway_ip() {
-    kubectl get gateway k2-gateway -n envoy-gateway-system \
-        -o jsonpath='{.status.addresses[0].value}' \
-        --context "${K2_CONTEXT}" 2>/dev/null || echo ""
-}
-
 # Adds a DNS entry to CoreDNS hosts plugin
 # Usage: add_coredns_host <hostname> <ip> <context>
-# Returns 0 if change was made, 1 if already configured
 add_coredns_host() {
     local hostname="$1"
     local ip="$2"
@@ -38,21 +30,30 @@ add_coredns_host() {
     local corefile
     corefile=$(kubectl get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}' --context "${context}")
     
-    # Check if already configured
-    if echo "$corefile" | grep -q "${hostname}"; then
+    # Check if the current address is already configured.
+    if awk -v host="${hostname}" -v address="${ip}" \
+        '$1 == address && $2 == host { found=1 } END { exit !found }' <<<"${corefile}"; then
         log_info "${hostname} already configured in CoreDNS"
-        return 1
+        return 0
     fi
     
     # Build modified Corefile
     local new_corefile
-    if echo "$corefile" | grep -q "hosts {"; then
-        # Add to existing hosts block - insert before fallthrough line
-        new_corefile=$(echo "$corefile" | awk -v entry="        ${ip} ${hostname}" '
-            /hosts \{/ { print; in_hosts=1; next }
-            in_hosts && /fallthrough/ { print entry; print; in_hosts=0; next }
+    if awk -v host="${hostname}" '$2 == host { found=1 } END { exit !found }' <<<"${corefile}"; then
+        new_corefile=$(awk -v host="${hostname}" -v address="${ip}" '
+            $2 == host { print "        " address " " host; next }
             { print }
-        ')
+        ' <<<"${corefile}")
+    elif grep -q "hosts {" <<<"${corefile}"; then
+        new_corefile=$(awk -v entry="        ${ip} ${hostname}" '
+            /hosts \{/ { print; in_hosts=1; inserted=0; next }
+            in_hosts && /fallthrough/ { print entry; inserted=1 }
+            in_hosts && /^[[:space:]]*}/ {
+                if (!inserted) print entry
+                in_hosts=0
+            }
+            { print }
+        ' <<<"${corefile}")
     else
         # Add new hosts block before kubernetes block
         local hosts_block="hosts {\n        ${ip} ${hostname}\n        fallthrough\n    }"
@@ -62,80 +63,31 @@ add_coredns_host() {
     kubectl create configmap coredns -n kube-system \
         --from-literal=Corefile="$new_corefile" \
         --dry-run=client -o yaml | kubectl apply -f - --context "${context}"
-    
+
+    CHANGES_MADE=true
     log_success "CoreDNS configured: ${hostname} -> ${ip}"
-    return 0
-}
-
-# Configures gateway.sjc-1.nvidia.com DNS in a cluster
-# Returns 0 if change was made, 1 if no change
-configure_k1_gateway_dns() {
-    local context="$1"
-    
-    local k1_gateway_ip
-    k1_gateway_ip=$(get_k1_gateway_ip)
-    
-    if [[ -z "$k1_gateway_ip" ]]; then
-        log_error "Could not get k1 gateway IP. Ensure k1 gateway is set up first."
-        return 1
-    fi
-    
-    add_coredns_host "gateway.sjc-1.nvidia.com" "$k1_gateway_ip" "$context"
-}
-
-# Configures gateway.k2.sjc-1.nvidia.com DNS in a cluster
-# Returns 0 if change was made, 1 if no change
-configure_k2_gateway_dns() {
-    local context="$1"
-    
-    local k2_gateway_ip
-    k2_gateway_ip=$(get_k2_gateway_ip)
-    
-    if [[ -z "$k2_gateway_ip" ]]; then
-        log_error "Could not get k2 gateway IP. Ensure k2 gateway is set up first."
-        return 1
-    fi
-    
-    add_coredns_host "gateway.k2.sjc-1.nvidia.com" "$k2_gateway_ip" "$context"
 }
 
 main() {
-    log_info "Configuring cross-cluster DNS..."
-    
-    local changes_made=false
-    
-    # Configure k1 to resolve both gateways
-    if configure_k1_gateway_dns "${K1_CONTEXT}"; then
-        changes_made=true
+    log_info "Configuring k2 DNS for the k1 Gateway..."
+
+    local k1_gateway_ip
+    k1_gateway_ip=$(get_k1_gateway_ip)
+    if [[ -z "${k1_gateway_ip}" ]]; then
+        log_error "Could not get the k1 Gateway IP"
+        return 1
     fi
-    if configure_k2_gateway_dns "${K1_CONTEXT}"; then
-        changes_made=true
-    fi
-    
-    # Configure k2 to resolve both gateways
-    if configure_k1_gateway_dns "${K2_CONTEXT}"; then
-        changes_made=true
-    fi
-    if configure_k2_gateway_dns "${K2_CONTEXT}"; then
-        changes_made=true
-    fi
-    
-    # Reload CoreDNS if changes were made
-    if [[ "$changes_made" == "true" ]]; then
-        log_info "Reloading CoreDNS in both clusters..."
-        kubectl rollout restart deployment coredns -n kube-system --context "${K1_CONTEXT}" &
-        kubectl rollout restart deployment coredns -n kube-system --context "${K2_CONTEXT}" &
-        wait
-        
-        log_info "Waiting for CoreDNS rollouts to complete..."
-        kubectl wait --for=condition=available deployment/coredns -n kube-system --timeout=60s --context "${K1_CONTEXT}" &
-        kubectl wait --for=condition=available deployment/coredns -n kube-system --timeout=60s --context "${K2_CONTEXT}" &
-        wait
+    add_coredns_host "gateway.sjc-1.nvidia.com" "${k1_gateway_ip}" "${K2_CONTEXT}"
+
+    if [[ "${CHANGES_MADE}" == "true" ]]; then
+        log_info "Reloading k2 CoreDNS..."
+        kubectl rollout restart deployment coredns -n kube-system --context "${K2_CONTEXT}"
+        kubectl rollout status deployment/coredns -n kube-system --timeout=60s --context "${K2_CONTEXT}"
     else
         log_info "No DNS changes needed"
     fi
-    
-    log_success "Cross-cluster DNS configured"
+
+    log_success "k2 DNS configured for the k1 Gateway"
 }
 
 trap 'log_error "Script interrupted"; exit 1' INT TERM

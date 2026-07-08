@@ -1,0 +1,107 @@
+{{- if .Values.identityController.enabled }}
+{{- $name := include "dsx-identity.identityControllerFullname" . -}}
+{{- $values := .Values.identityController -}}
+{{- $imageTag := $values.image.tag | default .Values.global.imageTag | default .Chart.Version -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "dsx-identity.identityControllerLabels" . | nindent 4 }}
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "dsx-identity.identityControllerLabels" . | nindent 4 }}
+rules:
+  - apiGroups: ["provisioning.dpu.nvidia.com"]
+    resources: ["dpus"]
+    verbs: ["get", "list", "watch"]
+  # TODO: Replace this E2E stand-in when LaunchLayer publishes its source CR.
+  - apiGroups: ["e2e.dsx-identity.nvidia.com"]
+    resources: ["launchlayersourcefixtures"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["spire.spiffe.io"]
+    resources: ["clusterstaticentries"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Reports invalid source input after removing its stale SPIRE entry.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  # Controller-runtime leader election when the controller has multiple replicas.
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "dsx-identity.identityControllerLabels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "dsx-identity.identityControllerLabels" . | nindent 4 }}
+spec:
+  replicas: {{ $values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "dsx-identity.identityControllerName" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "dsx-identity.identityControllerLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ $name }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: controller
+          image: "{{ $values.image.repository }}:{{ $imageTag }}"
+          imagePullPolicy: {{ $values.image.pullPolicy }}
+          args:
+            - --trust-domain={{ required "global.spire.trustDomain is required" $.Values.global.spire.trustDomain }}
+            - --operator-tenant={{ required "identityController.operatorTenant is required" $values.operatorTenant }}
+            # SPIRE controller-manager derives its class from this release identity.
+            - --class-name={{ $.Release.Namespace }}-{{ $.Release.Name }}
+            - --dpu-holder-namespace={{ required "identityController.dpuHolder.namespace is required" $values.dpuHolder.namespace }}
+            - --dpu-holder-service-account={{ required "identityController.dpuHolder.serviceAccount is required" $values.dpuHolder.serviceAccount }}
+          ports:
+            - name: metrics
+              containerPort: 8080
+            - name: health
+              containerPort: 8081
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+          resources:
+            {{- toYaml $values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+{{- end }}

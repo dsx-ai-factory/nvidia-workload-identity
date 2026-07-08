@@ -1,2 +1,0 @@
-spiffe-workload-support chart installed.
-This chart only provides Kyverno policies (no Kyverno installation).

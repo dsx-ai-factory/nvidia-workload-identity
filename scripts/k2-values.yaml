@@ -1,7 +1,8 @@
-# k2 umbrella chart values — workload cluster (SPIRE only, no exchange)
-# Used by: make spiffe-k2 (multi-cluster demo)
+# k2 umbrella chart values for the Data Hall SPIRE and Exchange shard
+# Used by: make identity-k2
 
 global:
+  imageTag: "0.1.0"
   installAndUpgradeHooks:
     enabled: true
   spire:
@@ -9,68 +10,258 @@ global:
     clusterName: "k2"
     jwtIssuer: "spiffe://k2.sjc-1.nvidia.com"
 
-spiffe-spire:
+spire:
+  spire-server:
+    defaultX509SvidTTL: "5m"
+    defaultJwtSvidTTL: "5m"
+    initContainers:
+      - name: install-dsx-imds-node-attestor-server
+        image: dsx-imds-node-attestor-server:0.1.0
+        imagePullPolicy: Never
+        command: ["/bin/cp"]
+        args:
+          - -a
+          - /usr/local/bin/dsx-imds-node-attestor-server
+          - /plugins/dsx-imds-node-attestor-server
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+          runAsNonRoot: false
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+        volumeMounts:
+          - name: dsx-imds-server-plugin
+            mountPath: /plugins
+    extraVolumes:
+      - name: dsx-imds-server-plugin
+        emptyDir: {}
+    extraVolumeMounts:
+      - name: dsx-imds-server-plugin
+        mountPath: /opt/spire/plugins
+        readOnly: true
+    customPlugins:
+      nodeAttestor:
+        dsx_imds:
+          plugin_cmd: /opt/spire/plugins/dsx-imds-node-attestor-server
+          # The chart requires the key. SPIRE treats an empty checksum as
+          # unspecified for a locally rebuilt external plugin.
+          plugin_checksum: ""
+          plugin_data:
+            jwks_url: http://spiffe-exchange.dsx-identity.svc.cluster.local:8080/.well-known/jwks.json
+            audience: spiffe://k2.sjc-1.nvidia.com/spire/server
+            trust_domain: k2.sjc-1.nvidia.com
+    controllerManager:
+      identities:
+        clusterSPIFFEIDs:
+          exchange-service:
+            type: raw
+            podSelector:
+              matchLabels:
+                app: spiffe-exchange
+            spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/ns/{{ .PodMeta.Namespace }}/sa/{{ .PodSpec.ServiceAccountName }}"
+          dsx-imds-host:
+            type: raw
+            hint: dsx-imds
+            spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/tenant/nca-0000000000000001/service/dsx/host/{{ .NodeMeta.Name }}"
+            namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: dsx-identity
+            podSelector:
+              matchLabels:
+                identity.dsx.nvidia.com/host-agent: dsx-imds
+          dsx-pod:
+            type: raw
+            podSelector:
+              matchExpressions:
+              - key: spiffe.nvidia.com/tenant
+                operator: Exists
+              - key: spiffe.nvidia.com/service
+                operator: In
+                values:
+                - dsx
+              - key: spiffe.nvidia.com/resource-type
+                operator: In
+                values:
+                - dpu
+                - host
+                - vm
+              - key: spiffe.nvidia.com/resource-id
+                operator: Exists
+              - key: kubevirt.io
+                operator: DoesNotExist
+            spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/tenant/{{ index .PodMeta.Labels \"spiffe.nvidia.com/tenant\" }}/service/dsx/{{ index .PodMeta.Labels \"spiffe.nvidia.com/resource-type\" }}/{{ index .PodMeta.Labels \"spiffe.nvidia.com/resource-id\" }}/pod/{{ .PodMeta.UID }}"
+  # The ordinary agent supplies the host SPIRE JWT-SVID used to attest this dsx_imds agent.
+  upstream:
+    enabled: true
+  upstream-spire-agent:
+    nameOverride: dsx-imds-agent
+    bundleConfigMap: spire-bundle
+    serviceAccount:
+      name: dsx-identity-dsx-imds-agent
+    server:
+      address: dsx-identity-server.dsx-identity
+    podLabels:
+      identity.dsx.nvidia.com/host-agent: dsx-imds
+    nodeAttestor:
+      k8sPSAT:
+        enabled: false
+    customPlugins:
+      nodeAttestor:
+        dsx_imds:
+          plugin_cmd: /opt/spire/plugins/dsx-imds-node-attestor-agent
+          plugin_checksum: ""
+          plugin_data:
+            audience: spiffe://k2.sjc-1.nvidia.com/spire/server
+            endpoint: http://127.0.0.1:18080
+    initContainers:
+      - name: install-dsx-imds-node-attestor-agent
+        image: dsx-imds-node-attestor-agent:0.1.0
+        imagePullPolicy: Never
+        command: ["/bin/cp"]
+        args:
+          - -a
+          - /usr/local/bin/dsx-imds-node-attestor-agent
+          - /plugins/dsx-imds-node-attestor-agent
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+          runAsNonRoot: false
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+        volumeMounts:
+          - name: dsx-imds-agent-plugin
+            mountPath: /plugins
+      - name: metadata-service
+        image: metadata-service:0.1.0
+        imagePullPolicy: Never
+        restartPolicy: Always
+        args:
+          - --listen=127.0.0.1:18080
+          - --svid-hint=dsx-imds
+          - --exchange-socket=/var/run/secrets/exchange.io/exchange.sock
+        startupProbe:
+          httpGet:
+            host: 127.0.0.1
+            path: /latest/meta-data/identity?aud=spiffe%3A%2F%2Fk2.sjc-1.nvidia.com%2Fspire%2Fserver
+            port: 18080
+            httpHeaders:
+              - name: Metadata
+                value: "true"
+              - name: Accept
+                value: text/plain
+          periodSeconds: 1
+          timeoutSeconds: 5
+          failureThreshold: 120
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+          - name: bootstrap-spiffe-csi
+            mountPath: /var/run/secrets/spire.io
+            readOnly: true
+          - name: exchange-csi
+            mountPath: /var/run/secrets/exchange.io
+            readOnly: true
+    extraVolumes:
+      - name: dsx-imds-agent-plugin
+        emptyDir: {}
+      - name: bootstrap-spiffe-csi
+        csi:
+          driver: csi.spiffe.io
+          readOnly: true
+      - name: exchange-csi
+        csi:
+          driver: csi.exchange.nvidia.com
+          readOnly: true
+    extraVolumeMounts:
+      - name: dsx-imds-agent-plugin
+        mountPath: /opt/spire/plugins
+        readOnly: true
+  upstream-spiffe-csi-driver:
+    agentSocketPath: /run/spire/agent-sockets-upstream/spire-agent.sock
+    validatingAdmissionPolicy:
+      enabled: false
+exchange:
   enabled: true
-  spire-crds:
-    enabled: false  # CRDs installed separately (Helm ordering)
-  spire:
-    spire-server:
-      defaultX509SvidTTL: "5m"
-      defaultJwtSvidTTL: "5m"
-      controllerManager:
-        identities:
-          clusterSPIFFEIDs:
-            pod-workloads:
-              type: raw
-              podSelector:
-                matchExpressions:
-                - key: spiffe.nvidia.com/tenant
-                  operator: Exists
-                - key: spiffe.nvidia.com/service
-                  operator: Exists
-                - key: kubevirt.io
-                  operator: DoesNotExist
-              spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/tenant/{{ index .PodMeta.Labels \"spiffe.nvidia.com/tenant\" }}/service/{{ index .PodMeta.Labels \"spiffe.nvidia.com/service\" }}/pod/{{ .PodMeta.UID }}"
-            vm-workloads:
-              type: raw
-              podSelector:
-                matchLabels:
-                  kubevirt.io: virt-launcher
-                matchExpressions:
-                - key: spiffe.nvidia.com/tenant
-                  operator: Exists
-                - key: spiffe.nvidia.com/service
-                  operator: Exists
-              spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/tenant/{{ index .PodMeta.Labels \"spiffe.nvidia.com/tenant\" }}/service/{{ index .PodMeta.Labels \"spiffe.nvidia.com/service\" }}/vm/{{ .PodMeta.UID }}"
-      federation:
-        enabled: true
-        bundleEndpoint:
-          enabled: true
-          port: 8443
-        tls:
-          spire:
-            enabled: false
-          certManager:
-            enabled: true
-            issuer:
-              create: false
-            certificate:
-              dnsNames:
-                - gateway.k2.sjc-1.nvidia.com
-              issuerRef:
-                kind: ClusterIssuer
-                name: ca-issuer
-    spiffe-oidc-discovery-provider:
-      tls:
-        spire:
-          enabled: false
+  image:
+    repository: spiffe-exchange-service
+    tag: "0.1.0"
+    pullPolicy: Never
+  imagePullSecrets: []
+  jwksURL: http://spiffe-exchange.dsx-identity.svc.cluster.local:8080/.well-known/jwks.json
+  shardID: k2
+  signingKeysetSecret: spiffe-exchange-signing-keyset
+  mqtt:
+    brokerURL: tcp://gateway.sjc-1.nvidia.com:1883
+    oauth2:
+      tokenURL: http://gateway.sjc-1.nvidia.com:8080/realms/event-bus/protocol/openid-connect/token
+      clientID: spiffe-exchange
+      clientSecretSecret: spiffe-exchange-mqtt-oauth
+      clientSecretKey: client-secret
 
-# Exchange runs on k1 only
-spiffe-exchange:
-  enabled: false
+podTokenFetcher:
+  enabled: true
+  image:
+    repository: dsx-token-fetcher
+    tag: "0.1.0"
+    pullPolicy: Never
 
-spiffe-workload-support:
-  enabled: false
+vmSupport:
+  enabled: true
+  metadataService:
+    image:
+      repository: metadata-service
+      tag: "0.1.0"
+      pullPolicy: Never
+  imdsNetworkSetup:
+    image:
+      repository: dsx-imds-network-setup
+      tag: "0.1.0"
+      pullPolicy: Never
+  exchangeProxyCsi:
+    image:
+      repository: exchange-proxy-csi
+      tag: "0.1.0"
+      pullPolicy: Never
+  policy:
+    svidHint: dsx-imds-vm
 
-spiffe-vm-support:
-  enabled: false
+identityController:
+  enabled: true
+  image:
+    repository: dsx-identity-controller
+    tag: "0.1.0"
+    pullPolicy: Never
+  operatorTenant: nca-0000000000000001
+  # k2 bootstrap installs an API-only Kind fixture for the external DPU CRD.
+  # dsx_dpu is supplied separately. The controller consumes only its stable
+  # parent-ID contract and the token-fetcher holder selectors below.
+  dpuHolder:
+    namespace: dsx-identity
+    serviceAccount: dpu-token-fetcher

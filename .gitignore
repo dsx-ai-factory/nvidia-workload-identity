@@ -4,11 +4,10 @@
 *.dll
 *.so
 *.dylib
-/cel-evaluator
-/spiffe-token-fetcher
+/dsx-token-fetcher
 /metadata-service
 /spiffe-exchange-service
-/mds-network-setup
+/dsx-imds-network-setup
 /exchange-proxy-csi
 
 # Test binary, built with `go test -c`

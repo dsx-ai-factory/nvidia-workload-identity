@@ -11,5 +11,9 @@ func bindMount(source, target string) error {
 }
 
 func unmount(target string) error {
-	return syscall.Unmount(target, 0)
+	err := syscall.Unmount(target, 0)
+	if err == syscall.EINVAL || err == syscall.ENOENT {
+		return nil
+	}
+	return err
 }

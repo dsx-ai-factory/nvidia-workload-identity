@@ -1,4 +1,4 @@
-# Gateway for k1 - exposes OpenBao and Exchange services
+# k1 Gateway exposes Event Bus endpoints to k2 and OpenBao to the E2E client.
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
@@ -15,11 +15,26 @@ spec:
           - kind: HTTPRoute
         namespaces:
           from: All
-    - name: exchange-service
+    - name: event-bus-oauth
       protocol: HTTP
       port: 8080
       allowedRoutes:
         kinds:
           - kind: HTTPRoute
         namespaces:
-          from: All
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: dsx-identity
+    - name: event-bus-mqtt
+      protocol: TCP
+      port: 1883
+      allowedRoutes:
+        kinds:
+          - group: gateway.networking.k8s.io
+            kind: TCPRoute
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: dsx-identity

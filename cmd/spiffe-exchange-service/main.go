@@ -3,17 +3,17 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"log/slog"
 	"maps"
 	"mime"
 	"net"
 	"net/http"
 	"os"
-	"strconv"
-	"strings"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -22,21 +22,18 @@ import (
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
+	"golang.org/x/sync/errgroup"
 
-	"spiffe-jwt-issuer/cmd/spiffe-exchange-service/keystore"
-	"spiffe-jwt-issuer/cmd/spiffe-exchange-service/keystore/cached"
-	"spiffe-jwt-issuer/cmd/spiffe-exchange-service/keystore/memory"
-	"spiffe-jwt-issuer/cmd/spiffe-exchange-service/keystore/postgres"
+	"dsx-identity/internal/identity"
+	"dsx-identity/internal/stricturl"
 )
 
-// RFC 8693 OAuth 2.0 Token Exchange constants
 const (
 	GrantTypeTokenExchange    = "urn:ietf:params:oauth:grant-type:token-exchange"
 	TokenTypeJWT              = "urn:ietf:params:oauth:token-type:jwt"
 	ContentTypeFormURLEncoded = "application/x-www-form-urlencoded"
 )
 
-// TokenExchangeResponse represents an RFC 8693 token exchange response.
 type TokenExchangeResponse struct {
 	AccessToken     string `json:"access_token"`
 	IssuedTokenType string `json:"issued_token_type"`
@@ -44,177 +41,51 @@ type TokenExchangeResponse struct {
 	ExpiresIn       int64  `json:"expires_in"`
 }
 
-// TokenExchangeErrorResponse represents an RFC 8693 error response.
 type TokenExchangeErrorResponse struct {
 	Error            string `json:"error"`
 	ErrorDescription string `json:"error_description,omitempty"`
 }
 
-// ExchangeServer handles SPIFFE JWT exchange operations.
 type ExchangeServer struct {
-	keyStore   keystore.KeyStore
-	jwtSource  *workloadapi.JWTSource
-	region     string
-	baseDomain string
+	keys      *signingKeyset
+	registry  *keyRegistry
+	jwtSource *workloadapi.JWTSource
+	jwksURL   string
+	keySync   *keySync
 }
 
-// NewExchangeServer creates a new exchange server using the SPIFFE Workload API.
-func NewExchangeServer(ctx context.Context, keyStore keystore.KeyStore, socketPath, region, baseDomain string) (*ExchangeServer, error) {
+func NewExchangeServer(ctx context.Context, keys *signingKeyset, registry *keyRegistry, socketPath, jwksURL string) (*ExchangeServer, error) {
 	opts := []workloadapi.JWTSourceOption{}
 	if socketPath != "" {
 		opts = append(opts, workloadapi.WithClientOptions(workloadapi.WithAddr(socketPath)))
 	}
-
-	jwtSource, err := workloadapi.NewJWTSource(ctx, opts...)
+	jwts, err := workloadapi.NewJWTSource(ctx, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create JWT source: %w", err)
+		return nil, fmt.Errorf("create JWT source: %w", err)
 	}
-
-	return &ExchangeServer{
-		keyStore:   keyStore,
-		jwtSource:  jwtSource,
-		region:     region,
-		baseDomain: baseDomain,
-	}, nil
+	return &ExchangeServer{keys: keys, registry: registry, jwtSource: jwts, jwksURL: jwksURL}, nil
 }
 
-// Close releases resources held by the server.
-func (s *ExchangeServer) Close() error {
-	return s.jwtSource.Close()
-}
-
-// PathComponents holds extracted components from a SPIFFE ID path.
-type PathComponents struct {
-	Tenant       string // From /tenant/{tenant}/
-	Service      string // From /service/{service}/
-	ResourceType string // vm or pod
-	ResourceID   string // UUID
-}
-
-// parsePathComponents extracts components from a SPIFFE ID path.
-// Format: /tenant/{tenant}/service/{service}/{resource_type}/{resource_id}
-func parsePathComponents(path string) (PathComponents, error) {
-	const tenantPrefix = "/tenant/"
-	if !strings.HasPrefix(path, tenantPrefix) {
-		return PathComponents{}, fmt.Errorf("path does not contain /tenant/: %s", path)
-	}
-
-	rest := path[len(tenantPrefix):]
-	parts := strings.Split(rest, "/")
-	if len(parts) < 5 {
-		return PathComponents{}, fmt.Errorf("path has insufficient components: %s", path)
-	}
-
-	if parts[1] != "service" {
-		return PathComponents{}, fmt.Errorf("path missing /service/: %s", path)
-	}
-
-	return PathComponents{
-		Tenant:       parts[0],
-		Service:      parts[2],
-		ResourceType: parts[3],
-		ResourceID:   parts[4],
-	}, nil
-}
-
-// transformSpiffeID transforms a SPIFFE ID by extracting components from the path
-// and constructing a new trust domain with the pattern:
-// {tenant}.{region}.{service}.{base-domain}
-//
-// Input:  spiffe://k2.sjc-1.nvidia.com/tenant/tenant1/service/vmaas/vm/{uuid}
-// Output: spiffe://tenant1.sjc-1.vmaas.nvidia.com/vm/{uuid}
-func transformSpiffeID(originalID spiffeid.ID, region, baseDomain string) (spiffeid.ID, error) {
-	originalPath := originalID.Path()
-
-	components, err := parsePathComponents(originalPath)
-	if err != nil {
-		return spiffeid.ID{}, err
-	}
-
-	// Construct new trust domain: {tenant}.{region}.{service}.{base-domain}
-	newDomain := components.Tenant + "." + region + "." + components.Service + "." + baseDomain
-
-	targetTD, err := spiffeid.TrustDomainFromString(newDomain)
-	if err != nil {
-		return spiffeid.ID{}, fmt.Errorf("invalid target domain: %w", err)
-	}
-
-	// Construct new path: /{resource_type}/{resource_id}
-	newPath := "/" + components.ResourceType + "/" + components.ResourceID
-
-	newID, err := spiffeid.FromPath(targetTD, newPath)
-	if err != nil {
-		return spiffeid.ID{}, fmt.Errorf("failed to create new SPIFFE ID: %w", err)
-	}
-
-	return newID, nil
-}
-
-// resignJWT re-signs a JWT with a new subject, preserving all other claims.
 func (s *ExchangeServer) resignJWT(originalClaims map[string]any, newSubject spiffeid.ID) (string, error) {
-	trustDomain := newSubject.TrustDomain().Name()
-	dk, err := s.keyStore.GetOrCreateKey(trustDomain)
-	if err != nil {
-		return "", fmt.Errorf("failed to get key: %w", err)
-	}
-
-	slog.Info("resigning JWT", "trustDomain", trustDomain, "newSubject", newSubject, "kid", dk.KeyID)
-
-	signerKey := jose.SigningKey{
-		Algorithm: dk.Algorithm,
-		Key:       dk.Signer,
-	}
-	signerOpts := &jose.SignerOptions{}
-	signerOpts.WithHeader(jose.HeaderKey("kid"), dk.KeyID)
-
-	signer, err := jose.NewSigner(signerKey, signerOpts)
-	if err != nil {
-		return "", fmt.Errorf("failed to create signer: %w", err)
-	}
-
-	// Copy claims and update subject and issuer
+	// Preserve every validated claim except sub and iss.
 	newClaims := make(map[string]any, len(originalClaims))
 	maps.Copy(newClaims, originalClaims)
 	newClaims["sub"] = newSubject.String()
-	newClaims["iss"] = newSubject.TrustDomain().IDString()
+	newClaims["iss"] = identity.Issuer
 
-	token, err := jwt.Signed(signer).Claims(newClaims).Serialize()
+	token, err := jwt.Signed(s.keys.signer).Claims(newClaims).Serialize()
 	if err != nil {
-		return "", fmt.Errorf("failed to sign JWT: %w", err)
+		return "", fmt.Errorf("sign JWT: %w", err)
 	}
-
 	return token, nil
 }
 
-// extractAudience extracts the audience claim from a JWT without full validation.
-func extractAudience(token string) ([]string, error) {
-	parsedJWT, err := jwt.ParseSigned(token, []jose.SignatureAlgorithm{jose.RS256, jose.RS384, jose.RS512, jose.ES256, jose.ES384, jose.ES512})
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse JWT: %w", err)
-	}
-
-	var claims jwt.Claims
-	if err := parsedJWT.UnsafeClaimsWithoutVerification(&claims); err != nil {
-		return nil, fmt.Errorf("failed to extract claims: %w", err)
-	}
-
-	return claims.Audience, nil
-}
-
-// writeTokenError writes an RFC 8693 compliant error response.
 func writeTokenError(w http.ResponseWriter, statusCode int, errorCode, description string) {
-	resp := TokenExchangeErrorResponse{
-		Error:            errorCode,
-		ErrorDescription: description,
-	}
-
-	// Preserialize response body so we can send the Content-Length header
-	responseBody, err := json.Marshal(resp)
+	responseBody, err := json.Marshal(TokenExchangeErrorResponse{Error: errorCode, ErrorDescription: description})
 	if err != nil {
 		slog.Error("Failed to marshal error response", "error", err)
 		return
 	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(responseBody)))
@@ -224,79 +95,59 @@ func writeTokenError(w http.ResponseWriter, statusCode int, errorCode, descripti
 	}
 }
 
-// handleTokenExchange handles POST requests to /token (RFC 8693 Token Exchange).
 func (s *ExchangeServer) handleTokenExchange(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Received token exchange request", "method", r.Method, "path", r.URL.Path, "remote_addr", r.RemoteAddr)
-
-	// Validate Content-Type
-	contentType := r.Header.Get("Content-Type")
-	mediaType, _, err := mime.ParseMediaType(contentType)
-	if err != nil || mediaType != ContentTypeFormURLEncoded {
-		slog.Warn("Invalid content type", "content_type", contentType, "error", err)
+	contentType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || contentType != ContentTypeFormURLEncoded {
 		writeTokenError(w, http.StatusUnsupportedMediaType, "invalid_request", "Content-Type must be application/x-www-form-urlencoded")
 		return
 	}
-
-	// Parse form data
+	if r.URL.RawQuery != "" {
+		writeTokenError(w, http.StatusBadRequest, "invalid_request", "Query parameters are not allowed")
+		return
+	}
 	if err := r.ParseForm(); err != nil {
-		slog.Warn("Failed to parse form", "error", err)
 		writeTokenError(w, http.StatusBadRequest, "invalid_request", "Failed to parse form data")
 		return
 	}
-
-	// Validate grant_type
-	grantType := r.FormValue("grant_type")
-	if grantType != GrantTypeTokenExchange {
-		slog.Warn("Invalid grant_type", "grant_type", grantType)
+	if grantType := r.PostForm.Get("grant_type"); grantType != GrantTypeTokenExchange {
 		writeTokenError(w, http.StatusBadRequest, "unsupported_grant_type", fmt.Sprintf("grant_type must be %s", GrantTypeTokenExchange))
 		return
 	}
-
-	// Get subject_token
-	subjectToken := r.FormValue("subject_token")
+	subjectToken := r.PostForm.Get("subject_token")
 	if subjectToken == "" {
-		slog.Warn("Missing subject_token")
 		writeTokenError(w, http.StatusBadRequest, "invalid_request", "subject_token is required")
 		return
 	}
-
-	// Validate subject_token_type
-	subjectTokenType := r.FormValue("subject_token_type")
-	if subjectTokenType != TokenTypeJWT {
-		slog.Warn("Invalid subject_token_type", "subject_token_type", subjectTokenType)
+	if subjectTokenType := r.PostForm.Get("subject_token_type"); subjectTokenType != TokenTypeJWT {
 		writeTokenError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("subject_token_type must be %s", TokenTypeJWT))
 		return
 	}
 
-	// Extract audience from the JWT
-	audience, err := extractAudience(subjectToken)
+	// Classify malformed claims and unsupported algorithms as an RFC 8693
+	// request error before the Workload API performs issuer-local verification.
+	parsedJWT, err := jwt.ParseSigned(subjectToken, []jose.SignatureAlgorithm{
+		jose.RS256, jose.RS384, jose.RS512,
+		jose.ES256, jose.ES384, jose.ES512,
+	})
+	if err == nil {
+		var claims jwt.Claims
+		err = parsedJWT.UnsafeClaimsWithoutVerification(&claims)
+	}
 	if err != nil {
-		slog.Warn("Failed to extract audience", "error", err)
 		writeTokenError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("Invalid subject_token: %v", err))
 		return
 	}
-
-	// Validate the JWT SVID
-	validatedSVID, err := jwtsvid.ParseAndValidate(subjectToken, s.jwtSource, audience)
+	validatedSVID, err := jwtsvid.ParseAndValidate(subjectToken, s.jwtSource, nil)
 	if err != nil {
-		slog.Warn("JWT validation failed", "error", err)
 		writeTokenError(w, http.StatusUnauthorized, "invalid_grant", fmt.Sprintf("JWT validation failed: %v", err))
 		return
 	}
-
-	slog.Info("JWT validated successfully", "original_spiffe_id", validatedSVID.ID.String())
-
-	// Transform the SPIFFE ID
-	newID, err := transformSpiffeID(validatedSVID.ID, s.region, s.baseDomain)
+	newID, err := identity.ExchangeSPIFFEID(validatedSVID.ID)
 	if err != nil {
-		slog.Warn("Failed to transform SPIFFE ID", "error", err)
 		writeTokenError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("Failed to transform SPIFFE ID: %v", err))
 		return
 	}
-
-	slog.Info("Transformed SPIFFE ID", "original", validatedSVID.ID.String(), "new", newID.String())
-
-	// Re-sign the JWT with the new identity
 	token, err := s.resignJWT(validatedSVID.Claims, newID)
 	if err != nil {
 		slog.Error("Failed to sign JWT", "error", err)
@@ -304,27 +155,16 @@ func (s *ExchangeServer) handleTokenExchange(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Calculate expires_in (seconds until expiration)
-	expiresIn := max(int64(time.Until(validatedSVID.Expiry).Seconds()), 0)
-
-	// Build RFC 8693 compliant response
-	resp := TokenExchangeResponse{
+	responseBody, err := json.Marshal(TokenExchangeResponse{
 		AccessToken:     token,
 		IssuedTokenType: TokenTypeJWT,
 		TokenType:       "Bearer",
-		ExpiresIn:       expiresIn,
-	}
-
-	slog.Info("Successfully exchanged JWT", "new_spiffe_id", newID.String(), "expires_in", expiresIn)
-
-	// Preserialize response body so we can send the Content-Length header
-	responseBody, err := json.Marshal(resp)
+		ExpiresIn:       max(int64(time.Until(validatedSVID.Expiry).Seconds()), 0),
+	})
 	if err != nil {
-		slog.Error("Failed to marshal JSON response", "error", err)
 		writeTokenError(w, http.StatusInternalServerError, "server_error", "Failed to encode response")
 		return
 	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(responseBody)))
@@ -333,50 +173,12 @@ func (s *ExchangeServer) handleTokenExchange(w http.ResponseWriter, r *http.Requ
 	}
 }
 
-// trustDomainFromHost returns the host without an optional port (e.g. "tenant1.example.com:8080" -> "tenant1.example.com").
-func trustDomainFromHost(host string) string {
-	h, _, err := net.SplitHostPort(host)
+func (s *ExchangeServer) handleJWKS(w http.ResponseWriter, _ *http.Request) {
+	responseBody, err := json.Marshal(s.registry.keyset())
 	if err != nil {
-		return host
-	}
-	return h
-}
-
-// handleJWKS handles GET requests to /.well-known/jwks.json.
-func (s *ExchangeServer) handleJWKS(w http.ResponseWriter, r *http.Request) {
-	slog.Info("Received JWKS request", "method", r.Method, "path", r.URL.Path, "host", r.Host, "remote_addr", r.RemoteAddr)
-
-	trustDomain := trustDomainFromHost(r.Host)
-	if trustDomain == "" {
-		http.Error(w, "Host header required", http.StatusBadRequest)
-		return
-	}
-
-	keys, err := s.keyStore.GetKeys(trustDomain)
-	if err != nil {
-		slog.Error("Failed to get keys for domain", "domain", trustDomain, "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-
-	jwks := jose.JSONWebKeySet{Keys: make([]jose.JSONWebKey, len(keys))}
-	for i, dk := range keys {
-		jwks.Keys[i] = jose.JSONWebKey{
-			Key:       dk.Signer.Public(),
-			KeyID:     dk.KeyID.String(),
-			Algorithm: string(dk.Algorithm),
-			Use:       "sig",
-		}
-	}
-
-	// Preserialize response body so we can send the Content-Length header
-	responseBody, err := json.Marshal(jwks)
-	if err != nil {
-		slog.Error("Failed to marshal JWKS", "error", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(responseBody)))
 	if _, err := w.Write(responseBody); err != nil {
@@ -384,36 +186,16 @@ func (s *ExchangeServer) handleJWKS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleOIDCDiscovery handles GET requests to /.well-known/openid-configuration.
-// It returns OIDC provider metadata (issuer, jwks_uri) using the Host header for tenant-scoped discovery.
-func (s *ExchangeServer) handleOIDCDiscovery(w http.ResponseWriter, r *http.Request) {
-	slog.Info("Received OIDC discovery request", "method", r.Method, "path", r.URL.Path, "host", r.Host, "remote_addr", r.RemoteAddr)
-
-	trustDomain := trustDomainFromHost(r.Host)
-	if trustDomain == "" {
-		http.Error(w, "Host header required", http.StatusBadRequest)
-		return
-	}
-
-	scheme := "http"
-	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
-		scheme = proto
-	}
-	jwksURL := scheme + "://" + r.Host + "/.well-known/jwks.json"
-
-	cfg := oidc.ProviderConfig{
-		IssuerURL:  "spiffe://" + trustDomain,
-		JWKSURL:    jwksURL,
-		Algorithms: []string{"ES256"},
-	}
-
-	responseBody, err := json.Marshal(cfg)
+func (s *ExchangeServer) handleOIDCDiscovery(w http.ResponseWriter, _ *http.Request) {
+	responseBody, err := json.Marshal(oidc.ProviderConfig{
+		IssuerURL:  identity.Issuer,
+		JWKSURL:    s.jwksURL,
+		Algorithms: signingAlgorithms(s.registry.keyset()),
+	})
 	if err != nil {
-		slog.Error("Failed to marshal OIDC discovery", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(responseBody)))
 	if _, err := w.Write(responseBody); err != nil {
@@ -421,164 +203,140 @@ func (s *ExchangeServer) handleOIDCDiscovery(w http.ResponseWriter, r *http.Requ
 	}
 }
 
-func main() {
+func (s *ExchangeServer) handleReady(w http.ResponseWriter, _ *http.Request) {
+	if s.keySync != nil {
+		if !s.keySync.isConnectedAndSubscribed() {
+			http.Error(w, "MQTT is not connected and subscribed", http.StatusServiceUnavailable)
+			return
+		}
+		if !s.keySync.isCacheReady() {
+			http.Error(w, "public key cache is not ready", http.StatusServiceUnavailable)
+			return
+		}
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleLive(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *ExchangeServer) handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/exchange", s.handleTokenExchange)
+	mux.HandleFunc("GET /.well-known/jwks.json", s.handleJWKS)
+	mux.HandleFunc("GET /.well-known/openid-configuration", s.handleOIDCDiscovery)
+	mux.HandleFunc("GET /live", handleLive)
+	mux.HandleFunc("GET /ready", s.handleReady)
+	return mux
+}
+
+func serveHTTP(ctx context.Context, server *http.Server) error {
+	// Bind first so cancellation cannot race startup and leave an unowned server.
+	listener, err := net.Listen("tcp", server.Addr)
+	if err != nil {
+		return err
+	}
+	serveContext, cancel := context.WithCancel(ctx)
+	defer cancel()
+	group := new(errgroup.Group)
+	group.Go(func() error {
+		defer cancel()
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		return nil
+	})
+	group.Go(func() error {
+		<-serveContext.Done()
+		if ctx.Err() == nil {
+			return nil
+		}
+		shutdownContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownContext); err != nil {
+			return errors.Join(fmt.Errorf("shut down HTTP server: %w", err), server.Close())
+		}
+		return nil
+	})
+	return group.Wait()
+}
+
+func run() (runErr error) {
+	var level slog.Level
+	flag.TextVar(&level, "log-level", slog.LevelInfo, "log level (debug, info, warn, error)")
 	var (
-		listenAddr = flag.String("listen", ":8080", "HTTP server listen address")
-		socketPath = flag.String("socket", "", "SPIFFE Workload API socket path")
-		region     = flag.String("region", "", "Region identifier (e.g., sjc-1)")
-		baseDomain = flag.String("base-domain", "", "Base trust domain (e.g., nvidia.com)")
-		logLevel   = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
-
-		// KeyStore backend selection
-		keystoreBackend = flag.String("keystore-backend", "in-memory", "KeyStore backend: in-memory or postgres")
-
-		// Postgres configuration (used when keystore-backend=postgres)
-		pgHost     = flag.String("pg-host", getEnvOrDefault("EXCHANGE_PG_HOST", "localhost"), "PostgreSQL host")
-		pgPort     = flag.Int("pg-port", getEnvOrDefaultInt("EXCHANGE_PG_PORT", 5432), "PostgreSQL port")
-		pgDatabase = flag.String("pg-database", getEnvOrDefault("EXCHANGE_PG_DATABASE", "exchange"), "PostgreSQL database")
-		pgUser     = flag.String("pg-user", getEnvOrDefault("EXCHANGE_PG_USER", "exchange"), "PostgreSQL user")
-		pgPassword = flag.String("pg-password", getEnvOrDefault("EXCHANGE_PG_PASSWORD", ""), "PostgreSQL password")
-		pgSSLMode  = flag.String("pg-sslmode", getEnvOrDefault("EXCHANGE_PG_SSLMODE", "disable"), "PostgreSQL SSL mode")
-
-		// Encryption keyset for Postgres backend (JWKS format)
-		encryptionKeyset = flag.String("encryption-keyset", getEnvOrDefault("EXCHANGE_ENCRYPTION_KEYSET", ""), "JWKS containing symmetric keys (kty: oct, alg: A256GCM) for domain key encryption")
-		activeKeyID      = flag.String("active-key-id", getEnvOrDefault("EXCHANGE_ACTIVE_KEY_ID", ""), "Key ID of the active key for new encryptions")
+		listenAddr        = flag.String("listen", ":8080", "HTTP server listen address")
+		socketPath        = flag.String("socket", "", "SPIFFE Workload API socket path")
+		jwksURL           = flag.String("jwks-url", "", "public JWKS URL advertised through discovery")
+		signingJWKS       = flag.String("signing-jwks", "/run/secrets/spiffe-exchange/signing-jwks.json", "private signing JWKS file")
+		activeKID         = flag.String("active-kid", "/run/secrets/spiffe-exchange/active-kid", "file containing the active signing kid")
+		shardID           = flag.String("shard-id", "", "stable Exchange shard identifier")
+		mqttBroker        = flag.String("mqtt-broker", "", "MQTT 3.1.1 broker URL")
+		mqttClientID      = flag.String("mqtt-client-id", "", "MQTT client identifier (defaults to spiffe-exchange-<shard-id>)")
+		publicKeyLeaseTTL = flag.Duration("public-key-lease-ttl", 10*time.Minute, "public key publication lease lifetime")
+		mqttTokenURL      = flag.String("mqtt-oauth-token-url", "", "OAuth2 client-credentials token endpoint for MQTT")
+		mqttOAuthID       = flag.String("mqtt-oauth-client-id", "", "OAuth2 client ID for MQTT")
+		mqttSecret        = flag.String("mqtt-oauth-client-secret", "", "file containing the OAuth2 client secret for MQTT")
 	)
 	flag.Parse()
 
-	if *region == "" {
-		slog.Error("--region is required")
-		os.Exit(1)
-	}
-	if *baseDomain == "" {
-		slog.Error("--base-domain is required")
-		os.Exit(1)
-	}
-
-	var level slog.Level
-	switch *logLevel {
-	case "debug":
-		level = slog.LevelDebug
-	case "info":
-		level = slog.LevelInfo
-	case "warn":
-		level = slog.LevelWarn
-	case "error":
-		level = slog.LevelError
-	default:
-		level = slog.LevelInfo
-	}
-
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: level,
-	})))
-
-	ctx := context.Background()
-
-	// Create the appropriate KeyStore backend
-	var ks keystore.KeyStore
-
-	switch *keystoreBackend {
-	case "in-memory":
-		slog.Info("Using in-memory keystore backend")
-		ks = memory.New(keystore.ES256KeyGenerator{})
-	case "postgres":
-		if *encryptionKeyset == "" {
-			slog.Error("--encryption-keyset is required for postgres backend")
-			os.Exit(1)
-		}
-		if *activeKeyID == "" {
-			slog.Error("--active-key-id is required for postgres backend")
-			os.Exit(1)
-		}
-		if *pgPassword == "" {
-			slog.Error("--pg-password is required for postgres backend")
-			os.Exit(1)
-		}
-
-		encryptor, err := keystore.NewJWKSEncryptor(*encryptionKeyset, *activeKeyID)
-		if err != nil {
-			slog.Error("Failed to create encryption keyset", "error", err)
-			os.Exit(1)
-		}
-
-		pgConfig := postgres.Config{
-			Host:     *pgHost,
-			Port:     *pgPort,
-			Database: *pgDatabase,
-			User:     *pgUser,
-			Password: *pgPassword,
-			SSLMode:  *pgSSLMode,
-		}
-
-		slog.Info("Connecting to PostgreSQL",
-			"host", pgConfig.Host,
-			"port", pgConfig.Port,
-			"database", pgConfig.Database,
-			"user", pgConfig.User,
-			"sslmode", pgConfig.SSLMode,
-			"activeKeyID", *activeKeyID)
-
-		pgStore, err := postgres.New(ctx, pgConfig, encryptor, keystore.ES256KeyGenerator{})
-		if err != nil {
-			slog.Error("Failed to create postgres keystore", "error", err)
-			os.Exit(1)
-		}
-		ks = cached.New(pgStore, cached.DefaultTTL)
-		slog.Info("Using postgres keystore backend")
-	default:
-		slog.Error("Unknown keystore backend", "backend", *keystoreBackend)
-		os.Exit(1)
-	}
-
-	if closer, ok := ks.(io.Closer); ok {
-		defer closer.Close()
-	}
-
-	slog.Info("Starting SPIFFE Exchange Service",
-		"listen_addr", *listenAddr,
-		"socket_path", *socketPath,
-		"region", *region,
-		"base_domain", *baseDomain,
-		"keystore_backend", *keystoreBackend,
-		"log_level", level.String())
-
-	server, err := NewExchangeServer(ctx, ks, *socketPath, *region, *baseDomain)
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level})))
+	parsedJWKSURL, err := stricturl.ParseHTTP(*jwksURL)
 	if err != nil {
-		slog.Error("Failed to create exchange server", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("--jwks-url %w", err)
 	}
-	defer server.Close()
-
-	http.HandleFunc("POST /v1/exchange", server.handleTokenExchange)
-	http.HandleFunc("GET /.well-known/jwks.json", server.handleJWKS)
-	http.HandleFunc("GET /.well-known/openid-configuration", server.handleOIDCDiscovery)
-	http.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("OK"))
-	})
-
-	slog.Info("Starting HTTP server", "listen_addr", *listenAddr)
-	if err := http.ListenAndServe(*listenAddr, nil); err != nil {
-		slog.Error("HTTP server failed", "error", err)
-		os.Exit(1)
+	if *mqttClientID == "" {
+		*mqttClientID = "spiffe-exchange-" + *shardID
 	}
-}
 
-// getEnvOrDefault returns the environment variable value or the default if not set.
-func getEnvOrDefault(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
+	keys, err := loadSigningKeyset(*signingJWKS, *activeKID)
+	if err != nil {
+		return fmt.Errorf("load signing keyset: %w", err)
 	}
-	return defaultValue
-}
+	if *publicKeyLeaseTTL < 2*time.Second {
+		return fmt.Errorf("--public-key-lease-ttl must be at least 2s: %s", publicKeyLeaseTTL.String())
+	}
+	registry := newKeyRegistry()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	mqttOAuth := mqttOAuthConfig{tokenURL: *mqttTokenURL, clientID: *mqttOAuthID, clientSecretFile: *mqttSecret}
+	syncer, err := startKeySync(ctx, *mqttBroker, *mqttClientID, *shardID, keys.public, *publicKeyLeaseTTL, registry, mqttOAuth)
+	if err != nil {
+		return fmt.Errorf("start public key synchronization: %w", err)
+	}
+	go registry.byKID.Start()
+	defer registry.byKID.Stop()
+	defer syncer.Close()
 
-// getEnvOrDefaultInt returns the environment variable as int or the default if not set.
-func getEnvOrDefaultInt(key string, defaultValue int) int {
-	if value := os.Getenv(key); value != "" {
-		if intValue, err := strconv.Atoi(value); err == nil {
-			return intValue
+	server, err := NewExchangeServer(ctx, keys, registry, *socketPath, parsedJWKSURL.String())
+	if err != nil {
+		return fmt.Errorf("create exchange server: %w", err)
+	}
+	defer func() {
+		if err := server.jwtSource.Close(); err != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("close JWT source: %w", err))
 		}
+	}()
+	server.keySync = syncer
+
+	httpServer := &http.Server{
+		Addr:              *listenAddr,
+		Handler:           server.handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
-	return defaultValue
+	slog.Info("Starting SPIFFE Exchange Service", "listen_addr", *listenAddr, "issuer", identity.Issuer, "shard_id", *shardID, "active_kid", keys.activeKID)
+	if err := serveHTTP(ctx, httpServer); err != nil {
+		return fmt.Errorf("serve HTTP: %w", err)
+	}
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		slog.Error("SPIFFE Exchange Service failed", "error", err)
+		os.Exit(1)
+	}
 }

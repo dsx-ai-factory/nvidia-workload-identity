@@ -1,5 +1,5 @@
 #!/bin/bash
-# setup-cluster.sh - Creates the k1 Kind cluster (primary cluster)
+# setup-cluster.sh - Creates the Common Services Kind cluster
 # Uses default kindnet CNI - no OVN overhead needed
 
 set -euo pipefail
@@ -30,15 +30,19 @@ check_prerequisites() {
 }
 
 create_cluster() {
-    if kind get clusters | grep -q "^${CLUSTER_NAME}$"; then
+    local clusters
+    clusters=$(kind get clusters)
+    if grep -Fxq "${CLUSTER_NAME}" <<<"${clusters}"; then
         log_info "Cluster '${CLUSTER_NAME}' already exists, skipping creation"
+        kind_configure_context "${CLUSTER_NAME}" "${KIND_CONFIG}"
         kubectl wait --for=condition=Ready nodes --all --timeout=120s --context "kind-${CLUSTER_NAME}"
         log_success "Cluster '${CLUSTER_NAME}' ready"
         return 0
     fi
     
     log_info "Creating Kind cluster '${CLUSTER_NAME}'..."
-    kind create cluster --config="${KIND_CONFIG}" --name="${CLUSTER_NAME}"
+    kind_create_cluster "${CLUSTER_NAME}" "${KIND_CONFIG}"
+    kind_configure_context "${CLUSTER_NAME}" "${KIND_CONFIG}"
     
     kubectl wait --for=condition=Ready --timeout=120s -n kube-system pod -l component=kube-apiserver --context "kind-${CLUSTER_NAME}"
     kubectl wait --for=condition=Ready nodes --all --timeout=120s --context "kind-${CLUSTER_NAME}"
@@ -57,12 +61,14 @@ display_info() {
 
 cleanup() {
     log_info "Cleaning up k1 cluster..."
-    if kind get clusters | grep -q "^${CLUSTER_NAME}$"; then
-        kind delete cluster --name "${CLUSTER_NAME}"
-        log_success "Cluster '${CLUSTER_NAME}' deleted"
-    else
-        log_info "Cluster '${CLUSTER_NAME}' not found"
+    kind delete cluster --name "${CLUSTER_NAME}"
+    local clusters
+    clusters=$(kind get clusters)
+    if grep -Fxq "${CLUSTER_NAME}" <<<"${clusters}"; then
+        log_error "Cluster '${CLUSTER_NAME}' still exists after deletion"
+        return 1
     fi
+    log_success "Cluster '${CLUSTER_NAME}' is absent"
 }
 
 main() {
