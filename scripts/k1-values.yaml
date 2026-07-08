@@ -1,8 +1,8 @@
-# k1 umbrella chart values — primary cluster (SPIRE root + exchange service)
-# Used by: make spiffe (multi-cluster demo)
+# k1 umbrella chart values for the primary SPIRE and Exchange shard
+# Used by: make identity-k1
 
 global:
-  imageTag: "latest"
+  imageTag: "0.1.0"
   installAndUpgradeHooks:
     enabled: true
   spire:
@@ -10,90 +10,67 @@ global:
     clusterName: "k1"
     jwtIssuer: "spiffe://sjc-1.nvidia.com"
 
-spiffe-spire:
-  enabled: true
-  spire-crds:
-    enabled: false  # CRDs installed separately (Helm ordering)
-  spire:
-    spire-server:
-      defaultX509SvidTTL: "5m"
-      defaultJwtSvidTTL: "5m"
-      extraVolumes:
-        - name: k2-federation-ca
-          secret:
-            secretName: k2-federation-ca
-      extraVolumeMounts:
-        - name: k2-federation-ca
-          mountPath: /etc/ssl/certs/k2-federation-ca.crt
-          subPath: ca.crt
-          readOnly: true
-      extraEnv:
-        - name: SSL_CERT_FILE
-          value: /etc/ssl/certs/k2-federation-ca.crt
-      controllerManager:
-        identities:
-          clusterSPIFFEIDs:
-            exchange-service:
-              type: raw
-              podSelector:
-                matchLabels:
-                  app: spiffe-exchange
-              spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/ns/{{ .PodMeta.Namespace }}/sa/{{ .PodSpec.ServiceAccountName }}"
-            pod-workloads:
-              type: raw
-              podSelector:
-                matchExpressions:
-                - key: spiffe.nvidia.com/tenant
-                  operator: Exists
-                - key: spiffe.nvidia.com/service
-                  operator: Exists
-              spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/tenant/{{ index .PodMeta.Labels \"spiffe.nvidia.com/tenant\" }}/service/{{ index .PodMeta.Labels \"spiffe.nvidia.com/service\" }}/pod/{{ .PodMeta.UID }}"
-          clusterFederatedTrustDomains:
-            k2:
-              bundleEndpointURL: "https://gateway.k2.sjc-1.nvidia.com:8443"
-              bundleEndpointProfile:
-                type: "https_web"
-              trustDomain: "k2.sjc-1.nvidia.com"
-      federation:
-        enabled: true
-        bundleEndpoint:
-          enabled: false
-    spiffe-oidc-discovery-provider:
-      tls:
-        spire:
-          enabled: false
-
-spiffe-exchange:
+spire:
+  spire-server:
+    defaultX509SvidTTL: "5m"
+    defaultJwtSvidTTL: "5m"
+    controllerManager:
+      identities:
+        clusterSPIFFEIDs:
+          exchange-service:
+            type: raw
+            podSelector:
+              matchLabels:
+                app: spiffe-exchange
+            spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/ns/{{ .PodMeta.Namespace }}/sa/{{ .PodSpec.ServiceAccountName }}"
+          dsx-pod:
+            type: raw
+            podSelector:
+              matchExpressions:
+              - key: spiffe.nvidia.com/tenant
+                operator: Exists
+              - key: spiffe.nvidia.com/service
+                operator: In
+                values:
+                - dsx
+              - key: spiffe.nvidia.com/resource-type
+                operator: In
+                values:
+                - dpu
+                - host
+                - vm
+              - key: spiffe.nvidia.com/resource-id
+                operator: Exists
+            spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/tenant/{{ index .PodMeta.Labels \"spiffe.nvidia.com/tenant\" }}/service/dsx/{{ index .PodMeta.Labels \"spiffe.nvidia.com/resource-type\" }}/{{ index .PodMeta.Labels \"spiffe.nvidia.com/resource-id\" }}/pod/{{ .PodMeta.UID }}"
+exchange:
   enabled: true
   image:
     repository: spiffe-exchange-service
-    tag: latest
+    tag: "0.1.0"
     pullPolicy: Never
   imagePullSecrets: []
-  exchange:
-    region: sjc-1
-    baseDomain: nvidia.com
-    pgHost: "shared-pg-cluster-rw.cnpg-shared.svc.cluster.local"
-    pgDatabase: spiffe_exchange
-    pgUser: spiffe_exchange
-    pgPasswordSecret: "shared-pg-cluster-app"
-  dbMigration:
-    enabled: true
-  encryptionKeyset:
-    autoGenerate: true
-  route:
-    enabled: true
-    gatewayName: k1-gateway
-    gatewayNamespace: envoy-gateway-system
-    sectionName: exchange-service
+  jwksURL: http://spiffe-exchange.dsx-identity.svc.cluster.local:8080/.well-known/jwks.json
+  shardID: k1
+  signingKeysetSecret: spiffe-exchange-signing-keyset
+  mqtt:
+    brokerURL: tcp://nats:1883
+    oauth2:
+      tokenURL: http://keycloak-service.dsx-identity.svc.cluster.local:8080/realms/event-bus/protocol/openid-connect/token
+      clientID: spiffe-exchange
+      clientSecretSecret: spiffe-exchange-mqtt-oauth
+      clientSecretKey: client-secret
 
-spiffe-workload-support:
-  enabled: true
-  tokenFetcher:
-    image:
-      repository: spiffe-token-fetcher
-      tag: latest
-      pullPolicy: Never
+podTokenFetcher:
+  # The k1 E2E workload declares its token-fetcher explicitly. k1 does not
+  # install Kyverno in the multi-cluster profile.
+  enabled: false
+  image:
+    repository: dsx-token-fetcher
+    tag: "0.1.0"
+    pullPolicy: Never
 
-spiffe-vm-support:
+vmSupport:
+  enabled: false
+
+identityController:
   enabled: false

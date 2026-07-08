@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"sync"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
@@ -16,14 +16,7 @@ const (
 	Version = "0.1.0"
 )
 
-// Config is the configuration for the driver
-type Config struct {
-	NodeID     string
-	PluginName string
-	SocketDir  string
-}
-
-// Driver is the ephemeral-inline CSI driver implementation
+// Driver provides the ephemeral inline CSI service.
 type Driver struct {
 	csi.UnimplementedIdentityServer
 	csi.UnimplementedNodeServer
@@ -31,21 +24,14 @@ type Driver struct {
 	nodeID     string
 	pluginName string
 	socketDir  string
-}
-
-// NewDriver creates a new driver with the given config
-func NewDriver(config Config) (*Driver, error) {
-	if config.NodeID == "" {
-		return nil, errors.New("node ID is required")
+	mounts     struct {
+		// Kubelet may issue duplicate publish and unpublish RPCs concurrently.
+		// Serialize each external mount-state transition so retries are idempotent.
+		sync.Mutex
+		mount    func(string, string) error
+		unmount  func(string) error
+		sameFile func(string, string) (bool, error)
 	}
-	if config.SocketDir == "" {
-		return nil, errors.New("socket directory is required")
-	}
-	return &Driver{
-		nodeID:     config.NodeID,
-		pluginName: config.PluginName,
-		socketDir:  config.SocketDir,
-	}, nil
 }
 
 // Identity Server
@@ -88,14 +74,21 @@ func (d *Driver) NodePublishVolume(_ context.Context, req *csi.NodePublishVolume
 	case ephemeralMode != "true":
 		return nil, status.Error(codes.InvalidArgument, "only ephemeral volumes supported")
 	}
+	d.mounts.Lock()
+	defer d.mounts.Unlock()
 
-	// Create target path
 	if err := os.MkdirAll(req.TargetPath, 0755); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create target path: %v", err)
 	}
+	same, err := d.sameMount(req.TargetPath)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to inspect target path: %v", err)
+	}
+	if same {
+		return &csi.NodePublishVolumeResponse{}, nil
+	}
 
-	// Bind mount the socket directory
-	if err := bindMount(d.socketDir, req.TargetPath); err != nil {
+	if err := d.bindMount(d.socketDir, req.TargetPath); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to bind mount: %v", err)
 	}
 
@@ -114,8 +107,10 @@ func (d *Driver) NodeUnpublishVolume(_ context.Context, req *csi.NodeUnpublishVo
 	case req.TargetPath == "":
 		return nil, status.Error(codes.InvalidArgument, "target path required")
 	}
+	d.mounts.Lock()
+	defer d.mounts.Unlock()
 
-	if err := unmount(req.TargetPath); err != nil {
+	if err := d.unmountPath(req.TargetPath); err != nil && !os.IsNotExist(err) {
 		return nil, status.Errorf(codes.Internal, "failed to unmount: %v", err)
 	}
 
@@ -125,6 +120,37 @@ func (d *Driver) NodeUnpublishVolume(_ context.Context, req *csi.NodeUnpublishVo
 
 	slog.Info("Volume unpublished", "volume_id", req.VolumeId)
 	return &csi.NodeUnpublishVolumeResponse{}, nil
+}
+
+func (d *Driver) bindMount(source, target string) error {
+	if d.mounts.mount != nil {
+		return d.mounts.mount(source, target)
+	}
+	return bindMount(source, target)
+}
+
+func (d *Driver) unmountPath(target string) error {
+	if d.mounts.unmount != nil {
+		return d.mounts.unmount(target)
+	}
+	return unmount(target)
+}
+
+func (d *Driver) sameMount(target string) (bool, error) {
+	if d.mounts.sameFile != nil {
+		return d.mounts.sameFile(d.socketDir, target)
+	}
+	sourceInfo, err := os.Stat(d.socketDir)
+	if err != nil {
+		return false, err
+	}
+	targetInfo, err := os.Stat(target)
+	if err != nil {
+		return false, err
+	}
+	// A bind mount refers to the same inode as its source. Comparing identity is
+	// more reliable than inferring mount state from path text.
+	return os.SameFile(sourceInfo, targetInfo), nil
 }
 
 func (d *Driver) NodeGetCapabilities(context.Context, *csi.NodeGetCapabilitiesRequest) (*csi.NodeGetCapabilitiesResponse, error) {

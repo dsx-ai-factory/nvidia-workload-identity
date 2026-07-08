@@ -1,0 +1,118 @@
+asyncapi: 3.1.0
+info:
+  title: DSX SPIFFE Exchange public keys
+  version: 1.0.0
+  description: |
+    Each Exchange publishes every public signing key separately. Messages use
+    MQTT 3.1.1 QoS 1 with retain enabled. Exchanges refresh publication leases
+    before their expiry and discard publications whose leases have expired.
+    Each lease allows three further publish opportunities before expiry. The
+    publication timestamp provides a best-effort startup freshness watermark.
+servers:
+  dsxExchange:
+    host: nats:1883
+    protocol: mqtt
+    protocolVersion: '3.1.1'
+channels:
+  publicKey:
+    address: spiffe-exchange/v1/pub-keys/shard/{shard_id}/kid/{kid}
+    parameters:
+      shard_id:
+        description: Stable Exchange shard identifier.
+        x-pattern: '^[A-Za-z0-9._:-]+$'
+        examples: [k1]
+      kid:
+        description: Globally unique public JWK key ID.
+        x-pattern: '^[^/+#[:space:]]+$'
+    messages:
+      publicKey:
+        $ref: '#/components/messages/PublicKey'
+operations:
+  publishPublicKey:
+    action: send
+    channel:
+      $ref: '#/channels/publicKey'
+    messages:
+      - $ref: '#/channels/publicKey/messages/publicKey'
+    bindings:
+      mqtt:
+        qos: 1
+        retain: true
+        bindingVersion: '0.2.0'
+  subscribePublicKeys:
+    action: receive
+    channel:
+      $ref: '#/channels/publicKey'
+    messages:
+      - $ref: '#/channels/publicKey/messages/publicKey'
+    bindings:
+      mqtt:
+        qos: 1
+        bindingVersion: '0.2.0'
+components:
+  messages:
+    PublicKey:
+      name: PublicKey
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/PublicKeyPublication'
+  schemas:
+    PublicKeyPublication:
+      type: object
+      additionalProperties: false
+      required: [published_at, lease_expires_at, jwk]
+      properties:
+        published_at:
+          type: integer
+          format: int64
+          description: Unix timestamp when the Exchange published this lease.
+        lease_expires_at:
+          type: integer
+          format: int64
+          description: Unix timestamp after which this publication must not be served.
+        jwk:
+          $ref: '#/components/schemas/PublicJwk'
+    PublicJwk:
+      type: object
+      additionalProperties: false
+      description: Public asymmetric signing JWK. Private parameters are forbidden.
+      required: [kty, alg, kid]
+      properties:
+        kty:
+          enum: [EC, RSA, OKP]
+        crv:
+          type: string
+        x:
+          type: string
+        y:
+          type: string
+        n:
+          type: string
+        e:
+          type: string
+        use:
+          const: sig
+        alg:
+          enum: [ES256, ES384, ES512, RS256, RS384, RS512, PS256, PS384, PS512, EdDSA]
+        kid:
+          type: string
+          minLength: 1
+      oneOf:
+        - properties:
+            kty:
+              const: EC
+          required: [crv, x, y]
+        - properties:
+            kty:
+              const: RSA
+          required: [n, e]
+        - properties:
+            kty:
+              const: OKP
+            crv:
+              const: Ed25519
+          required: [crv, x]
+      not:
+        anyOf:
+          - required: [d]
+          - required: [k]

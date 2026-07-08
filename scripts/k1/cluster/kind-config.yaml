@@ -1,11 +1,11 @@
-# Kind cluster configuration for k1 (primary cluster)
+# Kind cluster configuration for k1 Common Services
 # Uses default kindnet CNI - no OVN overhead needed
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 name: k1
 nodes:
 - role: control-plane
-  image: kindest/node:v1.31.9
+  image: kindest/node:v1.34.8@sha256:02722c2dedddcfc00febf5d27fbeb9b7b2c14294c82109ff4a85d89ac9ba3256
   kubeadmConfigPatches:
   - |
     kind: InitConfiguration

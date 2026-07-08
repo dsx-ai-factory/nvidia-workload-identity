@@ -25,11 +25,10 @@ Thumbs.db
 /dist/
 /build/
 /target/
-/cel-evaluator
-/spiffe-token-fetcher
+/dsx-token-fetcher
 /metadata-service
 /spiffe-exchange-service
-/mds-network-setup
+/dsx-imds-network-setup
 /exchange-proxy-csi
 
 # Test files and coverage

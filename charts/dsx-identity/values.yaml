@@ -1,0 +1,192 @@
+# DSX identity umbrella. Override the trust domain and cluster name per shard.
+global:
+  imageTag: ""
+  installAndUpgradeHooks:
+    enabled: false
+  spire:
+    trustDomain: ""
+    clusterName: ""
+    jwtIssuer: ""
+    caSubject:
+      country: US
+      organization: NVIDIA
+      commonName: SPIRE Server CA
+
+spire:
+  enabled: true
+  spire-server:
+    defaultX509SvidTTL: 1h
+    defaultJwtSvidTTL: 5m
+    controllerManager:
+      reconcile:
+        clusterFederatedTrustDomains: false
+      identities:
+        clusterSPIFFEIDs:
+          # The upstream chart enables sample identities by default.
+          default:
+            enabled: false
+          oidc-discovery-provider:
+            enabled: false
+          test-keys:
+            enabled: false
+          spike-keeper:
+            enabled: false
+          spike-nexus:
+            enabled: false
+          spike-pilot:
+            enabled: false
+          dsx-pod:
+            type: raw
+            podSelector:
+              matchExpressions:
+                - key: spiffe.nvidia.com/tenant
+                  operator: Exists
+                - key: spiffe.nvidia.com/service
+                  operator: In
+                  values: [dsx]
+                - key: spiffe.nvidia.com/resource-type
+                  operator: In
+                  values: [dpu, host, vm]
+                - key: spiffe.nvidia.com/resource-id
+                  operator: Exists
+            spiffeIDTemplate: 'spiffe://{{ .TrustDomain }}/tenant/{{ index .PodMeta.Labels "spiffe.nvidia.com/tenant" }}/service/dsx/{{ index .PodMeta.Labels "spiffe.nvidia.com/resource-type" }}/{{ index .PodMeta.Labels "spiffe.nvidia.com/resource-id" }}/pod/{{ .PodMeta.UID }}'
+  spiffe-oidc-discovery-provider:
+    enabled: false
+  spiffe-csi-driver:
+    enabled: true
+
+exchange:
+  enabled: true
+  image:
+    repository: nvcr.io/0837451325059433/components-dev/spiffe-exchange-service
+    tag: ""
+    pullPolicy: IfNotPresent
+  imagePullSecrets: []
+  replicas: 2
+  service:
+    type: ClusterIP
+    port: 8080
+  jwksURL: ""
+  logLevel: info
+  # Must match the Event Bus retained-message maxAge and cover DSX JWT validity.
+  publicKeyLeaseTTL: 10m
+  # Globally unique across every Exchange sharing this Event Bus fabric.
+  shardID: ""
+  signingKeysetSecret: spiffe-exchange-signing-keyset
+  mqtt:
+    brokerURL: ""
+    oauth2:
+      tokenURL: ""
+      clientID: spiffe-exchange
+      clientSecretSecret: spiffe-exchange-mqtt-oauth
+      clientSecretKey: client-secret
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+podTokenFetcher:
+  enabled: true
+  image:
+    repository: nvcr.io/0837451325059433/components-dev/dsx-token-fetcher
+    tag: ""
+    pullPolicy: IfNotPresent
+  audience: spiffe://ds9.dsx.nvid.id/openbao
+  outputPath: /var/run/secrets/nvidia.com/dsx/token
+  startupProbe:
+    httpGet:
+      path: /healthz
+      port: 8080
+    periodSeconds: 1
+    failureThreshold: 30
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 50m
+      memory: 64Mi
+  policy:
+    namespaceLabelSelector:
+      matchLabels:
+        spiffe.nvidia.com/enabled: "true"
+
+vmSupport:
+  enabled: false
+  proxyNamespace: exchange-proxy-system
+  socat:
+    image:
+      repository: alpine/socat
+      tag: 1.8.0.3
+      pullPolicy: IfNotPresent
+  nodeDriverRegistrar:
+    image:
+      repository: registry.k8s.io/sig-storage/csi-node-driver-registrar
+      tag: v2.12.0
+      pullPolicy: IfNotPresent
+  metadataService:
+    image:
+      repository: nvcr.io/0837451325059433/components-dev/metadata-service
+      tag: ""
+      pullPolicy: IfNotPresent
+  imdsNetworkSetup:
+    image:
+      repository: nvcr.io/0837451325059433/components-dev/dsx-imds-network-setup
+      tag: ""
+      pullPolicy: IfNotPresent
+  exchangeProxyCsi:
+    image:
+      repository: nvcr.io/0837451325059433/components-dev/exchange-proxy-csi
+      tag: ""
+      pullPolicy: IfNotPresent
+  resources:
+    proxy:
+      requests: {cpu: 10m, memory: 16Mi}
+      limits: {cpu: 50m, memory: 32Mi}
+    driver:
+      requests: {cpu: 10m, memory: 32Mi}
+      limits: {cpu: 50m, memory: 64Mi}
+    registrar:
+      requests: {cpu: 10m, memory: 16Mi}
+      limits: {cpu: 50m, memory: 32Mi}
+    metadata:
+      requests: {cpu: 50m, memory: 64Mi}
+      limits: {cpu: 100m, memory: 128Mi}
+    networkSetup:
+      requests: {cpu: 10m, memory: 32Mi}
+      limits: {cpu: 100m, memory: 64Mi}
+  policy:
+    annotation: spiffe.nvidia.com/inject-dsx-imds
+    namespaceSelector:
+      matchLabels:
+        spiffe.nvidia.com/vm-metadata-enabled: "true"
+    podSelector:
+      matchLabels:
+        kubevirt.io: virt-launcher
+    serviceAccount:
+      name: kubevirt-controller
+      namespace: kubevirt
+    svidHint: dsx-imds-vm
+    logLevel: info
+
+identityController:
+  enabled: false
+  image:
+    repository: nvcr.io/0837451325059433/components-dev/dsx-identity-controller
+    tag: ""
+    pullPolicy: IfNotPresent
+  operatorTenant: ""
+  dpuHolder:
+    namespace: ""
+    serviceAccount: dpu-token-fetcher
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi

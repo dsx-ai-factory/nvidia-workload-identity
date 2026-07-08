@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestIdentityRequest_Validation(t *testing.T) {
@@ -15,6 +18,7 @@ func TestIdentityRequest_Validation(t *testing.T) {
 		name           string
 		query          string
 		metadataHeader string
+		acceptHeader   string
 		wantStatus     int
 	}{
 		{
@@ -41,6 +45,13 @@ func TestIdentityRequest_Validation(t *testing.T) {
 			metadataHeader: "true",
 			wantStatus:     http.StatusBadRequest,
 		},
+		{
+			name:           "unsupported response type",
+			query:          "?aud=test",
+			metadataHeader: "true",
+			acceptHeader:   "application/xml",
+			wantStatus:     http.StatusNotAcceptable,
+		},
 	}
 
 	server := &MetadataServer{
@@ -57,6 +68,9 @@ func TestIdentityRequest_Validation(t *testing.T) {
 				req := httptest.NewRequest(http.MethodGet, endpoint+tt.query, nil)
 				if tt.metadataHeader != "" {
 					req.Header.Set("Metadata", tt.metadataHeader)
+				}
+				if tt.acceptHeader != "" {
+					req.Header.Set("Accept", tt.acceptHeader)
 				}
 				req.RemoteAddr = "10.0.0.1:12345"
 				rr := httptest.NewRecorder()
@@ -97,6 +111,11 @@ func TestIdentityRequest_RejectsForwardedRequests(t *testing.T) {
 			header: "X-Forwarded-Proto",
 			value:  "https",
 		},
+		{
+			name:   "empty X-Forwarded-For header",
+			header: "X-Forwarded-For",
+			value:  "",
+		},
 	}
 
 	server := &MetadataServer{
@@ -122,6 +141,69 @@ func TestIdentityRequest_RejectsForwardedRequests(t *testing.T) {
 				t.Errorf("body = %q, want to contain 'Forwarded requests not allowed'", rr.Body.String())
 			}
 		})
+	}
+}
+
+func TestExchangeSPIRESVIDUsesCSIUnixSocket(t *testing.T) {
+	t.Parallel()
+
+	socketPath := filepath.Join(t.TempDir(), "exchange.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/exchange" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+		}
+		if got := r.FormValue("subject_token"); got != "local-svid" {
+			t.Errorf("subject token = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"exchanged","token_type":"Bearer","expires_in":60}`))
+	})}
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(func() { _ = server.Close() })
+
+	metadata := &MetadataServer{exchangeSocket: socketPath, httpClient: newExchangeHTTPClient(socketPath)}
+	token, err := metadata.exchangeSPIRESVID(context.Background(), "local-svid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token.AccessToken != "exchanged" || !token.Expiry.After(time.Now()) {
+		t.Fatalf("token = %#v", token)
+	}
+}
+
+func TestExchangeSPIRESVIDRejectsUnavailableCSIUnixSocket(t *testing.T) {
+	t.Parallel()
+
+	socketPath := filepath.Join(t.TempDir(), "missing.sock")
+	metadata := &MetadataServer{exchangeSocket: socketPath, httpClient: newExchangeHTTPClient(socketPath)}
+	if _, err := metadata.exchangeSPIRESVID(context.Background(), "local-svid"); err == nil {
+		t.Fatal("expected unavailable Exchange proxy socket to fail")
+	}
+}
+
+func TestMetadataMuxHasNoSessionTokenEndpoint(t *testing.T) {
+	t.Parallel()
+
+	mux := newMetadataMux(new(MetadataServer))
+	for _, test := range []struct {
+		path   string
+		status int
+	}{
+		{path: "/latest/api/token", status: http.StatusNotFound},
+		{path: "/latest/meta-data/identity", status: http.StatusMethodNotAllowed},
+	} {
+		recorder := httptest.NewRecorder()
+		mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, test.path, nil))
+		if recorder.Code != test.status {
+			t.Fatalf("PUT %s status = %d, want %d", test.path, recorder.Code, test.status)
+		}
 	}
 }
 
@@ -164,6 +246,11 @@ func TestIsForwardedRequest(t *testing.T) {
 		{
 			name:    "multiple forwarding headers",
 			headers: map[string]string{"X-Forwarded-For": "192.0.2.60", "X-Forwarded-Proto": "https"},
+			want:    true,
+		},
+		{
+			name:    "empty forwarding header",
+			headers: map[string]string{"X-Forwarded-For": ""},
 			want:    true,
 		},
 	}
@@ -209,18 +296,16 @@ func TestIdentityResponse_JSONMarshaling(t *testing.T) {
 	}
 }
 
-// TestAcceptHeaderParsing tests the Accept header parsing logic
-// Note: Full integration tests with both response formats are done via make targets
 func TestAcceptHeaderParsing(t *testing.T) {
 	tests := []struct {
 		name         string
 		acceptHeader string
-		wantFormat   string // "application/json" or "text/plain"
+		wantFormat   string
+		wantErr      bool
 	}{
 		{
-			name:         "no Accept header defaults to JSON",
-			acceptHeader: "",
-			wantFormat:   "application/json",
+			name:       "no Accept header defaults to JSON",
+			wantFormat: "application/json",
 		},
 		{
 			name:         "Accept application/json returns JSON",
@@ -233,60 +318,50 @@ func TestAcceptHeaderParsing(t *testing.T) {
 			wantFormat:   "text/plain",
 		},
 		{
-			name:         "Accept with quality values prefers text/plain",
+			name:         "higher quality type is selected",
 			acceptHeader: "text/plain;q=0.9, application/json",
-			wantFormat:   "text/plain",
+			wantFormat:   "application/json",
 		},
 		{
-			name:         "Accept with multiple types prefers text/plain",
+			name:         "first supported type is selected",
 			acceptHeader: "text/plain, application/json",
 			wantFormat:   "text/plain",
 		},
 		{
-			name:         "Accept only JSON returns JSON",
-			acceptHeader: "application/json",
+			name:         "unsupported type is rejected",
+			acceptHeader: "application/xml",
+			wantErr:      true,
+		},
+		{
+			name:         "unsupported alternative is ignored",
+			acceptHeader: "application/xml, text/plain",
+			wantFormat:   "text/plain",
+		},
+		{
+			name:         "optional whitespace is parsed",
+			acceptHeader: " application/json",
 			wantFormat:   "application/json",
 		},
 		{
-			name:         "Accept unknown type defaults to JSON",
-			acceptHeader: "application/xml",
+			name:         "media type is case insensitive",
+			acceptHeader: "Application/Json",
 			wantFormat:   "application/json",
+		},
+		{
+			name:         "zero quality is rejected",
+			acceptHeader: "application/json;q=0",
+			wantErr:      true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Simulate Accept header parsing logic from handleIdentity
-			responseFormat := "application/json"
-			if tt.acceptHeader != "" {
-				acceptTypes := strings.Split(tt.acceptHeader, ",")
-				prefersTextPlain := false
-				prefersJSON := false
-
-				for _, acceptType := range acceptTypes {
-					acceptType = strings.TrimSpace(acceptType)
-					if idx := strings.Index(acceptType, ";"); idx != -1 {
-						acceptType = acceptType[:idx]
-					}
-					acceptType = strings.TrimSpace(acceptType)
-
-					if acceptType == "text/plain" {
-						prefersTextPlain = true
-					}
-					if acceptType == "application/json" {
-						prefersJSON = true
-					}
-				}
-
-				if prefersTextPlain {
-					responseFormat = "text/plain"
-				} else if prefersJSON {
-					responseFormat = "application/json"
-				}
+			got, err := determineResponseFormat(tt.acceptHeader)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
 			}
-
-			if responseFormat != tt.wantFormat {
-				t.Errorf("responseFormat = %q, want %q", responseFormat, tt.wantFormat)
+			if got != tt.wantFormat {
+				t.Errorf("determineResponseFormat() = %q, want %q", got, tt.wantFormat)
 			}
 		})
 	}

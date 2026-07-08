@@ -1,2 +1,0 @@
-spiffe-exchange chart installed.
-Configure image repository/tag and route host via values.yaml.

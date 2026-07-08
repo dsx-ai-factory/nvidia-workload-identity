@@ -1,0 +1,49 @@
+{
+  "id": "event-bus",
+  "realm": "event-bus",
+  "enabled": true,
+  "displayName": "Event Bus Realm",
+  "accessTokenLifespan": 300,
+  "attributes": {
+    "frontendUrl": "http://keycloak-service.dsx-identity.svc.cluster.local:8080"
+  },
+  "clients": [
+    {
+      "clientId": "spiffe-exchange",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "${SPIFFE_EXCHANGE_CLIENT_SECRET}",
+      "directAccessGrantsEnabled": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "defaultClientScopes": ["mqtt"],
+      "optionalClientScopes": []
+    }
+  ],
+  "clientScopes": [
+    {
+      "name": "mqtt",
+      "description": "DSX Event Bus MQTT access",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "dsx-exchange-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "dsx-exchange",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ]
+}

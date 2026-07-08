@@ -2,554 +2,551 @@ package main
 
 import (
 	"context"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	_ "crypto/sha256"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 
-	"spiffe-jwt-issuer/cmd/spiffe-exchange-service/keystore"
-	"spiffe-jwt-issuer/cmd/spiffe-exchange-service/keystore/memory"
+	"dsx-identity/internal/identity"
 )
 
-func TestParsePathComponents(t *testing.T) {
-	tests := []struct {
-		name             string
-		path             string
-		wantTenant       string
-		wantService      string
-		wantResourceType string
-		wantResourceID   string
-		wantErr          bool
-	}{
-		{
-			name:             "vm workload",
-			path:             "/tenant/tenant1/service/vmaas/vm/abc-123",
-			wantTenant:       "tenant1",
-			wantService:      "vmaas",
-			wantResourceType: "vm",
-			wantResourceID:   "abc-123",
-			wantErr:          false,
-		},
-		{
-			name:             "pod workload",
-			path:             "/tenant/acme-corp/service/default/pod/xyz-789",
-			wantTenant:       "acme-corp",
-			wantService:      "default",
-			wantResourceType: "pod",
-			wantResourceID:   "xyz-789",
-			wantErr:          false,
-		},
-		{
-			name:    "missing domain prefix",
-			path:    "/workload/pod/abc",
-			wantErr: true,
-		},
-		{
-			name:    "missing service segment",
-			path:    "/tenant/tenant1/vmaas/vm/abc",
-			wantErr: true,
-		},
-		{
-			name:    "insufficient components",
-			path:    "/tenant/tenant1/service/vmaas",
-			wantErr: true,
-		},
-		{
-			name:    "empty path",
-			path:    "",
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := parsePathComponents(tt.path)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if tt.wantErr {
-				return
-			}
-			if got.Tenant != tt.wantTenant {
-				t.Errorf("Tenant = %q, want %q", got.Tenant, tt.wantTenant)
-			}
-			if got.Service != tt.wantService {
-				t.Errorf("Service = %q, want %q", got.Service, tt.wantService)
-			}
-			if got.ResourceType != tt.wantResourceType {
-				t.Errorf("ResourceType = %q, want %q", got.ResourceType, tt.wantResourceType)
-			}
-			if got.ResourceID != tt.wantResourceID {
-				t.Errorf("ResourceID = %q, want %q", got.ResourceID, tt.wantResourceID)
-			}
-		})
+func TestServeHTTPStopsWhenContextIsAlreadyCanceled(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	server := &http.Server{Addr: "127.0.0.1:0", Handler: http.NotFoundHandler()}
+	if err := serveHTTP(ctx, server); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestTrustDomainFromHost(t *testing.T) {
-	tests := []struct {
-		name string
-		host string
-		want string
-	}{
-		{"host with port", "tenant1.sjc-1.internal.nvidia.com:8080", "tenant1.sjc-1.internal.nvidia.com"},
-		{"host without port", "tenant1.sjc-1.internal.nvidia.com", "tenant1.sjc-1.internal.nvidia.com"},
-		{"host with 443", "acme.example.com:443", "acme.example.com"},
-		{"localhost with port", "localhost:8080", "localhost"},
-		{"IPv6 with port", "[::1]:8080", "::1"},
-		{"empty host", "", ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := trustDomainFromHost(tt.host)
-			if got != tt.want {
-				t.Errorf("trustDomainFromHost(%q) = %q, want %q", tt.host, got, tt.want)
-			}
-		})
-	}
-}
+func TestStaticSigningKeysetAndClaims(t *testing.T) {
+	t.Parallel()
 
-func TestTransformSpiffeID(t *testing.T) {
-	tests := []struct {
-		name       string
-		originalID string
-		region     string
-		baseDomain string
-		wantID     string
-		wantErr    bool
-	}{
-		{
-			name:       "vm workload",
-			originalID: "spiffe://k2.sjc-1.nvidia.com/tenant/tenant1/service/vmaas/vm/12345",
-			region:     "sjc-1",
-			baseDomain: "nvidia.com",
-			wantID:     "spiffe://tenant1.sjc-1.vmaas.nvidia.com/vm/12345",
-			wantErr:    false,
-		},
-		{
-			name:       "pod workload",
-			originalID: "spiffe://k2.sjc-1.nvidia.com/tenant/acme-corp/service/default/pod/abc-xyz",
-			region:     "sjc-1",
-			baseDomain: "nvidia.com",
-			wantID:     "spiffe://acme-corp.sjc-1.default.nvidia.com/pod/abc-xyz",
-			wantErr:    false,
-		},
-		{
-			name:       "missing domain prefix",
-			originalID: "spiffe://k2.sjc-1.nvidia.com/workload/pod/abc",
-			region:     "sjc-1",
-			baseDomain: "nvidia.com",
-			wantID:     "",
-			wantErr:    true,
-		},
-		{
-			name:       "missing product segment",
-			originalID: "spiffe://k2.sjc-1.nvidia.com/tenant/tenant1/vmaas/vm/abc",
-			region:     "sjc-1",
-			baseDomain: "nvidia.com",
-			wantID:     "",
-			wantErr:    true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			originalID, err := spiffeid.FromString(tt.originalID)
-			if err != nil {
-				t.Fatalf("failed to parse original ID: %v", err)
-			}
-
-			got, err := transformSpiffeID(originalID, tt.region, tt.baseDomain)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !tt.wantErr && got.String() != tt.wantID {
-				t.Errorf("got = %q, want %q", got.String(), tt.wantID)
-			}
-		})
-	}
-}
-
-func TestJWKS_UsesFullHostForKeyLookup(t *testing.T) {
-	// Regression test: JWKS handler was extracting only tenant prefix,
-	// looking for keys under "tenant1.nvidia.com" instead of "tenant1.sjc-1.internal.nvidia.com"
-
-	store := memory.New(keystore.ES256KeyGenerator{})
-	server := &ExchangeServer{
-		keyStore:   store,
-		baseDomain: "nvidia.com",
-		region:     "sjc-1",
-	}
-
-	// Pre-create a key for the full trust domain (simulating what transformSpiffeID does)
-	fullDomain := "tenant1.sjc-1.internal.nvidia.com"
-	dk, err := store.GetOrCreateKey(fullDomain)
+	active := testJWKForAlgorithm(t, "active", jose.ES384, false)
+	previous := testJWK(t, "previous", true)
+	jwksPath, kidPath := writeSigningFiles(t, []jose.JSONWebKey{active, previous}, "active")
+	keys, err := loadSigningKeyset(jwksPath, kidPath)
 	if err != nil {
-		t.Fatalf("failed to create key: %v", err)
+		t.Fatal(err)
 	}
-	expectedKID := dk.KeyID
+	if keys.activeKID != "active" || len(keys.public) != 2 {
+		t.Fatalf("loaded keyset = kid %q, %d public keys", keys.activeKID, len(keys.public))
+	}
+	for _, key := range keys.public {
+		if !key.IsPublic() {
+			t.Fatalf("published kid %q contains private material", key.KeyID)
+		}
+	}
 
-	// Make JWKS request with full domain as Host header
-	req := httptest.NewRequest("GET", "/.well-known/jwks.json", nil)
-	req.Host = fullDomain + ":8080"
+	server := &ExchangeServer{keys: keys}
+	original := map[string]any{
+		"iss":    "spiffe://k2.internal",
+		"sub":    "spiffe://k2.internal/original",
+		"aud":    []string{"spiffe://ds9.dsx.nvid.id/openbao"},
+		"iat":    int64(1700000000),
+		"exp":    int64(1700000300),
+		"custom": "preserved",
+	}
+	subject := spiffeid.RequireFromString("spiffe://nca-0000000000000001.ds9.dsx.nvid.id/host/host-1")
+	token, err := server.resignJWT(original, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := jwt.ParseSigned(token, []jose.SignatureAlgorithm{jose.SignatureAlgorithm(active.Algorithm)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := parsed.Headers[0].KeyID; got != "active" {
+		t.Fatalf("kid = %q, want active", got)
+	}
+	var claims map[string]any
+	if err := parsed.Claims(active.Public().Key, &claims); err != nil {
+		t.Fatal(err)
+	}
+	rawExpected, err := json.Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var expected map[string]any
+	if err := json.Unmarshal(rawExpected, &expected); err != nil {
+		t.Fatal(err)
+	}
+	expected["iss"] = identity.Issuer
+	expected["sub"] = subject.String()
+	if !reflect.DeepEqual(claims, expected) {
+		t.Fatalf("claims = %#v, want %#v", claims, expected)
+	}
+
+	otherSubject := spiffeid.RequireFromString("spiffe://nca-0000000000000002.ds9.dsx.nvid.id/vm/vm-2")
+	otherToken, err := server.resignJWT(original, otherSubject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherParsed, err := jwt.ParseSigned(otherToken, []jose.SignatureAlgorithm{jose.SignatureAlgorithm(active.Algorithm)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := otherParsed.Headers[0].KeyID; got != "active" {
+		t.Fatalf("second tenant kid = %q, want active", got)
+	}
+	var otherClaims map[string]any
+	if err := otherParsed.Claims(active.Public().Key, &otherClaims); err != nil {
+		t.Fatalf("verify second tenant token: %v", err)
+	}
+	if otherClaims["iss"] != identity.Issuer || otherClaims["sub"] != otherSubject.String() {
+		t.Fatalf("second tenant claims = %#v", otherClaims)
+	}
+
+	reloaded, err := loadSigningKeyset(jwksPath, kidPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keys.public) != len(reloaded.public) || !verifyJWKPresent(reloaded.public, keys.public[0]) {
+		t.Fatal("reloading the mounted keyset changed its public keys")
+	}
+}
+
+func TestRejectInvalidSigningConfiguration(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		mutate func(*jose.JSONWebKey)
+		kid    string
+	}{
+		{name: "missing kid", mutate: func(k *jose.JSONWebKey) { k.KeyID = "" }, kid: "active"},
+		{name: "algorithm does not match key", mutate: func(k *jose.JSONWebKey) { k.Algorithm = "ES384" }, kid: "active"},
+		{name: "unsupported use", mutate: func(k *jose.JSONWebKey) { k.Use = "enc" }, kid: "active"},
+		{name: "symmetric key", mutate: func(k *jose.JSONWebKey) { k.Key = []byte("symmetric") }, kid: "active"},
+		{name: "public active key", mutate: func(k *jose.JSONWebKey) { *k = k.Public() }, kid: "active"},
+		{name: "unknown active kid", mutate: func(*jose.JSONWebKey) {}, kid: "missing"},
+		{name: "active kid whitespace", mutate: func(*jose.JSONWebKey) {}, kid: " active"},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			key := testJWK(t, "active", false)
+			test.mutate(&key)
+			jwksPath, kidPath := writeSigningFiles(t, []jose.JSONWebKey{key}, test.kid)
+			if _, err := loadSigningKeyset(jwksPath, kidPath); err == nil {
+				t.Fatal("expected invalid configuration to fail")
+			}
+		})
+	}
+
+	t.Run("empty keyset", func(t *testing.T) {
+		jwksPath, kidPath := writeSigningFiles(t, nil, "active")
+		if _, err := loadSigningKeyset(jwksPath, kidPath); err == nil {
+			t.Fatal("empty keyset was accepted")
+		}
+	})
+	t.Run("duplicate kid", func(t *testing.T) {
+		key := testJWK(t, "active", false)
+		jwksPath, kidPath := writeSigningFiles(t, []jose.JSONWebKey{key, key}, "active")
+		if _, err := loadSigningKeyset(jwksPath, kidPath); err == nil {
+			t.Fatal("duplicate kid was accepted")
+		}
+	})
+	t.Run("malformed JSON", func(t *testing.T) {
+		jwksPath, kidPath := writeSigningFiles(t, []jose.JSONWebKey{testJWK(t, "active", false)}, "active")
+		if err := os.WriteFile(jwksPath, []byte(`{"keys":[`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadSigningKeyset(jwksPath, kidPath); err == nil {
+			t.Fatal("malformed JWKS was accepted")
+		}
+	})
+	t.Run("missing files", func(t *testing.T) {
+		dir := t.TempDir()
+		if _, err := loadSigningKeyset(filepath.Join(dir, "missing-jwks"), filepath.Join(dir, "missing-kid")); err == nil {
+			t.Fatal("missing signing files were accepted")
+		}
+	})
+}
+
+func TestRegistryValidatesPublications(t *testing.T) {
+	t.Parallel()
+
+	registry := newKeyRegistry()
+	first := testJWK(t, "first-kid", true)
+	second := testJWKForAlgorithm(t, "second-kid", jose.ES384, true)
+	if err := registerTestKey(registry, first, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if err := registerTestKey(registry, second, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if got := registry.keyset().Keys; len(got) != 2 || got[0].KeyID != first.KeyID || got[1].KeyID != second.KeyID {
+		t.Fatalf("aggregate key order = %v, want [%s %s]", keyIDs(got), first.KeyID, second.KeyID)
+	}
+	private := testJWK(t, "private", false)
+	if err := replaceTestPayload(registry, private.KeyID, rawPublishedKey(t, private, time.Hour)); err == nil {
+		t.Fatal("private key was accepted")
+	}
+	if err := replaceTestPayload(registry, second.KeyID, []byte(`{"jwk":`)); err == nil {
+		t.Fatal("malformed publication was accepted")
+	}
+	if err := replaceTestPayload(registry, second.KeyID, rawPublishedKey(t, second, -time.Second)); err == nil {
+		t.Fatal("publication with an expired lease was accepted")
+	}
+	if got := registry.keyset().Keys; len(got) != 2 ||
+		!verifyJWKPresent(got, first) || !verifyJWKPresent(got, second) {
+		t.Fatalf("invalid publication changed aggregate: %#v", got)
+	}
+}
+
+func TestAggregatesVerifyFlatKidsAndRotation(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+
+	type shard struct {
+		id    string
+		key   jose.JSONWebKey
+		token string
+	}
+	shards := make([]shard, 0, 5)
+	for _, id := range []string{"shard-a", "shard-b", "shard-c", "shard-d", "shard-e"} {
+		algorithm := jose.ES256
+		if id == "shard-b" {
+			algorithm = jose.ES384
+		}
+		key := testJWKForAlgorithm(t, id+"-kid", algorithm, false)
+		shards = append(shards, shard{id: id, key: key, token: signTestToken(t, key)})
+	}
+	registries := []*keyRegistry{newKeyRegistry(), newKeyRegistry(), newKeyRegistry()}
+	for _, registry := range registries {
+		for _, shard := range shards {
+			leaseExpiresAt := now.Add(2 * time.Hour)
+			if shard.id == "shard-b" {
+				leaseExpiresAt = now.Add(time.Hour)
+			}
+			if err := registry.replace(shard.key.KeyID, publishedKey{
+				key:            shard.key.Public(),
+				leaseExpiresAt: leaseExpiresAt,
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for i, registry := range registries {
+		if len(registry.keyset().Keys) != len(shards) {
+			t.Fatalf("aggregate %d has the wrong key count", i)
+		}
+		for _, shard := range shards {
+			if !verifyTestToken(registry.keyset(), shard.token) {
+				t.Fatalf("aggregate %d did not verify %s token", i, shard.id)
+			}
+		}
+	}
+
+	rotated := &shards[1]
+	newKey := testJWK(t, rotated.id+"-rotated-kid", false)
+	newToken := signTestToken(t, newKey)
+	for i, registry := range registries {
+		if err := registry.replace(newKey.KeyID, publishedKey{
+			key:            newKey.Public(),
+			leaseExpiresAt: now.Add(2 * time.Hour),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if len(registry.keyset().Keys) != len(shards)+1 || !verifyTestToken(registry.keyset(), newToken) {
+			t.Fatalf("aggregate %d did not preserve both rotation keys", i)
+		}
+		for _, shard := range shards {
+			if !verifyTestToken(registry.keyset(), shard.token) {
+				t.Fatalf("aggregate %d lost %s during key rotation", i, shard.id)
+			}
+		}
+	}
+
+	for i, registry := range registries {
+		registry.byKID.Delete(rotated.key.KeyID)
+		if len(registry.keyset().Keys) != len(shards) || !verifyTestToken(registry.keyset(), newToken) {
+			t.Fatalf("aggregate %d did not retain only the new key after retirement", i)
+		}
+		for _, shard := range shards {
+			valid := verifyTestToken(registry.keyset(), shard.token)
+			if shard.id == rotated.id && valid {
+				t.Fatalf("aggregate %d retained %s retired key", i, shard.id)
+			}
+			if shard.id != rotated.id && !valid {
+				t.Fatalf("aggregate %d lost %s during retirement", i, shard.id)
+			}
+		}
+	}
+}
+
+func verifyJWKPresent(keys []jose.JSONWebKey, want jose.JSONWebKey) bool {
+	wantThumbprint, err := want.Thumbprint(crypto.SHA256)
+	if err != nil {
+		return false
+	}
+	for _, key := range keys {
+		thumbprint, err := key.Thumbprint(crypto.SHA256)
+		if err == nil && key.KeyID == want.KeyID && string(thumbprint) == string(wantThumbprint) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestJWKSAndDiscoveryAreConfiguredNotHostScoped(t *testing.T) {
+	t.Parallel()
+
+	registry := newKeyRegistry()
+	if err := registerTestKey(registry, testJWK(t, "one", true), time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if err := registerTestKey(registry, testJWKForAlgorithm(t, "two", jose.ES384, true), time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	server := &ExchangeServer{
+		registry: registry,
+		jwksURL:  "https://exchange.example/.well-known/jwks.json",
+	}
+
+	var previous string
+	for _, host := range []string{"tenant-one.example", "tenant-two.example"} {
+		req := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
+		req.Host = host
+		rec := httptest.NewRecorder()
+		server.handleJWKS(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("host %s status = %d", host, rec.Code)
+		}
+		if previous != "" && previous != rec.Body.String() {
+			t.Fatal("JWKS changed with Host header")
+		}
+		previous = rec.Body.String()
+	}
+
 	rec := httptest.NewRecorder()
-
-	server.handleJWKS(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-
-	// Verify the returned JWKS contains the key we created
-	var jwks struct {
-		Keys []struct {
-			Kid string `json:"kid"`
-		} `json:"keys"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&jwks); err != nil {
-		t.Fatalf("failed to decode JWKS: %v", err)
-	}
-
-	if len(jwks.Keys) == 0 {
-		t.Fatal("expected at least one key in JWKS")
-	}
-
-	// The key ID should match the one we created for the full domain
-	if jwks.Keys[0].Kid != expectedKID.String() {
-		t.Errorf("key ID = %q, want %q", jwks.Keys[0].Kid, expectedKID.String())
-	}
-}
-
-// mockKeyStore implements keystore.KeyStore for testing handlers
-type mockKeyStore struct {
-	keys   map[string]keystore.DomainKey
-	keygen keystore.KeyGenerator
-}
-
-func newMockKeyStore() *mockKeyStore {
-	return &mockKeyStore{
-		keys:   make(map[string]keystore.DomainKey),
-		keygen: keystore.ES256KeyGenerator{},
-	}
-}
-
-func (m *mockKeyStore) GetOrCreateKey(trustDomain string) (keystore.DomainKey, error) {
-	if dk, ok := m.keys[trustDomain]; ok {
-		return dk, nil
-	}
-	dk, err := m.keygen.GenerateKey()
-	if err != nil {
-		return keystore.DomainKey{}, err
-	}
-	m.keys[trustDomain] = dk
-	return dk, nil
-}
-
-func (m *mockKeyStore) GetKeys(trustDomain string) ([]keystore.DomainKey, error) {
-	dk, err := m.GetOrCreateKey(trustDomain)
-	if err != nil {
-		return nil, err
-	}
-	return []keystore.DomainKey{dk}, nil
-}
-
-func TestHandleJWKS(t *testing.T) {
-	keyStore := newMockKeyStore()
-	server := &ExchangeServer{
-		keyStore:   keyStore,
-		baseDomain: "nvidia.com",
-	}
-
-	tests := []struct {
-		name       string
-		host       string
-		wantStatus int
-		wantKeys   int
-	}{
-		{
-			name:       "valid request",
-			host:       "tenant1.default.svc.cluster.local",
-			wantStatus: http.StatusOK,
-			wantKeys:   1,
-		},
-		{
-			name:       "simple tenant host",
-			host:       "acme.example.com",
-			wantStatus: http.StatusOK,
-			wantKeys:   1,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
-			if tt.host != "" {
-				req.Host = tt.host
-			}
-			rr := httptest.NewRecorder()
-
-			server.handleJWKS(rr, req)
-
-			if rr.Code != tt.wantStatus {
-				t.Errorf("status = %d, want %d", rr.Code, tt.wantStatus)
-			}
-
-			if tt.wantStatus == http.StatusOK {
-				var jwks jose.JSONWebKeySet
-				if err := json.NewDecoder(rr.Body).Decode(&jwks); err != nil {
-					t.Fatalf("failed to decode JWKS: %v", err)
-				}
-				if len(jwks.Keys) != tt.wantKeys {
-					t.Errorf("got %d keys, want %d", len(jwks.Keys), tt.wantKeys)
-				}
-				if tt.wantKeys > 0 {
-					key := jwks.Keys[0]
-					if key.KeyID == "" {
-						t.Error("key ID should not be empty")
-					}
-					if key.Algorithm != "ES256" {
-						t.Errorf("algorithm = %s, want ES256", key.Algorithm)
-					}
-					if key.Use != "sig" {
-						t.Errorf("use = %s, want sig", key.Use)
-					}
-				}
-			}
-		})
-	}
-}
-
-func TestHandleOIDCDiscovery(t *testing.T) {
-	keyStore := newMockKeyStore()
-	server := &ExchangeServer{
-		keyStore:   keyStore,
-		baseDomain: "nvidia.com",
-		region:     "sjc-1",
-	}
-
-	tests := []struct {
-		name              string
-		host              string
-		wantStatus        int
-		wantIssuer        string
-		wantJWKSURIPrefix string
-	}{
-		{
-			name:              "valid request with port",
-			host:              "tenant1.sjc-1.internal.nvidia.com:8080",
-			wantStatus:        http.StatusOK,
-			wantIssuer:        "spiffe://tenant1.sjc-1.internal.nvidia.com",
-			wantJWKSURIPrefix: "http://tenant1.sjc-1.internal.nvidia.com:8080/.well-known/jwks.json",
-		},
-		{
-			name:              "valid request without port",
-			host:              "tenant1.sjc-1.internal.nvidia.com",
-			wantStatus:        http.StatusOK,
-			wantIssuer:        "spiffe://tenant1.sjc-1.internal.nvidia.com",
-			wantJWKSURIPrefix: "http://tenant1.sjc-1.internal.nvidia.com/.well-known/jwks.json",
-		},
-		{
-			name:       "empty host returns 400",
-			host:       "",
-			wantStatus: http.StatusBadRequest,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/.well-known/openid-configuration", nil)
-			req.Host = tt.host
-			rr := httptest.NewRecorder()
-
-			server.handleOIDCDiscovery(rr, req)
-
-			if rr.Code != tt.wantStatus {
-				t.Errorf("status = %d, want %d", rr.Code, tt.wantStatus)
-			}
-			if tt.wantStatus != http.StatusOK {
-				return
-			}
-			if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
-				t.Errorf("Content-Type = %q, want application/json", ct)
-			}
-			var cfg oidc.ProviderConfig
-			if err := json.NewDecoder(rr.Body).Decode(&cfg); err != nil {
-				t.Fatalf("decode discovery JSON: %v", err)
-			}
-			if cfg.IssuerURL != tt.wantIssuer {
-				t.Errorf("issuer = %q, want %q", cfg.IssuerURL, tt.wantIssuer)
-			}
-			if tt.wantJWKSURIPrefix != "" && cfg.JWKSURL != tt.wantJWKSURIPrefix {
-				t.Errorf("jwks_uri = %q, want %q", cfg.JWKSURL, tt.wantJWKSURIPrefix)
-			}
-			if len(cfg.Algorithms) != 1 || cfg.Algorithms[0] != "ES256" {
-				t.Errorf("algorithms = %v, want [ES256]", cfg.Algorithms)
-			}
-		})
-	}
-}
-
-// discoveryRoundTripper forwards discovery requests to the handler instead of the network.
-type discoveryRoundTripper struct {
-	server *ExchangeServer
-}
-
-func (d discoveryRoundTripper) RoundTrip(outReq *http.Request) (*http.Response, error) {
-	inReq := httptest.NewRequest(outReq.Method, outReq.URL.RequestURI(), nil)
-	inReq.Host = outReq.URL.Host
-	rr := httptest.NewRecorder()
-	d.server.handleOIDCDiscovery(rr, inReq)
-	return rr.Result(), nil
-}
-
-func TestOIDCClientDiscovery(t *testing.T) {
-	keyStore := newMockKeyStore()
-	server := &ExchangeServer{
-		keyStore:   keyStore,
-		baseDomain: "nvidia.com",
-		region:     "sjc-1",
-	}
-	client := &http.Client{
-		Transport: discoveryRoundTripper{server: server},
-	}
-	ctx := oidc.ClientContext(context.Background(), client)
-	path := "http://tenant1.sjc-1.internal.nvidia.com/.well-known/openid-configuration"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
+	server.handleOIDCDiscovery(rec, httptest.NewRequest(http.MethodGet, "/.well-known/openid-configuration", nil))
 	var cfg oidc.ProviderConfig
-	if err := json.NewDecoder(resp.Body).Decode(&cfg); err != nil {
-		t.Fatalf("decode discovery: %v", err)
+	if err := json.NewDecoder(rec.Body).Decode(&cfg); err != nil {
+		t.Fatal(err)
 	}
-	// ProviderConfig.NewProvider builds a Provider from the document without re-fetching; validates the library accepts our shape.
-	provider := cfg.NewProvider(ctx)
-	if provider == nil {
-		t.Fatal("NewProvider returned nil")
+	if cfg.IssuerURL != identity.Issuer || cfg.JWKSURL != server.jwksURL ||
+		!reflect.DeepEqual(cfg.Algorithms, []string{"ES256", "ES384"}) {
+		t.Fatalf("unexpected discovery: %#v", cfg)
 	}
-	_ = provider.Endpoint()
 }
 
-func TestHandleTokenExchange_InvalidRequests(t *testing.T) {
-	keyStore := newMockKeyStore()
-	server := &ExchangeServer{
-		keyStore:   keyStore,
-		baseDomain: "nvidia.com",
-	}
+func TestTokenExchangeRequestContract(t *testing.T) {
+	t.Parallel()
 
+	server := new(ExchangeServer)
 	tests := []struct {
 		name        string
 		contentType string
 		body        string
-		wantStatus  int
-		wantError   string
+		status      int
+		code        string
 	}{
-		{
-			name:        "wrong content type",
-			contentType: "application/json",
-			body:        `{"jwt":"test"}`,
-			wantStatus:  http.StatusUnsupportedMediaType,
-			wantError:   "invalid_request",
-		},
-		{
-			name:        "missing grant_type",
-			contentType: "application/x-www-form-urlencoded",
-			body:        "subject_token=test&subject_token_type=urn:ietf:params:oauth:token-type:jwt",
-			wantStatus:  http.StatusBadRequest,
-			wantError:   "unsupported_grant_type",
-		},
-		{
-			name:        "wrong grant_type",
-			contentType: "application/x-www-form-urlencoded",
-			body:        "grant_type=client_credentials&subject_token=test&subject_token_type=urn:ietf:params:oauth:token-type:jwt",
-			wantStatus:  http.StatusBadRequest,
-			wantError:   "unsupported_grant_type",
-		},
-		{
-			name:        "missing subject_token",
-			contentType: "application/x-www-form-urlencoded",
-			body:        "grant_type=urn:ietf:params:oauth:grant-type:token-exchange&subject_token_type=urn:ietf:params:oauth:token-type:jwt",
-			wantStatus:  http.StatusBadRequest,
-			wantError:   "invalid_request",
-		},
-		{
-			name:        "wrong subject_token_type",
-			contentType: "application/x-www-form-urlencoded",
-			body:        "grant_type=urn:ietf:params:oauth:grant-type:token-exchange&subject_token=test&subject_token_type=urn:ietf:params:oauth:token-type:access_token",
-			wantStatus:  http.StatusBadRequest,
-			wantError:   "invalid_request",
-		},
+		{"wrong content type", "application/json", `{}`, http.StatusUnsupportedMediaType, "invalid_request"},
+		{"malformed content type", ContentTypeFormURLEncoded + "; charset", ``, http.StatusUnsupportedMediaType, "invalid_request"},
+		{"content type parameters", ContentTypeFormURLEncoded + "; charset=utf-8", ``, http.StatusBadRequest, "unsupported_grant_type"},
+		{"content type case", "Application/X-Www-Form-Urlencoded", ``, http.StatusBadRequest, "unsupported_grant_type"},
+		{"missing grant", ContentTypeFormURLEncoded, "subject_token=x&subject_token_type=" + TokenTypeJWT, http.StatusBadRequest, "unsupported_grant_type"},
+		{"missing subject", ContentTypeFormURLEncoded, "grant_type=" + GrantTypeTokenExchange + "&subject_token_type=" + TokenTypeJWT, http.StatusBadRequest, "invalid_request"},
+		{"wrong token type", ContentTypeFormURLEncoded, "grant_type=" + GrantTypeTokenExchange + "&subject_token=x&subject_token_type=access_token", http.StatusBadRequest, "invalid_request"},
+		{"malformed subject token", ContentTypeFormURLEncoded, "grant_type=" + GrantTypeTokenExchange + "&subject_token=not-a-jwt&subject_token_type=" + TokenTypeJWT, http.StatusBadRequest, "invalid_request"},
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/v1/exchange", strings.NewReader(tt.body))
-			req.Header.Set("Content-Type", tt.contentType)
-			rr := httptest.NewRecorder()
-
-			server.handleTokenExchange(rr, req)
-
-			if rr.Code != tt.wantStatus {
-				t.Errorf("status = %d, want %d, body: %s", rr.Code, tt.wantStatus, rr.Body.String())
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			req := httptest.NewRequest(http.MethodPost, "/v1/exchange", strings.NewReader(test.body))
+			req.Header.Set("Content-Type", test.contentType)
+			rec := httptest.NewRecorder()
+			server.handleTokenExchange(rec, req)
+			if rec.Code != test.status {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, test.status, rec.Body.String())
 			}
-
-			// Verify error response format
-			var errResp TokenExchangeErrorResponse
-			if err := json.NewDecoder(rr.Body).Decode(&errResp); err != nil {
-				t.Fatalf("failed to decode error response: %v", err)
+			var response TokenExchangeErrorResponse
+			if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+				t.Fatal(err)
 			}
-			if errResp.Error != tt.wantError {
-				t.Errorf("error = %q, want %q", errResp.Error, tt.wantError)
+			if response.Error != test.code {
+				t.Fatalf("error = %q, want %q", response.Error, test.code)
 			}
 		})
 	}
 }
 
-func must[T any](value T, err error) T {
-	if err != nil {
-		panic(err)
+func TestLiveAggregateVerifiesTokens(t *testing.T) {
+	rawJWKS := os.Getenv("DSX_E2E_VERIFY_JWKS")
+	rawTokens := os.Getenv("DSX_E2E_VERIFY_TOKENS")
+	if rawJWKS == "" && rawTokens == "" {
+		t.Skip("live aggregate inputs are not set")
 	}
-	return value
+	var keys jose.JSONWebKeySet
+	if err := json.Unmarshal([]byte(rawJWKS), &keys); err != nil {
+		t.Fatalf("parse live JWKS: %v", err)
+	}
+	var tokens []string
+	if err := json.Unmarshal([]byte(rawTokens), &tokens); err != nil {
+		t.Fatalf("parse live tokens: %v", err)
+	}
+	if len(keys.Keys) == 0 || len(tokens) == 0 {
+		t.Fatal("live JWKS and tokens must be non-empty")
+	}
+	for i, token := range tokens {
+		if !verifyTestToken(keys, token) {
+			t.Fatalf("live aggregate did not verify token %d", i)
+		}
+	}
 }
 
-func TestGenerateKeyID(t *testing.T) {
-	gen := keystore.ES256KeyGenerator{}
+func testJWK(t *testing.T, kid string, public bool) jose.JSONWebKey {
+	return testJWKForAlgorithm(t, kid, jose.ES256, public)
+}
 
-	// Generate two different keys
-	dk1 := must(gen.GenerateKey())
-	dk2 := must(gen.GenerateKey())
-
-	kid1 := keystore.GenerateKeyID(dk1.Signer.Public())
-	kid2 := keystore.GenerateKeyID(dk2.Signer.Public())
-
-	// Same key should produce same ID
-	kid1Again := keystore.GenerateKeyID(dk1.Signer.Public())
-	if kid1 != kid1Again {
-		t.Error("same key should produce same key ID")
+func testJWKForAlgorithm(t *testing.T, kid string, algorithm jose.SignatureAlgorithm, public bool) jose.JSONWebKey {
+	t.Helper()
+	curve := elliptic.P256()
+	switch algorithm {
+	case jose.ES384:
+		curve = elliptic.P384()
+	case jose.ES512:
+		curve = elliptic.P521()
+	case jose.ES256:
+	default:
+		t.Fatalf("test algorithm %q is unsupported", algorithm)
 	}
-
-	// Different keys should produce different IDs
-	if kid1 == kid2 {
-		t.Error("different keys should produce different key IDs")
+	key, err := ecdsa.GenerateKey(curve, rand.Reader)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	// Key ID should be non-empty
-	if kid1 == "" || kid2 == "" {
-		t.Error("key ID should not be empty")
+	jwk := jose.JSONWebKey{Key: key, KeyID: kid, Algorithm: string(algorithm), Use: "sig"}
+	if public {
+		return jwk.Public()
 	}
+	return jwk
+}
+
+func writeSigningFiles(t *testing.T, keys []jose.JSONWebKey, activeKID string) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	jwksPath := filepath.Join(dir, "signing-jwks.json")
+	kidPath := filepath.Join(dir, "active-kid")
+	raw, err := json.Marshal(jose.JSONWebKeySet{Keys: keys})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(jwksPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(kidPath, []byte(activeKID), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return jwksPath, kidPath
+}
+
+func addJWKField(t *testing.T, payload []byte, name string, value any) []byte {
+	t.Helper()
+	var raw struct {
+		JWK map[string]any `json:"jwk"`
+	}
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		t.Fatal(err)
+	}
+	raw.JWK[name] = value
+	updated, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return updated
+}
+
+func testPublishedKey(t *testing.T, key jose.JSONWebKey, leaseDuration time.Duration) []byte {
+	t.Helper()
+	publishedAt := time.Now()
+	payload, err := marshalPublicKey(key, publishedAt, publishedAt.Add(leaseDuration))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
+
+func rawPublishedKey(t *testing.T, key jose.JSONWebKey, leaseDuration time.Duration) []byte {
+	t.Helper()
+	publishedAt := time.Now()
+	payload, err := json.Marshal(publicKeyPublication{
+		PublishedAt:    publishedAt.Unix(),
+		LeaseExpiresAt: publishedAt.Add(leaseDuration).Unix(),
+		JWK:            key,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
+
+func replaceTestPayload(registry *keyRegistry, keyID string, payload []byte) error {
+	publication, err := decodePublishedKey(payload)
+	if err != nil {
+		return err
+	}
+	return registry.replace(keyID, publication)
+}
+
+func registerTestKey(registry *keyRegistry, key jose.JSONWebKey, leaseDuration time.Duration) error {
+	return registry.replace(key.KeyID, publishedKey{key: key, leaseExpiresAt: time.Now().Add(leaseDuration)})
+}
+
+func signTestToken(t *testing.T, key jose.JSONWebKey) string {
+	t.Helper()
+	signer, err := jose.NewSigner(
+		jose.SigningKey{Algorithm: jose.SignatureAlgorithm(key.Algorithm), Key: key.Key},
+		(&jose.SignerOptions{}).WithHeader(jose.HeaderKey("kid"), key.KeyID),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := jwt.Signed(signer).Claims(jwt.Claims{
+		Issuer:   identity.Issuer,
+		Subject:  "spiffe://nca-0000000000000001.ds9.dsx.nvid.id/host/host-1",
+		Audience: jwt.Audience{"spiffe://ds9.dsx.nvid.id/openbao"},
+		Expiry:   jwt.NewNumericDate(time.Now().Add(time.Minute)),
+	}).Serialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
+}
+
+func verifyTestToken(keys jose.JSONWebKeySet, token string) bool {
+	algorithms := make([]jose.SignatureAlgorithm, 0, len(keys.Keys))
+	for _, key := range keys.Keys {
+		algorithms = append(algorithms, jose.SignatureAlgorithm(key.Algorithm))
+	}
+	parsed, err := jwt.ParseSigned(token, algorithms)
+	if err != nil || len(parsed.Headers) != 1 {
+		return false
+	}
+	for _, key := range keys.Key(parsed.Headers[0].KeyID) {
+		var claims jwt.Claims
+		if parsed.Claims(key.Key, &claims) == nil {
+			return true
+		}
+	}
+	return false
 }

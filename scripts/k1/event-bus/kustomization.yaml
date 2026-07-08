@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: dsx-identity
+resources:
+  - keycloak.yaml
+# The generated name rolls Keycloak only when its realm input changes.
+configMapGenerator:
+  - name: keycloak-realm-import
+    files:
+      - event-bus-realm.json

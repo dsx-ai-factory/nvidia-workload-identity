@@ -1,0 +1,11 @@
+DSX identity has been deployed.
+
+Trust Domain: {{ .Values.global.spire.trustDomain }}
+Cluster Name: {{ .Values.global.spire.clusterName }}
+
+Components:
+  - SPIRE: {{ if .Values.spire.enabled }}enabled{{ else }}disabled{{ end }}
+  - Exchange: {{ if .Values.exchange.enabled }}enabled{{ else }}disabled{{ end }}
+  - Pod token-fetcher injection: {{ if .Values.podTokenFetcher.enabled }}enabled{{ else }}disabled{{ end }}
+  - VM support: {{ if .Values.vmSupport.enabled }}enabled{{ else }}disabled{{ end }}
+  - Identity controller: {{ if .Values.identityController.enabled }}enabled{{ else }}disabled{{ end }}

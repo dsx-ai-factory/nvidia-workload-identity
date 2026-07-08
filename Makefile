@@ -1,76 +1,97 @@
-# SPIFFE + OpenBao CEL Multi-Cluster Demo Makefile
+# DSX identity Makefile
 
-.PHONY: help install clean test verify-clusters verify-nginx verify-vm status
-.PHONY: cluster gateway postgres spiffe bao configure-dns sync-federation-ca cert-manager-k2 helm-repos
-.PHONY: k2-cluster k2-gateway kubevirt kyverno spiffe-k2 nginx metadata-service vm
-.PHONY: build-images build-images-all chart-deps spiffe-deploy spiffe-verify spiffe-template spiffe-clean
+.PHONY: help install clean test verify-clusters verify-vm verify-openbao status
+.PHONY: k1-cluster k1-gateway identity-k1 openbao configure-dns sync-event-bus-oauth helm-repos
+.PHONY: k2-cluster kubevirt kyverno identity-k2 nginx vm
+.PHONY: build-token-fetcher build-images build-images-k2 build-dsx-imds-agent build-images-all load-images-k2 chart-deps
+.PHONY: identity-deploy identity-verify identity-template identity-clean
+.PHONY: validate test-go test-shell test-helm event-bus-tools event-bus-prereqs
+
+LOCAL_IMAGE_TAG := 0.1.0
 
 # Default target
 help: ## Show this help message
-	@echo "SPIFFE + OpenBao CEL Multi-Cluster Demo"
+	@echo "DSX identity"
 	@echo "========================================"
 	@echo ""
 	@echo "Available targets:"
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-24s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 # ============================================================
-# Quick start (production-like, single cluster)
+# Single-cluster smoke path
 # ============================================================
 
-spiffe-deploy: cluster helm-repos chart-deps build-images ## Deploy full SPIFFE stack via umbrella chart
-	@./scripts/deploy-spiffe.sh
+identity-deploy: k1-cluster ## Deploy the k1 identity smoke environment
+	@./scripts/deploy-identity.sh
 
-spiffe-verify: ## Smoke test: verify SPIFFE stack is healthy
-	@./scripts/verify-spiffe.sh
+identity-verify: ## Verify the k1 identity smoke environment
+	@./scripts/verify-identity.sh
 
-spiffe-template: chart-deps ## Validate SPIFFE umbrella chart templates
-	@helm template spiffe charts/spiffe/ -f scripts/local-values.yaml --debug
+identity-template: chart-deps ## Render the identity umbrella
+	@helm template dsx-identity charts/dsx-identity/ --namespace dsx-identity -f scripts/local-values.yaml --debug
 
-spiffe-clean: ## Uninstall SPIFFE charts
-	@./scripts/deploy-spiffe.sh cleanup
+identity-clean: ## Remove the k1 identity smoke environment
+	@./scripts/deploy-identity.sh cleanup
+
+validate: test-go test-shell test-helm ## Run local static validation
+
+test-go: ## Run all Go tests
+	@go test -race ./...
+
+test-shell: ## Check every shell script for syntax errors
+	@find scripts -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
+
+test-helm: helm-repos chart-deps ## Lint and render both cluster profiles
+	@helm lint charts/dsx-identity -f scripts/k1-values.yaml
+	@helm lint charts/dsx-identity -f scripts/k2-values.yaml
+	@helm template dsx-identity charts/dsx-identity --namespace dsx-identity -f scripts/k1-values.yaml >/dev/null
+	@helm template dsx-identity charts/dsx-identity --namespace dsx-identity -f scripts/k2-values.yaml >/dev/null
+	@helm lint third-party/dsx-exchange/deploy/nats-event-bus -f scripts/k1/event-bus/values.yaml
+	@helm template event-bus third-party/dsx-exchange/deploy/nats-event-bus -f scripts/k1/event-bus/values.yaml --set global.eventBus.gateway.routes.mqtt.enabled=true >/dev/null
 
 # ============================================================
-# Multi-cluster demo (k1 = root, k2 = child)
+# Multi-cluster environment with independent SPIRE and Exchange shards
 # ============================================================
 
-install: k1 k2 ## Complete setup: k1 + k2 + SPIRE federation
+install: k1 k2 ## Complete setup: two local Exchange shards with one k1 Event Bus
 	@echo ""
 	@echo "Installation complete"
 	@echo ""
 	@echo "Multi-cluster setup ready:"
-	@echo "  k1: Root SPIRE (sjc-1.nvidia.com), OpenBao, Exchange Service"
-	@echo "  k2: Child SPIRE (nested under k1), KubeVirt, workloads"
+	@echo "  k1: SPIRE (sjc-1.nvidia.com), Exchange, Event Bus, OAuth2"
+	@echo "  k2: SPIRE, Exchange, nginx Pod, KubeVirt VM"
+	@echo "  external relying party: OpenBao (local k1 placement)"
 	@echo ""
 	@echo "Next steps:"
 	@echo "  make test          # Run all integration tests"
 	@echo "  make status        # Check component status"
 	@echo "  make clean         # Clean up when done"
 
-k1: cluster gateway spiffe bao ## Setup k1 with SPIRE + Exchange + OpenBao
+k1: openbao ## Set up Common Services and the external OpenBao test instance
 	@echo ""
 	@echo "k1 cluster ready"
 
-k2: k2-cluster kubevirt kyverno spiffe-k2 nginx metadata-service vm ## Setup k2 with workloads
+k2: nginx vm ## Set up the Data Hall shard, nginx Pod, and KubeVirt VM
 	@echo ""
 	@echo "k2 cluster ready"
 
 clean: ## Clean up: Remove both Kind clusters
 	@echo "Cleaning up..."
-	@./scripts/k1/cluster/setup-cluster.sh cleanup 2>/dev/null || true
-	@./scripts/k2/cluster/create-cluster.sh cleanup 2>/dev/null || true
+	@./scripts/k1/cluster/setup-cluster.sh cleanup
+	@./scripts/k2/cluster/create-cluster.sh cleanup
 	@echo "Cleanup complete"
 
-test: verify-clusters verify-nginx verify-vm ## Run integration tests
+test: verify-openbao ## Run the complete integration test sequence
 	@echo "Tests complete"
 
 verify-clusters: ## Verify cluster components
 	@./scripts/verify.sh
 
-verify-nginx: ## Verify nginx SPIFFE authentication
-	@./scripts/k2/nginx/verify-nginx.sh
-
-verify-vm: ## Verify VM metadata service
+verify-vm: verify-clusters ## Verify VM metadata service
 	@./scripts/k2/vm/verify-vm.sh
+
+verify-openbao: verify-vm ## Verify OpenBao, restart, and rotation flows
+	@./scripts/k1/openbao/verify-openbao.sh
 
 status: ## Show status of all components
 	@echo "Multi-Cluster Status"
@@ -79,65 +100,85 @@ status: ## Show status of all components
 	@echo "=== k1 Cluster ==="
 	@kubectl get nodes --context kind-k1 2>/dev/null || echo "k1 cluster not found"
 	@echo ""
-	@kubectl get pods -n dsx-spiffe --context kind-k1 2>/dev/null || echo "No SPIFFE pods"
+	@kubectl get pods -n dsx-identity --context kind-k1 2>/dev/null || echo "No identity pods"
 	@echo ""
-	@kubectl get pods -n bao -l app.kubernetes.io/name=openbao --context kind-k1 2>/dev/null || echo "No OpenBao"
+	@kubectl get pods -n openbao -l app.kubernetes.io/name=openbao --context kind-k1 2>/dev/null || echo "No OpenBao"
 	@echo ""
 	@echo "=== k2 Cluster ==="
 	@kubectl get nodes --context kind-k2 2>/dev/null || echo "k2 cluster not found"
 	@echo ""
-	@kubectl get pods -n dsx-spiffe --context kind-k2 2>/dev/null || echo "No SPIFFE pods"
+	@kubectl get pods -n dsx-identity --context kind-k2 2>/dev/null || echo "No identity pods"
 
 # ============================================================
 # Build targets
 # ============================================================
 
-build-images: ## Build core SPIFFE Docker images (exchange + token-fetcher)
-	@docker build -t spiffe-exchange-service:latest -f Dockerfile.spiffe-exchange-service .
-	@docker build -t spiffe-token-fetcher:latest -f Dockerfile.spiffe-token-fetcher .
+build-token-fetcher: ## Build the shared token-fetcher image
+	@docker build -t dsx-token-fetcher:$(LOCAL_IMAGE_TAG) -f Dockerfile.dsx-token-fetcher .
 
-build-images-all: build-images ## Build all images including VM support (requires BuildKit)
-	@DOCKER_BUILDKIT=1 docker build -t metadata-service:latest -f Dockerfile.metadata-service .
-	@DOCKER_BUILDKIT=1 docker build -t mds-network-setup:latest -f Dockerfile.mds-network-setup .
-	@DOCKER_BUILDKIT=1 docker build -t exchange-proxy-csi:latest -f Dockerfile.exchange-proxy-csi .
+build-images: build-token-fetcher ## Build Exchange and token-fetcher images
+	@docker build -t spiffe-exchange-service:$(LOCAL_IMAGE_TAG) -f Dockerfile.spiffe-exchange-service .
 
-chart-deps: ## Build Helm chart dependencies
-	@cd charts/spiffe-spire && helm dep build 2>/dev/null
-	@cd charts/spiffe && helm dep build 2>/dev/null
+build-images-k2: build-images build-dsx-imds-agent ## Build k2 Exchange, controller, VM support, and dsx_imds plugins
+	@DOCKER_BUILDKIT=1 docker build -t metadata-service:$(LOCAL_IMAGE_TAG) -f Dockerfile.metadata-service .
+	@DOCKER_BUILDKIT=1 docker build -t dsx-imds-network-setup:$(LOCAL_IMAGE_TAG) -f Dockerfile.dsx-imds-network-setup .
+	@DOCKER_BUILDKIT=1 docker build -t exchange-proxy-csi:$(LOCAL_IMAGE_TAG) -f Dockerfile.exchange-proxy-csi .
+	@DOCKER_BUILDKIT=1 docker build -t dsx-identity-controller:$(LOCAL_IMAGE_TAG) -f Dockerfile.dsx-identity-controller .
+	@DOCKER_BUILDKIT=1 docker build -t dsx-imds-node-attestor-server:$(LOCAL_IMAGE_TAG) -f Dockerfile.dsx-imds-node-attestor-server .
+
+build-dsx-imds-agent: ## Build the repository-owned host-agent plugin artifact
+	@DOCKER_BUILDKIT=1 docker build -t dsx-imds-node-attestor-agent:$(LOCAL_IMAGE_TAG) -f Dockerfile.dsx-imds-node-attestor-agent .
+
+load-images-k2: k2-cluster build-images-k2 ## Load locally built k2 images into Kind
+	@./scripts/kind-load-image.sh metadata-service:$(LOCAL_IMAGE_TAG) k2
+	@./scripts/kind-load-image.sh dsx-imds-network-setup:$(LOCAL_IMAGE_TAG) k2
+	@./scripts/kind-load-image.sh exchange-proxy-csi:$(LOCAL_IMAGE_TAG) k2
+	@./scripts/kind-load-image.sh dsx-identity-controller:$(LOCAL_IMAGE_TAG) k2
+	@./scripts/kind-load-image.sh dsx-imds-node-attestor-server:$(LOCAL_IMAGE_TAG) k2
+	@./scripts/kind-load-image.sh dsx-imds-node-attestor-agent:$(LOCAL_IMAGE_TAG) k2
+	@./scripts/kind-load-image.sh spiffe-exchange-service:$(LOCAL_IMAGE_TAG) k2
+	@./scripts/kind-load-image.sh dsx-token-fetcher:$(LOCAL_IMAGE_TAG) k2
+
+build-images-all: build-images build-images-k2 ## Build all repository-owned images
+
+chart-deps: helm-repos ## Build Helm chart dependencies
+	@helm dependency build --skip-refresh third-party/dsx-exchange/deploy/nats-event-bus
+	@helm dependency build --skip-refresh charts/dsx-identity
+
+event-bus-tools: ## Install pinned DSX Event Bus NKey tools when missing
+	@test -x "$(CURDIR)/bin/nsc" || GOBIN="$(CURDIR)/bin" go install github.com/nats-io/nsc/v2@v2.14.0
+	@test -x "$(CURDIR)/bin/nk" || GOBIN="$(CURDIR)/bin" go install github.com/nats-io/nkeys/nk@v0.4.15
+
+event-bus-prereqs: k1-gateway event-bus-tools chart-deps ## Prepare the k1 DSX Event Bus behind its Gateway
+	@PATH="$(CURDIR)/bin:$$PATH" ./scripts/k1/event-bus/prepare-event-bus.sh
 
 helm-repos:
 	@./scripts/setup-helm-repos.sh
 
-configure-dns: gateway k2-gateway ## Configure cross-cluster DNS
+configure-dns: k1-gateway k2-cluster ## Configure k2 DNS for the k1 Event Bus and OpenBao Gateway
 	@./scripts/configure-dns.sh
+
+sync-event-bus-oauth: event-bus-prereqs k2-cluster ## Copy the k1 Exchange OAuth client credential into k2
+	@./scripts/sync-event-bus-oauth.sh
 
 # ============================================================
 # k1 targets
 # ============================================================
 
-cluster: ## Create k1 Kind cluster
+k1-cluster: ## Create the Common Services Kind cluster
 	@./scripts/k1/cluster/setup-cluster.sh
 
-gateway: cluster ## Install MetalLB + Envoy Gateway on k1
+k1-gateway: k1-cluster ## Install MetalLB and Envoy Gateway on k1
 	@./scripts/install-metallb.sh k1
 	@./scripts/install-envoy-gw.sh k1
-	@./scripts/k1/gateway/apply-gateway.sh
 
-postgres: cluster helm-repos ## Deploy shared CNPG cluster on k1
-	@./scripts/k1/postgres/deploy-postgres.sh
+identity-k1: k1-gateway event-bus-prereqs helm-repos chart-deps build-images ## Deploy the Common Services identity shard
+	@./scripts/kind-load-image.sh spiffe-exchange-service:$(LOCAL_IMAGE_TAG) k1
+	@./scripts/kind-load-image.sh dsx-token-fetcher:$(LOCAL_IMAGE_TAG) k1
+	@./scripts/deploy-identity.sh -c kind-k1 -f scripts/k1-values.yaml
 
-sync-federation-ca: cert-manager-k2 cluster ## Sync k2 CA to k1
-	@./scripts/sync-federation-ca.sh
-
-spiffe: gateway sync-federation-ca postgres helm-repos chart-deps build-images ## Deploy SPIFFE umbrella chart on k1
-	@echo "Deploying SPIFFE on k1 via umbrella chart..."
-	@kind load docker-image spiffe-exchange-service:latest --name k1
-	@kind load docker-image spiffe-token-fetcher:latest --name k1
-	@./scripts/deploy-spiffe.sh -c kind-k1 -f scripts/k1-values.yaml
-	@./scripts/k1/exchange/configure-tenant-dns.sh
-
-bao: spiffe helm-repos ## Deploy OpenBao on k1
-	@./scripts/k1/bao/deploy-bao.sh
+openbao: identity-k1 helm-repos ## Deploy the external OpenBao test instance in k1
+	@./scripts/k1/openbao/deploy-openbao.sh
 
 # ============================================================
 # k2 targets
@@ -146,31 +187,17 @@ bao: spiffe helm-repos ## Deploy OpenBao on k1
 k2-cluster: ## Create k2 Kind cluster with OVN
 	@./scripts/k2/cluster/create-cluster.sh
 
-cert-manager-k2: k2-cluster ## Install cert-manager on k2
-	@./scripts/install-cert-manager.sh k2
-
-k2-gateway: k2-cluster ## Install MetalLB + Envoy Gateway on k2
-	@./scripts/install-metallb.sh k2 220 230
-	@./scripts/install-envoy-gw.sh k2
-	@./scripts/k2/gateway/apply-gateway.sh
-
-kubevirt: k2-cluster ## Install KubeVirt and CDI on k2
+kubevirt: k2-cluster ## Install KubeVirt on k2
 	@./scripts/k2/kubevirt/install-kubevirt.sh
 
 kyverno: k2-cluster helm-repos ## Install Kyverno on k2
-	@./scripts/k2/kyverno/install-kyverno.sh
+	@./scripts/install-kyverno.sh k2
 
-spiffe-k2: k2-cluster k2-gateway cert-manager-k2 helm-repos chart-deps ## Deploy SPIFFE umbrella chart on k2
-	@echo "Deploying SPIFFE on k2 via umbrella chart..."
-	@./scripts/deploy-spiffe.sh -c kind-k2 -f scripts/k2-values.yaml
-	@echo "Applying SPIRE bundle endpoint route..."
-	@kubectl apply -f scripts/k2/spire/spire-bundle-route.yaml --context kind-k2
+identity-k2: k2-cluster kyverno load-images-k2 helm-repos chart-deps identity-k1 configure-dns sync-event-bus-oauth ## Deploy the Data Hall identity shard
+	@./scripts/deploy-identity.sh -c kind-k2 -f scripts/k2-values.yaml
 
-nginx: k2-cluster spiffe-k2 configure-dns spiffe ## Deploy demo nginx on k2
+nginx: identity-k2 ## Deploy the E2E nginx fixture on k2
 	@./scripts/k2/nginx/deploy-nginx.sh
 
-metadata-service: k2-cluster spiffe-k2 configure-dns spiffe ## Deploy metadata service on k2
-	@./scripts/k2/metadata/deploy-metadata.sh
-
-vm: k2-cluster spiffe-k2 kubevirt kyverno metadata-service ## Deploy Ubuntu VM on k2
+vm: identity-k2 kubevirt ## Deploy Ubuntu VM and its tenant fixtures on k2
 	@./scripts/k2/vm/deploy-vm.sh
