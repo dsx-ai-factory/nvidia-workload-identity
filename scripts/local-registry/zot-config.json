@@ -1,0 +1,104 @@
+{
+  "distSpecVersion": "1.0.1",
+  "storage": {
+    "rootDirectory": "/var/lib/registry",
+    "gc": true,
+    "dedupe": true
+  },
+  "http": {
+    "address": "0.0.0.0",
+    "port": "5000",
+    "compat": ["docker2s2"]
+  },
+  "log": {
+    "level": "info"
+  },
+  "extensions": {
+    "sync": {
+      "enable": true,
+      "registries": [
+        {
+          "urls": ["https://registry-1.docker.io"],
+          "onDemand": true,
+          "tlsVerify": true,
+          "maxRetries": 6,
+          "retryDelay": "5m",
+          "preserveDigest": true,
+          "content": [{"prefix": "**"}]
+        },
+        {
+          "urls": ["https://gcr.io"],
+          "onDemand": true,
+          "tlsVerify": true,
+          "maxRetries": 6,
+          "retryDelay": "5m",
+          "preserveDigest": true,
+          "content": [{"prefix": "**"}]
+        },
+        {
+          "urls": ["https://ghcr.io"],
+          "onDemand": true,
+          "tlsVerify": true,
+          "maxRetries": 6,
+          "retryDelay": "5m",
+          "preserveDigest": true,
+          "content": [{"prefix": "**"}]
+        },
+        {
+          "urls": ["https://quay.io"],
+          "onDemand": true,
+          "tlsVerify": true,
+          "maxRetries": 6,
+          "retryDelay": "5m",
+          "preserveDigest": true,
+          "content": [{"prefix": "**"}]
+        },
+        {
+          "urls": ["https://registry.k8s.io"],
+          "onDemand": true,
+          "tlsVerify": true,
+          "maxRetries": 6,
+          "retryDelay": "5m",
+          "preserveDigest": true,
+          "content": [{"prefix": "**"}]
+        },
+        {
+          "urls": ["https://cgr.dev"],
+          "onDemand": true,
+          "tlsVerify": true,
+          "maxRetries": 6,
+          "retryDelay": "5m",
+          "preserveDigest": true,
+          "content": [{"prefix": "**"}]
+        },
+        {
+          "urls": ["https://reg.kyverno.io"],
+          "onDemand": true,
+          "tlsVerify": true,
+          "maxRetries": 6,
+          "retryDelay": "5m",
+          "preserveDigest": true,
+          "content": [{"prefix": "**"}]
+        },
+        {
+          "urls": ["https://public.ecr.aws"],
+          "onDemand": true,
+          "tlsVerify": true,
+          "maxRetries": 6,
+          "retryDelay": "5m",
+          "preserveDigest": true,
+          "content": [{"prefix": "**"}]
+        },
+        {
+          "urls": ["https://nvcr.io"],
+          "onDemand": true,
+          "tlsVerify": true,
+          "maxRetries": 6,
+          "retryDelay": "5m",
+          "preserveDigest": true,
+          "content": [{"prefix": "**"}]
+        }
+      ]
+    }
+  }
+}

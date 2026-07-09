@@ -1,6 +1,6 @@
 module dsx-identity
 
-go 1.25
+go 1.26
 
 require (
 	github.com/container-storage-interface/spec v1.11.0

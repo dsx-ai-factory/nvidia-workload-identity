@@ -1,0 +1,330 @@
+apiVersion: skaffold/v4beta14
+kind: Config
+metadata:
+  name: k2-network-apis
+manifests:
+  kustomize:
+    paths:
+      - ../scripts/k2/network
+deploy:
+  kubeContext: kind-k2
+  statusCheckDeadlineSeconds: 120
+  tolerateFailuresUntilDeadline: true
+  kubectl:
+    hooks:
+      after:
+        - host:
+            command:
+              - kubectl
+              - wait
+              - --for=condition=Established
+              - --context=kind-k2
+              - --timeout=120s
+              - crd/network-attachment-definitions.k8s.cni.cncf.io
+              - crd/multi-networkpolicies.k8s.cni.cncf.io
+---
+apiVersion: skaffold/v4beta14
+kind: Config
+metadata:
+  name: ovn-k2-release
+requires:
+  - configs:
+      - k2-network-apis
+manifests:
+  helm:
+    releases: &ovnK2Releases
+      - name: ovn-kubernetes
+        chartPath: ../third-party/ovn-kubernetes/helm/ovn-kubernetes
+        namespace: default
+        skipBuildDependencies: true
+        # Reapplying this chart restarts the node agent after it has moved eth0
+        # into the OVN bridge, which makes the replacement unable to initialize.
+        upgradeOnChange: false
+        valuesFiles:
+          - ../third-party/ovn-kubernetes/helm/ovn-kubernetes/values-no-ic.yaml
+        setValues:
+          k8sAPIServer: https://k2-control-plane:6443
+          ovnkube-identity.replicas: 1
+          global.image.repository: ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-fedora
+          global.image.tag: release-1.2@sha256:a960f93ab6a910ab6ef9ad7ac2afc84ea5399151964c4e85c765554aa3442b0b
+          mtu: 1300
+          global.enableMultiNetwork: true
+          global.enableNetworkSegmentation: true
+deploy:
+  kubeContext: kind-k2
+  statusCheckDeadlineSeconds: 300
+  tolerateFailuresUntilDeadline: true
+  helm:
+    hooks:
+      after:
+        - host:
+            command:
+              - kubectl
+              - wait
+              - --for=condition=Established
+              - --context=kind-k2
+              - --timeout=120s
+              - crd/userdefinednetworks.k8s.ovn.org
+    releases: *ovnK2Releases
+---
+apiVersion: skaffold/v4beta14
+kind: Config
+metadata:
+  name: kubevirt-operator-k2
+requires:
+  - configs:
+      - ovn-k2-release
+manifests:
+  kustomize:
+    paths:
+      - ../scripts/k2/kubevirt/operator
+deploy:
+  kubeContext: kind-k2
+  statusCheckDeadlineSeconds: 180
+  tolerateFailuresUntilDeadline: true
+  kubectl:
+    hooks:
+      after:
+        - host:
+            command:
+              - kubectl
+              - wait
+              - --for=condition=Established
+              - --context=kind-k2
+              - --timeout=120s
+              - crd/kubevirts.kubevirt.io
+---
+apiVersion: skaffold/v4beta14
+kind: Config
+metadata:
+  name: kubevirt-k2-release
+requires:
+  - configs:
+      - kubevirt-operator-k2
+manifests:
+  kustomize:
+    paths:
+      - ../scripts/k2/kubevirt/release
+deploy:
+  kubeContext: kind-k2
+  statusCheckDeadlineSeconds: 360
+  tolerateFailuresUntilDeadline: true
+  kubectl:
+    hooks:
+      after:
+        - host:
+            command:
+              - kubectl
+              - wait
+              - --for=condition=Available
+              - --namespace=kubevirt
+              - --context=kind-k2
+              - --timeout=360s
+              - kubevirt/kubevirt
+---
+apiVersion: skaffold/v4beta14
+kind: Config
+metadata:
+  name: k2-source-fixtures
+manifests:
+  rawYaml:
+    - ../scripts/k2/source-fixtures/dpu-crd.yaml
+    - ../scripts/k2/source-fixtures/launch-layer-crd.yaml
+deploy:
+  kubeContext: kind-k2
+  statusCheckDeadlineSeconds: 60
+  tolerateFailuresUntilDeadline: true
+  kubectl:
+    hooks:
+      after:
+        - host:
+            command:
+              - kubectl
+              - wait
+              - --for=condition=Established
+              - --context=kind-k2
+              - --timeout=120s
+              - crd/dpus.provisioning.dpu.nvidia.com
+              - crd/launchlayersourcefixtures.e2e.dsx-identity.nvidia.com
+---
+apiVersion: skaffold/v4beta14
+kind: Config
+metadata:
+  name: kyverno-k2
+requires:
+  - configs:
+      - ovn-k2-release
+manifests:
+  helm:
+    releases: &kyvernoK2Releases
+      - name: kyverno
+        remoteChart: kyverno
+        repo: https://kyverno.github.io/kyverno/
+        version: 3.6.1
+        namespace: kyverno
+        createNamespace: true
+        setValues:
+          admissionController.replicas: 1
+          backgroundController.enabled: false
+          cleanupController.enabled: false
+          reportsController.enabled: false
+deploy:
+  kubeContext: kind-k2
+  statusCheckDeadlineSeconds: 180
+  tolerateFailuresUntilDeadline: true
+  helm:
+    hooks:
+      after:
+        - host:
+            command:
+              - kubectl
+              - wait
+              - --for=condition=Established
+              - --context=kind-k2
+              - --timeout=120s
+              - crd/clusterpolicies.kyverno.io
+    releases: *kyvernoK2Releases
+---
+apiVersion: skaffold/v4beta14
+kind: Config
+metadata:
+  name: spire-crds-k2
+manifests:
+  helm:
+    releases: &spireCrdsK2Releases
+      - name: spire-crds
+        remoteChart: spire-crds
+        repo: https://spiffe.github.io/helm-charts-hardened/
+        version: 0.5.0
+        namespace: spire-system
+        createNamespace: true
+deploy:
+  kubeContext: kind-k2
+  statusCheckDeadlineSeconds: 60
+  tolerateFailuresUntilDeadline: true
+  helm:
+    hooks:
+      after:
+        - host:
+            command:
+              - kubectl
+              - wait
+              - --for=condition=Established
+              - --context=kind-k2
+              - --timeout=120s
+              - crd/clusterspiffeids.spire.spiffe.io
+    releases: *spireCrdsK2Releases
+---
+apiVersion: skaffold/v4beta14
+kind: Config
+metadata:
+  name: identity-k2
+requires:
+  - path: images.yaml
+    configs:
+      - core-images
+      - k2-images
+  - path: secrets.yaml
+    configs:
+      - identity-secrets-k2
+  - configs:
+      - k2-source-fixtures
+      - ovn-k2-release
+      - spire-crds-k2
+  - path: k1.yaml
+    configs:
+      - k1-gateway-resources
+      - event-bus-k1
+      - event-bus-route-k1
+  - configs:
+      - kyverno-k2
+manifests:
+  helm:
+    releases: &k2IdentityReleases
+      - name: dsx-identity
+        chartPath: ../charts/dsx-identity
+        namespace: dsx-identity
+        createNamespace: true
+        skipBuildDependencies: true
+        valuesFiles:
+          - ../scripts/k2-values.yaml
+        setValueTemplates:
+          exchange.image.repository: "{{.IMAGE_REPO_dsx_identity_spiffe_exchange_service}}"
+          exchange.image.tag: "{{.IMAGE_TAG_dsx_identity_spiffe_exchange_service}}"
+          podTokenFetcher.image.repository: "{{.IMAGE_REPO_dsx_identity_dsx_token_fetcher}}"
+          podTokenFetcher.image.tag: "{{.IMAGE_TAG_dsx_identity_dsx_token_fetcher}}"
+          vmSupport.metadataService.image.repository: "{{.IMAGE_REPO_dsx_identity_metadata_service}}"
+          vmSupport.metadataService.image.tag: "{{.IMAGE_TAG_dsx_identity_metadata_service}}"
+          vmSupport.imdsNetworkSetup.image.repository: "{{.IMAGE_REPO_dsx_identity_dsx_imds_network_setup}}"
+          vmSupport.imdsNetworkSetup.image.tag: "{{.IMAGE_TAG_dsx_identity_dsx_imds_network_setup}}"
+          vmSupport.exchangeProxyCsi.image.repository: "{{.IMAGE_REPO_dsx_identity_exchange_proxy_csi}}"
+          vmSupport.exchangeProxyCsi.image.tag: "{{.IMAGE_TAG_dsx_identity_exchange_proxy_csi}}"
+          identityController.image.repository: "{{.IMAGE_REPO_dsx_identity_dsx_identity_controller}}"
+          identityController.image.tag: "{{.IMAGE_TAG_dsx_identity_dsx_identity_controller}}"
+          "spire.spire-server.initContainers[0].image": "{{.IMAGE_FULLY_QUALIFIED_dsx_identity_dsx_imds_node_attestor_server}}"
+          "spire.upstream-spire-agent.initContainers[0].image": "{{.IMAGE_FULLY_QUALIFIED_dsx_identity_dsx_imds_node_attestor_agent}}"
+          "spire.upstream-spire-agent.initContainers[1].image": "{{.IMAGE_FULLY_QUALIFIED_dsx_identity_metadata_service}}"
+deploy:
+  kubeContext: kind-k2
+  statusCheckDeadlineSeconds: 300
+  tolerateFailuresUntilDeadline: true
+  helm:
+    hooks:
+      after:
+        - host:
+            command:
+              - kubectl
+              - wait
+              - --for=condition=Ready
+              - --context=kind-k2
+              - --timeout=120s
+              - clusterpolicy/inject-dsx-token-fetcher
+              - clusterpolicy/inject-dsx-imds-sidecars
+    releases: *k2IdentityReleases
+---
+apiVersion: skaffold/v4beta14
+kind: Config
+metadata:
+  name: k2-fixture
+requires:
+  - path: images.yaml
+    configs:
+      - e2e-images
+  - configs:
+      - identity-k2
+manifests:
+  rawYaml:
+    - ../scripts/k2/nginx/e2e-nginx.yaml
+deploy:
+  kubeContext: kind-k2
+  statusCheckDeadlineSeconds: 180
+  tolerateFailuresUntilDeadline: true
+  kubectl: {}
+---
+apiVersion: skaffold/v4beta14
+kind: Config
+metadata:
+  name: vm-k2
+requires:
+  - path: images.yaml
+    configs:
+      - e2e-images
+  - configs:
+      - kubevirt-k2-release
+      - identity-k2
+      - k2-source-fixtures
+      - ovn-k2-release
+manifests:
+  hooks:
+    before:
+      - host:
+          command:
+            - scripts/k2/vm/prepare-secret-source.sh
+  kustomize:
+    paths:
+      - ../scripts/k2/vm
+deploy:
+  kubeContext: kind-k2
+  statusCheckDeadlineSeconds: 300
+  tolerateFailuresUntilDeadline: true
+  kubectl: {}

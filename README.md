@@ -1,11 +1,10 @@
 # DSX identity
 
 DSX identity issues identities from SPIRE and exchanges them for DSX JWTs. The
-local integration environment runs two Kind clusters, each with its own SPIRE
-server and Exchange shard. It exercises RFC 8693 token exchange, DSX IMDS v1,
-KubeVirt, and an external OpenBao relying party.
+full local environment runs two Kind clusters, each with its own SPIRE server
+and Exchange shard.
 
-## Local E2E topology
+## Local E2E identity topology
 
 ```mermaid
 flowchart TB
@@ -35,8 +34,10 @@ k1 and k2 are separate SPIRE trust domains. Pods, processes, hosts, and VMs use
 the SPIRE server and Exchange in their local shard. Cross-shard trust starts
 with a DSX JWT and the public keys distributed through the Event Bus.
 
-The local lifecycle places the Event Bus, OAuth2 provider, and OpenBao test
-deployment in k1. The k2 Exchange reaches the OAuth2 and MQTT endpoints in k1.
+The full local lifecycle places the Event Bus, Keycloak OAuth2 provider, and
+OpenBao test deployment in k1. These services are external to the production
+identity umbrella, but the local test runs them as Kubernetes resources in k1.
+The k2 Exchange reaches the OAuth2 and MQTT endpoints through the k1 Gateway.
 The OpenBao route is used by the relying-party test.
 
 A **SPIRE JWT-SVID** is the cluster-local credential fetched through a SPIRE
@@ -72,80 +73,75 @@ party configures one reachable Exchange endpoint and receives the complete key
 union from that aggregate JWKS. SPIRE, the Identity Controller, IMDS, and CSI
 remain local to their shard. DSX JWTs and public keys cross shard boundaries.
 
-### Identity delivery and E2E coverage
+### Identity delivery
 
-| Consumer | SPIRE plugins | Delivery | E2E coverage |
-|---|---|---|---|
-| k1 and k2 Kubernetes Pods | `k8s_psat` NodeAttestor and Kubernetes WorkloadAttestor | token-fetcher fetches a local SPIRE JWT-SVID, exchanges it, and writes the DSX JWT | Both shards, including k2 login to OpenBao through the Gateway |
-| DPU process or Pod | external `dsx_dpu` NodeAttestor agent and server with a Unix or Kubernetes WorkloadAttestor | token-fetcher selects the local SPIRE JWT-SVID with hint `dsx-dpu`, then exchanges it for a DSX JWT | Controller registration lifecycle |
-| Bare-metal host | external `dsx_dpu` NodeAttestor agent and server attest the DPU agent. Kubernetes WorkloadAttestor serves the DPU metadata-service. Repository `dsx_imds` NodeAttestor agent and server attest the physical host agent. Unix WorkloadAttestor serves host processes | DPU metadata-service exchanges a local host SPIRE JWT-SVID and serves the DSX JWT at `169.254.169.254`. The host agent submits that JWT for node attestation, then serves host processes | The k2 Pod fixture covers the software chain. Physical DPU-to-host link-local delivery is outside E2E |
-| KubeVirt VM | `k8s_psat` and Kubernetes WorkloadAttestor bootstrap an E2E-only second agent. Repository `dsx_imds` NodeAttestor agent and server attest it. Kubernetes WorkloadAttestor serves the virt-launcher metadata-service | the attested second agent and its CSI driver supply the VM identity. Metadata-service exchanges through Exchange Proxy CSI. The guest calls IMDS | Real plugins, agents, CSI drivers, sidecars, Exchange, guest IMDS, and KubeVirt layer-3 UDN |
+| Consumer | SPIRE plugins | Delivery |
+|---|---|---|
+| k1 and k2 Kubernetes Pods | `k8s_psat` NodeAttestor and Kubernetes WorkloadAttestor | token-fetcher fetches a local SPIRE JWT-SVID, exchanges it, and writes the DSX JWT |
+| DPU process or Pod | external `dsx_dpu` NodeAttestor agent and server with a Unix or Kubernetes WorkloadAttestor | token-fetcher selects the local SPIRE JWT-SVID with hint `dsx-dpu`, then exchanges it for a DSX JWT |
+| Bare-metal host | external `dsx_dpu` NodeAttestor agent and server attest the DPU agent. Kubernetes WorkloadAttestor serves the DPU metadata-service. Repository `dsx_imds` NodeAttestor agent and server attest the physical host agent. Unix WorkloadAttestor serves host processes | DPU metadata-service exchanges a local host SPIRE JWT-SVID and serves the DSX JWT at `169.254.169.254`. The host agent submits that JWT for node attestation, then serves host processes |
+| KubeVirt VM | `k8s_psat` and Kubernetes WorkloadAttestor bootstrap an E2E-only second agent. Repository `dsx_imds` NodeAttestor agent and server attest it. Kubernetes WorkloadAttestor serves the virt-launcher metadata-service | the attested second agent and its CSI driver supply the VM identity. Metadata-service exchanges through Exchange Proxy CSI. The guest calls IMDS |
 
 ## Quick start
 
-Required tools are Git, Docker, Kind, kubectl, Helm, Go 1.25+, Make, `jq`, `yq`,
-`curl`, and `openssl`. Full VM E2E requires a supported Linux host with
-privileged Docker and loadable `openvswitch`, `vport-geneve`, `nft_socket`,
-`tun`, and `vhost_net` modules. WSL is unsupported. `virtctl` v1.7.4 is
-optional. OpenBao commands use a host `bao` binary when available and otherwise
-use the pinned container image.
+### Prerequisites
 
-Initialize source and chart dependencies, then run static validation:
+Repository setup and validation require Git, mise, Make, and `curl`. Mise
+installs the tools pinned in `mise.toml`.
+
+The E2E workflow additionally requires Docker with Buildx, `openssl`, OpenSSH
+`ssh-keygen`, and a supported Linux host with privileged Docker and loadable
+`openvswitch`, `vport-geneve`, `nft_socket`, `tun`, and `vhost_net` modules.
+WSL is unsupported.
 
 ```bash
 git submodule update --init --recursive
 make validate
 ```
 
-Run the k1 smoke path:
+`make validate` does not require a cluster.
 
-```bash
-make identity-deploy
-make identity-verify
-make identity-clean
-```
-
-`identity-clean` removes the identity release, its fixture, the SPIRE CRDs, and
-Kyverno. The Kind cluster, `dsx-identity` namespace, signing Secret, Event Bus,
-and OAuth2 provider remain available for another smoke run. `make clean`
-deletes both Kind clusters and their state.
-
-Run the complete two-cluster lifecycle:
+### Full two-cluster workflow
 
 ```bash
 make -j install
 make test
-make status
 make clean
 ```
 
-`make test` covers both Exchange paths, VM metadata, controller lifecycle,
-cross-shard SVID rejection, OAuth2 retained publication, aggregate JWKS,
-Exchange availability, OpenBao policy enforcement,
-restart recovery, and key rotation overlap. Focused Go tests advance publication
-lease time deterministically and verify lease expiry without delaying E2E.
+`make test` verifies k2 identity delivery and cross-shard acceptance.
 
-The Go suite loads keys from five shards into three aggregates, rotates one
-shard, and removes only the retired key after its publication lease expires. The in-process MQTT suite covers retained
-replay, virtual-time refresh, and restart. The two-cluster suite covers
-issuance, isolation, routing, IMDS, and OpenBao.
+`make clean` removes both clusters and leaves the Zot service and cache intact.
+
+### Deployment ownership and image loading
+
+Make bootstraps Zot and the Kind clusters, then invokes one root Skaffold
+config. Skaffold owns every Kubernetes resource and all component ordering. Its
+hooks prepare dynamic DNS and credential inputs.
+
+Kind writes the ordinary `kind-k1` and `kind-k2` entries to kubeconfig. Each
+Skaffold deployment module names the context it uses. There is no merged,
+flattened, or synthetic kubeconfig, and deployment routing does not depend on
+the current context. Skaffold loads locally built images only into the Kind
+clusters that consume them.
+
+Zot only caches upstream images. Locally built images are loaded directly into
+Kind, not published to Zot. The Zot service and volume survive cluster cleanup.
 
 ## Helm chart
 
 `charts/dsx-identity` installs the shard-local SPIRE and Exchange resources. It
 depends on the official SPIRE chart and renders Pod and VM identity support and
-injection policies. The k2 profile also renders the Identity Controller.
+injection policies. The k2 configuration also renders the Identity Controller.
 
-For local E2E, `make install` separately deploys the SPIRE CRD chart, DSX Event
-Bus, Keycloak, Kyverno, cluster networking, OpenBao, and fixtures. The Event Bus
-is its own Helm release, and Keycloak provides OAuth2.
+External E2E components are separate Skaffold modules, not umbrella chart
+dependencies.
 
-Cluster profiles `scripts/k1-values.yaml`, `scripts/k2-values.yaml`, and
-`scripts/local-values.yaml` are local E2E inputs. Each deployed shard supplies
-its own SPIRE trust domain, cluster name, globally unique Exchange shard ID,
-and external Event Bus and OAuth2 endpoints. VM, UDN, nginx, DPU API, and
-external-client resources are E2E fixtures. `make build-images-all` builds the
-application and plugin images without deploying them.
+Cluster values files `scripts/k1-values.yaml` and `scripts/k2-values.yaml` are
+local E2E inputs. Each deployed shard supplies its own SPIRE trust domain,
+cluster name, globally unique Exchange shard ID, and external Event Bus and
+OAuth2 endpoints. VM, UDN, nginx, DPU API, and external-client resources are
+E2E fixtures.
 
 ## Identity contract
 
@@ -332,11 +328,9 @@ bare-metal host. Its `dsx_imds` plugin points to `169.254.169.254`, where the
 DPU metadata-service serves IMDS. Host-agent provisioning is outside this
 repository.
 
-The E2E path runs the real metadata-service, Exchange, both `dsx_imds` plugin
-halves, node attestation, second agent, CSI drivers, virt-launcher sidecar, and
-VM IMDS request. Its host bootstrap substitutes same-Pod loopback and an
-ordinary-agent CSI identity for the physical DPU-to-host link-local transport.
-Coverage of that physical transport requires hardware integration testing.
+The E2E host bootstrap substitutes same-Pod loopback and an ordinary-agent CSI
+identity for the physical DPU-to-host link-local transport. That transport
+requires hardware integration testing.
 
 In local E2E, the retained Event Bus publication carries the k2 public key to
 the k1 Exchange. The runner then uses the VM's DSX JWT to exercise cross-shard
@@ -361,30 +355,34 @@ sequenceDiagram
   Gateway-->>Runner: Return responses
 ```
 
-The runner submits the KubeVirt layer-3 UDN, controller sources, client, service
-account, `LaunchLayerSourceFixture`, and VM before its readiness checks. The
-external host-agent configuration is in
+The external host-agent configuration is in
 `scripts/k2/spire/dsx-imds-agent-plugin.hcl`.
 
 ## Signing-key rotation
 
 Each `kid` is the go-jose SHA-256 public-JWK thumbprint and remains unique after
-retirement. Keep private material in a restricted directory. The following
-commands rotate the local k1 E2E shard:
+retirement. Normal Skaffold reruns validate and reuse the signing keyset Secret.
+They do not rotate it. Keep private material in a restricted directory. The
+following commands explicitly rotate the local k1 E2E shard:
 
 ```bash
 umask 077
 KEYSET_DIR=/secure/path/k1-key-rotation
 install -d -m 0700 "${KEYSET_DIR}"
-go run ./cmd/generate-signing-keyset > "${KEYSET_DIR}/generated.json"
-jq -c '.jwks' "${KEYSET_DIR}/generated.json" > "${KEYSET_DIR}/signing-jwks.json"
-jq -jr '.active_kid' "${KEYSET_DIR}/generated.json" > "${KEYSET_DIR}/active-kid"
-kubectl create secret generic spiffe-exchange-signing-keyset -n dsx-identity \
+mise exec -- go run ./cmd/generate-signing-keyset > "${KEYSET_DIR}/generated.json"
+mise exec -- jq -c '.jwks' "${KEYSET_DIR}/generated.json" \
+  > "${KEYSET_DIR}/signing-jwks.json"
+mise exec -- jq -jr '.active_kid' "${KEYSET_DIR}/generated.json" \
+  > "${KEYSET_DIR}/active-kid"
+mise exec -- kubectl create secret generic spiffe-exchange-signing-keyset \
+  -n dsx-identity \
   --context kind-k1 --from-file="${KEYSET_DIR}/signing-jwks.json" \
   --from-file="${KEYSET_DIR}/active-kid" --dry-run=client -o yaml \
-  | kubectl apply --context kind-k1 -f -
-kubectl rollout restart deployment/spiffe-exchange -n dsx-identity --context kind-k1
-kubectl rollout status deployment/spiffe-exchange -n dsx-identity --context kind-k1
+  | mise exec -- kubectl apply --context kind-k1 -f -
+mise exec -- kubectl rollout restart deployment/spiffe-exchange \
+  -n dsx-identity --context kind-k1
+mise exec -- kubectl rollout status deployment/spiffe-exchange \
+  -n dsx-identity --context kind-k1
 ```
 
 The new key publishes under its own `kid`. Old replicas stop refreshing the old

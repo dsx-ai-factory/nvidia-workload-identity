@@ -41,9 +41,9 @@ variables:
     Commit: `${CI_COMMIT_TITLE}`
   PIPELINE_TRIGGER: "13"
   GIT_SUBMODULE_STRATEGY: recursive
-  KIND_VERSION: v0.32.0
   KIND_DIND_SERVICE_HOST: docker
   AL2023_KERNEL_IMAGE: public.ecr.aws/amazonlinux/amazonlinux:2023.9.20251110.1
+  DOCKER_PLATFORMS: "linux/amd64,linux/arm64"
 
 compute-next-release-version:
   extends:
@@ -57,6 +57,9 @@ commitlint:
     GIT_SUBMODULE_STRATEGY: none
 
 .helm-package:
+  needs:
+    - compute-next-release-version
+    - validate
   before_script:
     - |
       if [[ "${NEXT_VERSION:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
@@ -65,9 +68,7 @@ commitlint:
         HELM_CHART_VERSION="0.0.0-$(git rev-parse --short HEAD)"
       fi
       export HELM_CHART_VERSION
-      yq -i '.version = strenv(HELM_CHART_VERSION) | .appVersion = strenv(HELM_CHART_VERSION)' charts/dsx-identity/Chart.yaml
-      ./scripts/setup-helm-repos.sh
-      helm dependency build --skip-refresh charts/dsx-identity
+      yq -i '.appVersion = strenv(HELM_CHART_VERSION)' charts/dsx-identity/Chart.yaml
 
 .helm-package-rule:
   rules:
@@ -88,35 +89,46 @@ commitlint:
 
 validate:
   stage: test
-  image: ${NVCF_CICD_IMAGE}
+  image: golang:1.26.4-alpine
   extends:
     - .nvcf-cds-runner-tags
+  variables:
+    MISE_DATA_DIR: "$CI_PROJECT_DIR/.mise/mise-data"
+  cache:
+    - key:
+        prefix: mise-
+        files:
+          - mise.toml
+      paths:
+        - "$MISE_DATA_DIR"
+  before_script:
+    - apk add --no-cache bash build-base ca-certificates curl git make mise
+    - mise install
   script:
     - make validate
   rules:
     - !reference [.rules-push-or-mr, rules]
 
 e2e:
-  # The required E2E gate runs before build/package stages so a failed system
-  # test cannot race artifact publication.
   stage: test
-  image: ${NVCF_CICD_IMAGE}
+  image: golang:1.26.4-alpine
   extends:
     - .nvcf-cds-runner-large-dind-tags
     - .dind-service
   timeout: 4h
   needs:
     - validate
+  variables:
+    MISE_DATA_DIR: "$CI_PROJECT_DIR/.mise/mise-data"
+  cache:
+    - key:
+        prefix: mise-
+        files:
+          - mise.toml
+      paths:
+        - "$MISE_DATA_DIR"
   before_script:
-    - curl -fsSL -o /tmp/kind "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
-    - echo '50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54  /tmp/kind' | sha256sum -c -
-    - install -m 0755 /tmp/kind /usr/local/bin/kind
-    - BAO_CONTAINER_ID=$(docker create quay.io/openbao/openbao:2.4.0)
-    - docker cp "${BAO_CONTAINER_ID}:/bin/bao" /usr/local/bin/bao
-    - docker rm "${BAO_CONTAINER_ID}"
-    - kind version
-    - bao version
-    - docker info
+    - apk add --no-cache bash ca-certificates curl docker-cli docker-cli-buildx git make mise openssh-client openssl python3 util-linux
     # Preload matching AL2023 modules into the host kernel shared by DinD and
     # Kind before creating clusters.
     - |
@@ -132,12 +144,22 @@ e2e:
         test -d /sys/module/nft_socket
       '
   script:
-    - make identity-deploy
-    - make identity-verify
-    - make identity-clean
     - make -j install
     - make test
   after_script:
+    - |
+      if [ "${CI_JOB_STATUS}" != "success" ]; then
+        mise exec -- kubectl get kubevirt kubevirt --namespace kubevirt \
+          --context kind-k2 --request-timeout=10s -o yaml || true
+        mise exec -- kubectl get pods --namespace kubevirt \
+          --context kind-k2 --request-timeout=10s -o wide || true
+        mise exec -- kubectl get events --namespace kubevirt \
+          --context kind-k2 --request-timeout=10s --sort-by=.lastTimestamp || true
+        mise exec -- kubectl get vm,vmi,pods --namespace tenant-tenant1 \
+          --context kind-k2 --request-timeout=10s -o wide || true
+        mise exec -- kubectl get events --namespace tenant-tenant1 \
+          --context kind-k2 --request-timeout=10s --sort-by=.lastTimestamp || true
+      fi
     - make clean
   rules:
     - !reference [.rules-push-or-mr, rules]
@@ -146,55 +168,59 @@ e2e:
   stage: build
   extends:
     - .build-image-dind
+  needs:
+    - compute-next-release-version
+    - validate
 
 docker-build:dsx-token-fetcher:
   extends: [.container-build]
   variables:
     DOCKER_IMAGE_NAME: dsx-token-fetcher
-    DOCKERFILE_PATH: Dockerfile.dsx-token-fetcher
+    EXTRA_BUILD_ARGS: "--target dsx-token-fetcher --build-arg BINARY=dsx-token-fetcher"
 
 docker-build:spiffe-exchange-service:
   extends: [.container-build]
   variables:
     DOCKER_IMAGE_NAME: spiffe-exchange-service
-    DOCKERFILE_PATH: Dockerfile.spiffe-exchange-service
-    DOCKER_PLATFORMS: "linux/amd64,linux/arm64"
+    EXTRA_BUILD_ARGS: "--target spiffe-exchange-service --build-arg BINARY=spiffe-exchange-service"
 
 docker-build:metadata-service:
   extends: [.container-build]
   variables:
     DOCKER_IMAGE_NAME: metadata-service
-    DOCKERFILE_PATH: Dockerfile.metadata-service
+    EXTRA_BUILD_ARGS: "--target metadata-service --build-arg BINARY=metadata-service"
 
 docker-build:dsx-imds-network-setup:
   extends: [.container-build]
   variables:
     DOCKER_IMAGE_NAME: dsx-imds-network-setup
-    DOCKERFILE_PATH: Dockerfile.dsx-imds-network-setup
+    EXTRA_BUILD_ARGS: "--target dsx-imds-network-setup --build-arg BINARY=dsx-imds-network-setup"
 
 docker-build:exchange-proxy-csi:
   extends: [.container-build]
   variables:
     DOCKER_IMAGE_NAME: exchange-proxy-csi
-    DOCKERFILE_PATH: Dockerfile.exchange-proxy-csi
+    EXTRA_BUILD_ARGS: "--target exchange-proxy-csi --build-arg BINARY=exchange-proxy-csi"
 
 docker-build:dsx-identity-controller:
   extends: [.container-build]
   variables:
     DOCKER_IMAGE_NAME: dsx-identity-controller
-    DOCKERFILE_PATH: Dockerfile.dsx-identity-controller
+    EXTRA_BUILD_ARGS: "--target dsx-identity-controller --build-arg BINARY=dsx-identity-controller"
 
 docker-build:dsx-imds-node-attestor-server:
   extends: [.container-build]
   variables:
     DOCKER_IMAGE_NAME: dsx-imds-node-attestor-server
-    DOCKERFILE_PATH: Dockerfile.dsx-imds-node-attestor-server
+    DOCKERFILE_PATH: Dockerfile.plugin
+    EXTRA_BUILD_ARGS: "--build-arg BINARY=dsx-imds-node-attestor-server"
 
 docker-build:dsx-imds-node-attestor-agent:
   extends: [.container-build]
   variables:
     DOCKER_IMAGE_NAME: dsx-imds-node-attestor-agent
-    DOCKERFILE_PATH: Dockerfile.dsx-imds-node-attestor-agent
+    DOCKERFILE_PATH: Dockerfile.plugin
+    EXTRA_BUILD_ARGS: "--build-arg BINARY=dsx-imds-node-attestor-agent"
 
 pulse-scan:dsx-token-fetcher:
   extends:
@@ -299,7 +325,6 @@ docker-push-ngc:spiffe-exchange-service:
     - compute-next-release-version
   variables:
     DOCKER_IMAGE_NAME: spiffe-exchange-service
-    DOCKER_PLATFORMS: "linux/amd64,linux/arm64"
 
 docker-push-ngc:metadata-service:
   extends:

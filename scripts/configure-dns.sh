@@ -10,13 +10,6 @@ source "${PROJECT_ROOT}/scripts/common.sh"
 
 K1_CONTEXT="kind-k1"
 K2_CONTEXT="kind-k2"
-CHANGES_MADE=false
-
-get_k1_gateway_ip() {
-    kubectl get gateway k1-gateway -n envoy-gateway-system \
-        -o jsonpath='{.status.addresses[0].value}' \
-        --context "${K1_CONTEXT}" 2>/dev/null || echo ""
-}
 
 # Adds a DNS entry to CoreDNS hosts plugin
 # Usage: add_coredns_host <hostname> <ip> <context>
@@ -64,7 +57,6 @@ add_coredns_host() {
         --from-literal=Corefile="$new_corefile" \
         --dry-run=client -o yaml | kubectl apply -f - --context "${context}"
 
-    CHANGES_MADE=true
     log_success "CoreDNS configured: ${hostname} -> ${ip}"
 }
 
@@ -72,20 +64,9 @@ main() {
     log_info "Configuring k2 DNS for the k1 Gateway..."
 
     local k1_gateway_ip
-    k1_gateway_ip=$(get_k1_gateway_ip)
-    if [[ -z "${k1_gateway_ip}" ]]; then
-        log_error "Could not get the k1 Gateway IP"
-        return 1
-    fi
+    k1_gateway_ip=$(get_gateway_address \
+        "${K1_CONTEXT}" envoy-gateway-system k1-gateway)
     add_coredns_host "gateway.sjc-1.nvidia.com" "${k1_gateway_ip}" "${K2_CONTEXT}"
-
-    if [[ "${CHANGES_MADE}" == "true" ]]; then
-        log_info "Reloading k2 CoreDNS..."
-        kubectl rollout restart deployment coredns -n kube-system --context "${K2_CONTEXT}"
-        kubectl rollout status deployment/coredns -n kube-system --timeout=60s --context "${K2_CONTEXT}"
-    else
-        log_info "No DNS changes needed"
-    fi
 
     log_success "k2 DNS configured for the k1 Gateway"
 }

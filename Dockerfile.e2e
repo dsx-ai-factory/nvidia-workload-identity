@@ -1,0 +1,23 @@
+ARG BUILDER_IMG=golang:1.26.4
+ARG RUNTIME_IMG=curlimages/curl:8.10.1
+
+FROM --platform=$BUILDPLATFORM ${BUILDER_IMG} AS builder
+
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY cmd/dsx-token-fetcher/ ./cmd/dsx-token-fetcher/
+COPY cmd/spiffe-exchange-service/ ./cmd/spiffe-exchange-service/
+COPY internal/ ./internal/
+ARG TARGETOS
+ARG TARGETARCH
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go test -c -o /out/spire-svid-probe ./cmd/dsx-token-fetcher && \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go test -c -o /out/exchange-probe ./cmd/spiffe-exchange-service
+
+FROM ${RUNTIME_IMG}
+COPY --from=builder /out/spire-svid-probe /usr/local/bin/spire-svid-probe
+COPY --from=builder /out/exchange-probe /usr/local/bin/exchange-probe

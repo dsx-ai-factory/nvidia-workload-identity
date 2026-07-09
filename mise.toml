@@ -1,0 +1,10 @@
+[tools]
+go = "1.26.4"
+kind = "v0.32.0"
+kubectl = "v1.34.0"
+helm = "v3.21.2"
+skaffold = "v2.21.0"
+jq = "1.8.2"
+yq = "v4.52.5"
+"go:github.com/nats-io/nsc/v2" = "v2.14.0"
+"go:github.com/nats-io/nkeys/nk" = "v0.4.15"

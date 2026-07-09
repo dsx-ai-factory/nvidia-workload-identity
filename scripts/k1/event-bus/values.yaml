@@ -9,6 +9,14 @@ global:
         # Exchange clients use OAuth2. A null value disables anonymous fallback.
         noauth: null
         oauth2:
+          event-bus-e2e-observer:
+            azp: event-bus-e2e-observer
+            required_scope: mqtt
+            account: CSC
+            permissions:
+              sub:
+                allow:
+                  - "outside.>"
           spiffe-exchange:
             azp: spiffe-exchange
             required_scope: mqtt
@@ -24,7 +32,7 @@ global:
     gateway:
       routes:
         mqtt:
-          enabled: false
+          enabled: true
           kind: TCPRoute
           gatewayName: k1-gateway
           gatewayNamespace: envoy-gateway-system
@@ -60,9 +68,9 @@ nats:
 auth-callout:
   fullnameOverride: auth-callout
   image:
-    repository: auth-callout
-    tag: "v2.6.0"
-    pullPolicy: Never
+    repository: dsx-identity/auth-callout
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
   serviceConfig:
     jwks:
       url: http://keycloak-service.dsx-identity.svc.cluster.local:8080/realms/event-bus/protocol/openid-connect/certs
@@ -75,6 +83,7 @@ auth-callout:
     enabled: false
 
 surveyor:
+  replicaCount: 0
   config:
     expectedServers: 1
   serviceMonitor:

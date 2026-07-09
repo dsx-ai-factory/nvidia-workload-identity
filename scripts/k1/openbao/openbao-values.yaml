@@ -1,12 +1,5 @@
-# OpenBao Helm Chart Values for k1
-# Using official OpenBao 2.4.0 release
-
 server:
-  image:
-    registry: quay.io
-    repository: openbao/openbao
-    tag: "2.4.0"
-    pullPolicy: IfNotPresent
+  updateStrategyType: RollingUpdate
 
   resources:
     requests:
@@ -16,48 +9,43 @@ server:
       memory: 512Mi
       cpu: 500m
 
-  readinessProbe:
-    enabled: true
-    path: "/v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204"
+  extraSecretEnvironmentVars:
+    - envName: OPENBAO_STATIC_SEAL_KEY
+      secretName: openbao-static-seal
+      secretKey: current-key
 
-  livenessProbe:
-    enabled: true
-    path: "/v1/sys/health?standbyok=true"
-    initialDelaySeconds: 60
+  volumes:
+    - name: policies
+      configMap:
+        name: openbao-policies
 
-  service:
-    enabled: true
-    type: ClusterIP
-    port: 8200
-    targetPort: 8200
+  volumeMounts:
+    - name: policies
+      mountPath: /openbao/policies
+      readOnly: true
 
-  dataStorage:
-    enabled: true
-    size: 10Gi
-    storageClass: null
-    accessMode: ReadWriteOnce
-
-  ha:
-    enabled: false
-
-  standalone:
-    enabled: true
-    config: |
-      ui = true
-      listener "tcp" {
-        tls_disable = 1
-        address = "[::]:8200"
-        cluster_address = "[::]:8201"
-      }
-      storage "file" {
-        path = "/openbao/data"
-      }
-
-ui:
-  enabled: false
+  gateway:
+    httpRoute:
+      enabled: true
+      hosts:
+        - gateway.sjc-1.nvidia.com
+      parentRefs:
+        - name: k1-gateway
+          namespace: envoy-gateway-system
+          sectionName: openbao
 
 injector:
   enabled: false
 
-csi:
-  enabled: false
+extraObjects:
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: openbao-static-seal
+    stringData:
+      current-key: dsx-identity-e2e-static-key-v1!!
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: openbao-policies
+    data: {}

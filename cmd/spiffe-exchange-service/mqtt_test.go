@@ -35,6 +35,10 @@ func TestLiveMQTTAuthorization(t *testing.T) {
 	if accessToken == "" {
 		t.Fatal("DSX_E2E_MQTT_TOKEN is not set")
 	}
+	observerToken := os.Getenv("DSX_E2E_MQTT_OBSERVER_TOKEN")
+	if observerToken == "" {
+		t.Fatal("DSX_E2E_MQTT_OBSERVER_TOKEN is not set")
+	}
 
 	initialAuthorized := connectLiveMQTT(t, brokerURL, accessToken)
 	initialAuthorized.Disconnect(0)
@@ -70,68 +74,6 @@ func TestLiveMQTTAuthorization(t *testing.T) {
 	}
 	authorized := connectLiveMQTT(t, brokerURL, accessToken)
 	t.Cleanup(func() { authorized.Disconnect(0) })
-
-	type retainedMessage struct {
-		topic    string
-		payload  []byte
-		retained bool
-	}
-	retained := make(chan retainedMessage, 16)
-	shardID := os.Getenv("DSX_E2E_MQTT_SHARD_ID")
-	if shardID == "" {
-		shardID = "k1"
-	}
-	shardTopic := keyTopicPrefix + shardID + "/kid/+"
-	token = authorized.Subscribe(shardTopic, 1, func(_ mqtt.Client, message mqtt.Message) {
-		select {
-		case retained <- retainedMessage{
-			topic:    message.Topic(),
-			payload:  append([]byte(nil), message.Payload()...),
-			retained: message.Retained(),
-		}:
-		default:
-		}
-	})
-	if !token.WaitTimeout(10*time.Second) || token.Error() != nil {
-		t.Fatalf("retained shard subscription failed: %v", token.Error())
-	}
-	if got := token.(*mqtt.SubscribeToken).Result()[shardTopic]; got != 1 {
-		t.Fatalf("retained shard SUBACK = %#x, want QoS 1", got)
-	}
-	var expected jose.JSONWebKeySet
-	if encoded := os.Getenv("DSX_E2E_MQTT_EXPECTED_JWKS"); encoded != "" {
-		if err := json.Unmarshal([]byte(encoded), &expected); err != nil {
-			t.Fatalf("parse DSX_E2E_MQTT_EXPECTED_JWKS: %v", err)
-		}
-	}
-	registry := newKeyRegistry()
-	deadline := time.After(10 * time.Second)
-	for {
-		select {
-		case message := <-retained:
-			if !message.retained {
-				t.Fatal("late subscriber received a live public key instead of retained replay")
-			}
-			keyID, ok := parseKeyTopic(message.topic)
-			if !ok {
-				t.Fatal("retained public key topic was invalid")
-			}
-			publication, err := decodePublishedKey(message.payload)
-			if err != nil {
-				t.Fatalf("deployed Event Bus retained an invalid public key: %v", err)
-			}
-			if err := registry.replace(keyID, publication); err != nil {
-				t.Fatalf("deployed Event Bus retained a conflicting public key: %v", err)
-			}
-			if len(expected.Keys) == 0 || sameKeysets(registry.keyset().Keys, expected.Keys) {
-				goto retainedReplayVerified
-			}
-		case <-deadline:
-			t.Fatalf("deployed Event Bus retained keys = %v, want %v", keyIDs(registry.keyset().Keys), keyIDs(expected.Keys))
-		}
-	}
-
-retainedReplayVerified:
 
 	allowedTopic := fmt.Sprintf("%se2e-%d", keyTopicPrefix, time.Now().UnixNano())
 	received := make(chan []byte, 1)
@@ -170,9 +112,102 @@ retainedReplayVerified:
 		t.Fatalf("out-of-prefix MQTT SUBACK = %#x, want failure (0x80)", got)
 	}
 
-	token = authorized.Publish("outside/dsx-identity-e2e", 1, false, "denied")
+	observer := connectLiveMQTT(t, brokerURL, observerToken)
+	t.Cleanup(func() { observer.Disconnect(0) })
+	deniedPublishTopic := fmt.Sprintf("outside/dsx-identity-e2e-%d", time.Now().UnixNano())
+	deniedPublication := make(chan struct{}, 1)
+	token = observer.Subscribe(deniedPublishTopic, 1, func(_ mqtt.Client, _ mqtt.Message) {
+		deniedPublication <- struct{}{}
+	})
+	if !token.WaitTimeout(10*time.Second) || token.Error() != nil {
+		t.Fatalf("observer subscription failed: %v", token.Error())
+	}
+	if got := token.(*mqtt.SubscribeToken).Result()[deniedPublishTopic]; got != 1 {
+		t.Fatalf("observer SUBACK = %#x, want QoS 1", got)
+	}
+	token = authorized.Publish(deniedPublishTopic, 1, false, "denied")
 	if !token.WaitTimeout(10*time.Second) || token.Error() != nil {
 		t.Fatalf("out-of-prefix MQTT publish did not receive its protocol acknowledgement: %v", token.Error())
+	}
+	select {
+	case <-deniedPublication:
+		t.Fatal("out-of-prefix MQTT publication was delivered")
+	case <-time.After(2 * time.Second):
+	}
+}
+
+func TestLiveMQTTRetainedReplay(t *testing.T) {
+	brokerURL := os.Getenv("DSX_E2E_MQTT_BROKER")
+	if brokerURL == "" {
+		t.Skip("DSX_E2E_MQTT_BROKER is not set")
+	}
+	accessToken := os.Getenv("DSX_E2E_MQTT_TOKEN")
+	if accessToken == "" {
+		t.Fatal("DSX_E2E_MQTT_TOKEN is not set")
+	}
+	var expected jose.JSONWebKeySet
+	if err := json.Unmarshal([]byte(os.Getenv("DSX_E2E_MQTT_EXPECTED_JWKS")), &expected); err != nil {
+		t.Fatalf("parse DSX_E2E_MQTT_EXPECTED_JWKS: %v", err)
+	}
+	if len(expected.Keys) == 0 {
+		t.Fatal("DSX_E2E_MQTT_EXPECTED_JWKS contains no keys")
+	}
+
+	client := connectLiveMQTT(t, brokerURL, accessToken)
+	t.Cleanup(func() { client.Disconnect(0) })
+	type retainedMessage struct {
+		topic    string
+		payload  []byte
+		retained bool
+	}
+	retained := make(chan retainedMessage, 16)
+	shardID := os.Getenv("DSX_E2E_MQTT_SHARD_ID")
+	if shardID == "" {
+		t.Fatal("DSX_E2E_MQTT_SHARD_ID is not set")
+	}
+	shardTopic := keyTopicPrefix + shardID + "/kid/+"
+	token := client.Subscribe(shardTopic, 1, func(_ mqtt.Client, message mqtt.Message) {
+		select {
+		case retained <- retainedMessage{
+			topic:    message.Topic(),
+			payload:  append([]byte(nil), message.Payload()...),
+			retained: message.Retained(),
+		}:
+		default:
+		}
+	})
+	if !token.WaitTimeout(10*time.Second) || token.Error() != nil {
+		t.Fatalf("retained shard subscription failed: %v", token.Error())
+	}
+	if got := token.(*mqtt.SubscribeToken).Result()[shardTopic]; got != 1 {
+		t.Fatalf("retained shard SUBACK = %#x, want QoS 1", got)
+	}
+
+	registry := newKeyRegistry()
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case message := <-retained:
+			if !message.retained {
+				t.Fatal("late subscriber received a live public key instead of retained replay")
+			}
+			keyID, ok := parseKeyTopic(message.topic)
+			if !ok {
+				t.Fatal("retained public key topic was invalid")
+			}
+			publication, err := decodePublishedKey(message.payload)
+			if err != nil {
+				t.Fatalf("deployed Event Bus retained an invalid public key: %v", err)
+			}
+			if err := registry.replace(keyID, publication); err != nil {
+				t.Fatalf("deployed Event Bus retained a conflicting public key: %v", err)
+			}
+			if containsKeyset(registry.keyset().Keys, expected.Keys) {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("deployed Event Bus retained keys = %v, want at least %v", keyIDs(registry.keyset().Keys), keyIDs(expected.Keys))
+		}
 	}
 }
 
@@ -635,10 +670,7 @@ func keyIDs(keys []jose.JSONWebKey) []string {
 	return result
 }
 
-func sameKeysets(actual, expected []jose.JSONWebKey) bool {
-	if len(actual) != len(expected) {
-		return false
-	}
+func containsKeyset(actual, expected []jose.JSONWebKey) bool {
 	for _, key := range expected {
 		if !verifyJWKPresent(actual, key) {
 			return false

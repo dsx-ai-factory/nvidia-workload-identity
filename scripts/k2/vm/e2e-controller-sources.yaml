@@ -1,0 +1,17 @@
+apiVersion: provisioning.dpu.nvidia.com/v1alpha1
+kind: DPU
+metadata:
+  name: e2e-controller-dpu
+---
+apiVersion: e2e.dsx-identity.nvidia.com/v1alpha1
+kind: LaunchLayerSourceFixture
+metadata:
+  name: e2e-controller-host-source
+spec:
+  type: host
+  tenantID: nca-0000000000000001
+  resourceID: e2e-controller-host-source
+  parentID: e2e-controller-dpu
+  holder:
+    namespace: dsx-identity
+    serviceAccount: dsx-identity-dsx-imds-agent

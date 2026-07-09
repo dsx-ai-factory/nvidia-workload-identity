@@ -35,6 +35,11 @@ spec:
                 secretKeyRef:
                   name: spiffe-exchange-mqtt-oauth
                   key: client-secret
+            - name: E2E_OBSERVER_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: event-bus-e2e-observer-oauth
+                  key: client-secret
           ports:
             - name: http
               containerPort: 8080

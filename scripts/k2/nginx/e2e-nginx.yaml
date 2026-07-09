@@ -40,7 +40,35 @@ spec:
         cpu: 200m
         memory: 256Mi
     volumeMounts:
+    - name: spiffe-csi
+      mountPath: /var/run/secrets/spire.io
+      readOnly: true
     - name: dsx-token
       mountPath: /var/run/secrets/nvidia.com/dsx
+      readOnly: true
+  - name: identity-probe
+    image: dsx-identity/e2e-probe:0.1.0
+    imagePullPolicy: IfNotPresent
+    command: ["tail", "-f", "/dev/null"]
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+      readOnlyRootFilesystem: true
+    volumeMounts:
+    - name: spiffe-csi
+      mountPath: /var/run/secrets/spire.io
+      readOnly: true
+  volumes:
+  - name: spiffe-csi
+    csi:
+      driver: csi.spiffe.io
       readOnly: true
   restartPolicy: Never

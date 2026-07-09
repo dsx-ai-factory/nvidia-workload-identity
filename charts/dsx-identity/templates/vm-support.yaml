@@ -46,6 +46,8 @@ spec:
         - name: exchange-proxy-csi
           image: "{{ .Values.vmSupport.exchangeProxyCsi.image.repository }}:{{ .Values.vmSupport.exchangeProxyCsi.image.tag | default $imageTag }}"
           imagePullPolicy: {{ .Values.vmSupport.exchangeProxyCsi.image.pullPolicy }}
+          command:
+            - /usr/local/bin/exchange-proxy-csi
           args:
             - --socket-dir=/run/exchange-proxy
             - --csi-socket-path=/exchange-proxy-csi/csi.sock
@@ -57,6 +59,9 @@ spec:
           # NodePublishVolume requires bind mounts into kubelet's pod tree.
           securityContext:
             privileged: true
+            runAsGroup: 0
+            runAsNonRoot: false
+            runAsUser: 0
             readOnlyRootFilesystem: true
             capabilities:
               drop:
@@ -87,7 +92,10 @@ spec:
               mountPath: /registration
       volumes:
         - name: exchange-socket-dir
-          emptyDir: {}
+          # Published bind mounts must survive a CSI DaemonSet rollout.
+          hostPath:
+            path: /var/lib/kubelet/plugins/csi.exchange.nvidia.com/proxy
+            type: DirectoryOrCreate
         - name: csi-socket-dir
           hostPath:
             path: /var/lib/kubelet/plugins/csi.exchange.nvidia.com
@@ -149,6 +157,7 @@ spec:
                   {{- toYaml .Values.vmSupport.resources.networkSetup | nindent 18 }}
                 securityContext:
                   runAsUser: 0
+                  runAsGroup: 0
                   runAsNonRoot: false
                   allowPrivilegeEscalation: false
                   capabilities:
@@ -159,6 +168,8 @@ spec:
               - name: metadata-service
                 image: "{{ .Values.vmSupport.metadataService.image.repository }}:{{ .Values.vmSupport.metadataService.image.tag | default $imageTag }}"
                 imagePullPolicy: {{ .Values.vmSupport.metadataService.image.pullPolicy }}
+                command:
+                  - /usr/local/bin/metadata-service
                 args:
                   - --listen=:80
                   - --log-level={{ .Values.vmSupport.policy.logLevel }}

@@ -77,6 +77,8 @@ spec:
         - name: controller
           image: "{{ $values.image.repository }}:{{ $imageTag }}"
           imagePullPolicy: {{ $values.image.pullPolicy }}
+          command:
+            - /usr/local/bin/dsx-identity-controller
           args:
             - --trust-domain={{ required "global.spire.trustDomain is required" $.Values.global.spire.trustDomain }}
             - --operator-tenant={{ required "identityController.operatorTenant is required" $values.operatorTenant }}
