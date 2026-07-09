@@ -1,8 +1,8 @@
 # k1 umbrella chart values for the primary SPIRE and Exchange shard
-# Used by: make identity-k1
+# Used by: make identities
 
 global:
-  imageTag: "0.1.0"
+  imageTag: ""
   installAndUpgradeHooks:
     enabled: true
   spire:
@@ -45,9 +45,9 @@ spire:
 exchange:
   enabled: true
   image:
-    repository: spiffe-exchange-service
-    tag: "0.1.0"
-    pullPolicy: Never
+    repository: dsx-identity/spiffe-exchange-service
+    tag: ""
+    pullPolicy: IfNotPresent
   imagePullSecrets: []
   jwksURL: http://spiffe-exchange.dsx-identity.svc.cluster.local:8080/.well-known/jwks.json
   shardID: k1
@@ -65,9 +65,9 @@ podTokenFetcher:
   # install Kyverno in the multi-cluster profile.
   enabled: false
   image:
-    repository: dsx-token-fetcher
-    tag: "0.1.0"
-    pullPolicy: Never
+    repository: dsx-identity/dsx-token-fetcher
+    tag: ""
+    pullPolicy: IfNotPresent
 
 vmSupport:
   enabled: false

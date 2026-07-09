@@ -1,0 +1,13 @@
+apiVersion: skaffold/v4beta14
+kind: Config
+metadata:
+  name: identity-e2e
+requires:
+  - path: skaffold/k1.yaml
+    configs:
+      - k1-fixture
+      - openbao-k1
+  - path: skaffold/k2.yaml
+    configs:
+      - vm-k2
+      - k2-fixture

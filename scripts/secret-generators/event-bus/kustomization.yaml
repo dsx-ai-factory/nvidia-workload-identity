@@ -1,0 +1,42 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: dsx-identity
+resources:
+  - ../namespace.yaml
+generatorOptions:
+  disableNameSuffixHash: true
+secretGenerator:
+  - name: auth-callout-keys
+    files:
+      - nkey-seed=generated/csc/nkeys/auth-callout-keys/nkey-seed
+      - issuer-seed=generated/csc/nkeys/auth-callout-keys/issuer-seed
+      - xkey-seed=generated/csc/nkeys/auth-callout-keys/xkey-seed
+  - name: nats-auth-signing
+    files:
+      - seed=generated/csc/nkeys/nats-auth-signing/seed
+      - pubkey=generated/csc/nkeys/nats-auth-signing/pubkey
+  - name: nats-authx-user
+    files:
+      - seed=generated/csc/nkeys/nats-authx-user/seed
+      - pubkey=generated/csc/nkeys/nats-authx-user/pubkey
+  - name: nats-nack-user
+    files:
+      - seed=generated/csc/nkeys/nats-nack-user/seed
+      - pubkey=generated/csc/nkeys/nats-nack-user/pubkey
+      - nack-user.nk=generated/csc/nkeys/nats-nack-user/nack-user.nk
+  - name: nats-surveyor
+    files:
+      - seed=generated/csc/nkeys/nats-surveyor/seed
+      - pubkey=generated/csc/nkeys/nats-surveyor/pubkey
+  - name: nats-xkey
+    files:
+      - seed=generated/csc/nkeys/nats-xkey/seed
+      - pubkey=generated/csc/nkeys/nats-xkey/pubkey
+  - name: spiffe-exchange-mqtt-oauth
+    files:
+      - client-id=generated/oauth/client-id
+      - client-secret=generated/oauth/client-secret
+  - name: event-bus-e2e-observer-oauth
+    files:
+      - client-id=generated/observer-oauth/client-id
+      - client-secret=generated/observer-oauth/client-secret

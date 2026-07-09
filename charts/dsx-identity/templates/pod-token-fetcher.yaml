@@ -29,12 +29,22 @@ spec:
                 image: "{{ .Values.podTokenFetcher.image.repository }}:{{ $imageTag }}"
                 imagePullPolicy: {{ .Values.podTokenFetcher.image.pullPolicy }}
                 restartPolicy: Always
+                command:
+                  - /usr/local/bin/dsx-token-fetcher
                 args:
                   - --socket=unix:///var/run/secrets/spire.io/spire-agent.sock
                   - --audience={{ .Values.podTokenFetcher.audience }}
                   - --svid-hint=dsx-pod
                   - --output={{ .Values.podTokenFetcher.outputPath }}
                   - --exchange-service-url=http://spiffe-exchange.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.exchange.service.port }}
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop: ["ALL"]
+                  readOnlyRootFilesystem: true
+                  runAsGroup: 0
+                  runAsNonRoot: false
+                  runAsUser: 0
                 {{- with .Values.podTokenFetcher.startupProbe }}
                 startupProbe:
                   {{- toYaml . | nindent 18 }}

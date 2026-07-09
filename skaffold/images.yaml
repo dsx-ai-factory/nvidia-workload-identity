@@ -1,0 +1,121 @@
+apiVersion: skaffold/v4beta14
+kind: Config
+metadata:
+  name: core-images
+build:
+  local:
+    concurrency: 0
+    push: false
+    useDockerCLI: true
+    useBuildkit: true
+  tagPolicy:
+    inputDigest: {}
+  artifacts:
+    - image: dsx-identity/spiffe-exchange-service
+      context: ..
+      docker:
+        dockerfile: Dockerfile
+        target: spiffe-exchange-service
+        buildArgs:
+          <<: &coreBuildArgs
+            BUILDER_IMG: 127.0.0.1:5002/library/golang:1.26.4
+          BINARY: spiffe-exchange-service
+    - image: dsx-identity/dsx-token-fetcher
+      context: ..
+      docker:
+        dockerfile: Dockerfile
+        target: dsx-token-fetcher
+        buildArgs:
+          <<: *coreBuildArgs
+          BINARY: dsx-token-fetcher
+    - image: dsx-identity/auth-callout
+      context: ../third-party/dsx-exchange/auth-callout
+      docker:
+        dockerfile: build/package/Dockerfile
+        buildArgs:
+          BUILDER_IMG: 127.0.0.1:5002/library/golang
+          FINAL_IMG: 127.0.0.1:5002/distroless/static-debian12
+---
+apiVersion: skaffold/v4beta14
+kind: Config
+metadata:
+  name: k2-images
+build:
+  local:
+    concurrency: 0
+    push: false
+    useDockerCLI: true
+    useBuildkit: true
+  tagPolicy:
+    inputDigest: {}
+  artifacts:
+    - image: dsx-identity/metadata-service
+      context: ..
+      docker:
+        dockerfile: Dockerfile
+        target: metadata-service
+        buildArgs:
+          <<: &k2BuildArgs
+            BUILDER_IMG: 127.0.0.1:5002/library/golang:1.26.4
+          BINARY: metadata-service
+    - image: dsx-identity/dsx-imds-network-setup
+      context: ..
+      docker:
+        dockerfile: Dockerfile
+        target: dsx-imds-network-setup
+        buildArgs:
+          <<: *k2BuildArgs
+          BINARY: dsx-imds-network-setup
+    - image: dsx-identity/exchange-proxy-csi
+      context: ..
+      docker:
+        dockerfile: Dockerfile
+        target: exchange-proxy-csi
+        buildArgs:
+          <<: *k2BuildArgs
+          BINARY: exchange-proxy-csi
+    - image: dsx-identity/dsx-identity-controller
+      context: ..
+      docker:
+        dockerfile: Dockerfile
+        target: dsx-identity-controller
+        buildArgs:
+          <<: *k2BuildArgs
+          BINARY: dsx-identity-controller
+    - image: dsx-identity/dsx-imds-node-attestor-server
+      context: ..
+      docker:
+        dockerfile: Dockerfile.plugin
+        buildArgs:
+          <<: &pluginBuildArgs
+            BUILDER_IMG: 127.0.0.1:5002/library/golang:1.26.4
+            TOOLS_IMG: 127.0.0.1:5002/library/busybox:1.37.0-musl
+          BINARY: dsx-imds-node-attestor-server
+    - image: dsx-identity/dsx-imds-node-attestor-agent
+      context: ..
+      docker:
+        dockerfile: Dockerfile.plugin
+        buildArgs:
+          <<: *pluginBuildArgs
+          BINARY: dsx-imds-node-attestor-agent
+---
+apiVersion: skaffold/v4beta14
+kind: Config
+metadata:
+  name: e2e-images
+build:
+  local:
+    concurrency: 0
+    push: false
+    useDockerCLI: true
+    useBuildkit: true
+  tagPolicy:
+    inputDigest: {}
+  artifacts:
+    - image: dsx-identity/e2e-probe
+      context: ..
+      docker:
+        dockerfile: Dockerfile.e2e
+        buildArgs:
+          BUILDER_IMG: 127.0.0.1:5002/library/golang:1.26.4
+          RUNTIME_IMG: 127.0.0.1:5002/curlimages/curl:8.10.1

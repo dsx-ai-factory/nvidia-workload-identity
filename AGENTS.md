@@ -48,8 +48,11 @@
 - DSX Event Bus, Keycloak, Kyverno runtime, cluster infrastructure, OpenBao, nginx, VMs, and E2E clients remain external to the umbrella.
 - CI packages and publishes only artifacts the repository actually produces: the umbrella chart and current images.
 - Apply every resource in an admission-compatible deployment phase before readiness waits. Split phases only to establish an API or admission webhook required to accept later resources.
+- Put each required API, admission, or infrastructure status gate in its provider Skaffold config's deploy after-hook. Every direct consumer must require that provider. Do not rely on config traversal order or a designated first consumer.
+- Deploy after-hooks intentionally wait for the required provider config's resources before checking its explicit contract. Keep each provider config cohesive instead of disabling status checks to avoid a real dependency.
 - Never wait for a workload and then discover its Pod UID, node, placement, or service account to synthesize another deployment object. Use stable declarative source CRs and selectors known before startup.
 - Use Helm values for production configuration and command-line overrides only for genuinely dynamic values.
+- Let Skaffold tolerate transient Kubernetes failures until each deployment deadline. Keep explicit provider gates only where an API, admission, or infrastructure contract must hold before a dependent config can be applied.
 - Use `kubectl rollout status` for controllers and `kubectl wait` for other resources. Avoid arbitrary sleeps.
 - The local k2 fixture uses OVN-Kubernetes layer-3 UDN and KubeVirt. WSL is unsupported because the metadata bridge requires nftables.
 - Use CSI drivers for workload identity delivery, not hostPath mounts.
@@ -100,15 +103,20 @@ spiffe://nca-<16-digits>.ds9.dsx.nvid.id/<dpu|host|vm>/<id>
 - Use `/v1/auth/jwt/cel/login` with any reachable Exchange's full aggregate JWKS. Local E2E uses k1 Exchange.
 - CEL parses tenant, region, service, resource type/ID, and optional process, pod, and role suffixes.
 - Policies remain narrowly scoped to authenticated, region, tenant, service, and resource-type identities.
-- Use the pinned official OpenBao chart/image and `bao` CLI through a port-forward with guaranteed cleanup.
+- Use the official OpenBao chart with native self-initialization and expose it through the k1 Gateway. Do not manage init keys or a root token, and do not use port-forwards.
 
 ## Engineering rules
 
+- Use the repository-pinned mise toolchain. Local and CI E2E must enter the same Skaffold workflow. Keep release image and chart publishing in the GitLab release pipeline.
+- Use one Skaffold command with per-module kubecontexts to deploy the full k1 and k2 identity topology. Use native Skaffold Kind image loading for source images. Use the persistent local Zot registry only as an upstream pull-through cache.
+- Reuse the local Zot container and volume across setup and cleanup. Do not recreate or delete them during normal workflows.
+- Preserve Zot's running state across workflows. Mount its checked-in config read-only instead of copying or rendering it.
+- Each deployment workflow invokes one root Skaffold config. Make may prepare Kind clusters, but it must not select, order, or invoke component Skaffold modules.
 - Use `#!/bin/bash`, `set -euo pipefail` where appropriate, `curl` rather than `wget`, and logging helpers from `scripts/common.sh`.
 - Build unreleased Go images locally with multi-stage Dockerfiles and minimal runtimes. Pin image tags. Never use `latest`.
 - Extract preload images from charts/manifests rather than hardcoding image arrays. Image loads must fail visibly.
 - Give containers resource requests, limits, and appropriate security contexts. KubeVirt uses cached `containerDisk` volumes with `IfNotPresent`.
-- Use Go 1.25+ and the repository's pinned `go-spiffe`. Follow standard formatting, context cancellation, structured logging, flag-based CLI configuration, and focused unit tests for business logic.
+- Use Go 1.26+ and the repository's pinned `go-spiffe`. Follow standard formatting, context cancellation, structured logging, flag-based CLI configuration, and focused unit tests for business logic.
 - Use `http.Header` methods instead of direct header-map access. Parse structured header values with the relevant standard-library grammar.
 - Never call `os.Exit` outside `main`. Put command work and deferred cleanup in an error-returning function so `main` translates failure to `os.Exit` only after those defers run.
 - Use two-space YAML indentation, descriptive labels, ConfigMaps/Secrets for configuration, and least-privilege service accounts.
@@ -119,6 +127,8 @@ spiffe://nca-<16-digits>.ds9.dsx.nvid.id/<dpu|host|vm>/<id>
 ## Functional validation
 
 - Tests assert observed runtime behavior only. Do not inspect YAML, templates, scripts, source, or rendered manifests as an E2E proxy.
+- Do not assert Pod or controller counts, readiness, rollout status, or log content as proxies for behavior. Use the client, service, identity, and policy contracts under test.
+- Do not use application or identity fixture containers as generic test runners. Run external-client checks from the test process. Execute a probe in a fixture only when its container-local interface is the contract under test.
 - Do not use sleeps in tests. Synchronize on observable conditions with bounded deadlines, and use deterministic or virtual time for time-dependent behavior.
 - Do not use fake metadata responders, test JWT signers, directly signed positive tokens, or test-only authentication paths.
 - VM requests are initiated by an external client. Do not run recurring assertions or result markers inside the guest.
@@ -136,16 +146,13 @@ spiffe://nca-<16-digits>.ds9.dsx.nvid.id/<dpu|host|vm>/<id>
   - globally unique key rotation and publication lease expiry.
 - Focused tests must prove publication lease expiry deterministically without waiting for wall-clock time.
 - CI-required validation and E2E jobs must not be manual or allowed to fail.
+- Run the full E2E lifecycle only after every queued review item is complete. New review items defer that run until they are complete.
 - Run `make validate` and the full E2E lifecycle after code or configuration changes. Use repository-pinned tool and dependency versions.
 
 ## Primary commands
 
 ```bash
 make validate
-make identity-deploy
-make identity-verify
-make identity-clean
-
 make -j install
 make test
 make clean

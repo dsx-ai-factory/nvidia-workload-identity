@@ -1,0 +1,10 @@
+*
+!go.mod
+!go.sum
+!cmd/
+!cmd/dsx-token-fetcher/
+!cmd/dsx-token-fetcher/**
+!cmd/spiffe-exchange-service/
+!cmd/spiffe-exchange-service/**
+!internal/
+!internal/**

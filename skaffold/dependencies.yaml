@@ -1,0 +1,10 @@
+apiVersion: skaffold/v4beta14
+kind: Config
+metadata:
+  name: chart-dependencies
+manifests:
+  hooks:
+    before:
+      - host:
+          command:
+            - scripts/prepare-chart-dependencies.sh

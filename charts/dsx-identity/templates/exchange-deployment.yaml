@@ -25,6 +25,14 @@ spec:
         app: spiffe-exchange
     spec:
       serviceAccountName: spiffe-exchange-sa
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        runAsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
       {{- with .Values.exchange.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -36,6 +44,8 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.exchange.service.port }}
+          command:
+            - /usr/local/bin/spiffe-exchange-service
           args:
             - --listen=:{{ .Values.exchange.service.port }}
             - --socket=unix:///var/run/secrets/spire.io/spire-agent.sock
@@ -51,6 +61,11 @@ spec:
             - --mqtt-oauth-client-id={{ required "exchange.mqtt.oauth2.clientID is required" .Values.exchange.mqtt.oauth2.clientID }}
             - --mqtt-oauth-client-secret=/run/secrets/spiffe-exchange-mqtt/client-secret
             - --log-level={{ .Values.exchange.logLevel }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
           resources:
             {{- toYaml .Values.exchange.resources | nindent 12 }}
           volumeMounts:
@@ -92,11 +107,11 @@ spec:
         - name: signing-keyset
           secret:
             secretName: {{ required "exchange.signingKeysetSecret is required" .Values.exchange.signingKeysetSecret }}
-            defaultMode: 0400
+            defaultMode: 0440
         - name: mqtt-oauth
           secret:
             secretName: {{ required "exchange.mqtt.oauth2.clientSecretSecret is required" .Values.exchange.mqtt.oauth2.clientSecretSecret }}
-            defaultMode: 0400
+            defaultMode: 0440
             items:
               - key: {{ .Values.exchange.mqtt.oauth2.clientSecretKey }}
                 path: client-secret

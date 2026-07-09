@@ -1,8 +1,8 @@
 # k2 umbrella chart values for the Data Hall SPIRE and Exchange shard
-# Used by: make identity-k2
+# Used by: make identities
 
 global:
-  imageTag: "0.1.0"
+  imageTag: ""
   installAndUpgradeHooks:
     enabled: true
   spire:
@@ -16,12 +16,9 @@ spire:
     defaultJwtSvidTTL: "5m"
     initContainers:
       - name: install-dsx-imds-node-attestor-server
-        image: dsx-imds-node-attestor-server:0.1.0
-        imagePullPolicy: Never
-        command: ["/bin/cp"]
+        image: dsx-identity/dsx-imds-node-attestor-server:0.1.0
+        imagePullPolicy: IfNotPresent
         args:
-          - -a
-          - /usr/local/bin/dsx-imds-node-attestor-server
           - /plugins/dsx-imds-node-attestor-server
         securityContext:
           runAsUser: 0
@@ -124,12 +121,9 @@ spire:
             endpoint: http://127.0.0.1:18080
     initContainers:
       - name: install-dsx-imds-node-attestor-agent
-        image: dsx-imds-node-attestor-agent:0.1.0
-        imagePullPolicy: Never
-        command: ["/bin/cp"]
+        image: dsx-identity/dsx-imds-node-attestor-agent:0.1.0
+        imagePullPolicy: IfNotPresent
         args:
-          - -a
-          - /usr/local/bin/dsx-imds-node-attestor-agent
           - /plugins/dsx-imds-node-attestor-agent
         securityContext:
           runAsUser: 0
@@ -150,9 +144,11 @@ spire:
           - name: dsx-imds-agent-plugin
             mountPath: /plugins
       - name: metadata-service
-        image: metadata-service:0.1.0
-        imagePullPolicy: Never
+        image: dsx-identity/metadata-service:0.1.0
+        imagePullPolicy: IfNotPresent
         restartPolicy: Always
+        command:
+          - /usr/local/bin/metadata-service
         args:
           - --listen=127.0.0.1:18080
           - --svid-hint=dsx-imds
@@ -210,9 +206,9 @@ spire:
 exchange:
   enabled: true
   image:
-    repository: spiffe-exchange-service
-    tag: "0.1.0"
-    pullPolicy: Never
+    repository: dsx-identity/spiffe-exchange-service
+    tag: ""
+    pullPolicy: IfNotPresent
   imagePullSecrets: []
   jwksURL: http://spiffe-exchange.dsx-identity.svc.cluster.local:8080/.well-known/jwks.json
   shardID: k2
@@ -228,36 +224,36 @@ exchange:
 podTokenFetcher:
   enabled: true
   image:
-    repository: dsx-token-fetcher
-    tag: "0.1.0"
-    pullPolicy: Never
+    repository: dsx-identity/dsx-token-fetcher
+    tag: ""
+    pullPolicy: IfNotPresent
 
 vmSupport:
   enabled: true
   metadataService:
     image:
-      repository: metadata-service
-      tag: "0.1.0"
-      pullPolicy: Never
+      repository: dsx-identity/metadata-service
+      tag: ""
+      pullPolicy: IfNotPresent
   imdsNetworkSetup:
     image:
-      repository: dsx-imds-network-setup
-      tag: "0.1.0"
-      pullPolicy: Never
+      repository: dsx-identity/dsx-imds-network-setup
+      tag: ""
+      pullPolicy: IfNotPresent
   exchangeProxyCsi:
     image:
-      repository: exchange-proxy-csi
-      tag: "0.1.0"
-      pullPolicy: Never
+      repository: dsx-identity/exchange-proxy-csi
+      tag: ""
+      pullPolicy: IfNotPresent
   policy:
     svidHint: dsx-imds-vm
 
 identityController:
   enabled: true
   image:
-    repository: dsx-identity-controller
-    tag: "0.1.0"
-    pullPolicy: Never
+    repository: dsx-identity/dsx-identity-controller
+    tag: ""
+    pullPolicy: IfNotPresent
   operatorTenant: nca-0000000000000001
   # k2 bootstrap installs an API-only Kind fixture for the external DPU CRD.
   # dsx_dpu is supplied separately. The controller consumes only its stable

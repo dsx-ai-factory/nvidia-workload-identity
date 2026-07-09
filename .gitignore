@@ -24,7 +24,7 @@ go.work
 go.work.sum
 
 # Build artifacts
-/bin/
+/.mise/
 /dist/
 /build/
 /target/
@@ -124,6 +124,10 @@ coverage.html
 local/
 dev/
 debug
+/scripts/secret-generators/event-bus/generated/
+/scripts/secret-generators/identity-k1/generated/
+/scripts/secret-generators/identity-k2/generated/
+/scripts/k2/vm/generated/
 
 # Terraform
 *.tfstate

@@ -1,5 +1,5 @@
 #!/bin/bash
-# setup-cluster.sh - Creates the Common Services Kind cluster
+# setup-cluster.sh - Creates the k1 Kind cluster
 # Uses default kindnet CNI - no OVN overhead needed
 
 set -euo pipefail
@@ -10,24 +10,6 @@ CLUSTER_NAME="k1"
 KIND_CONFIG="${SCRIPT_DIR}/kind-config.yaml"
 
 source "${PROJECT_ROOT}/scripts/common.sh"
-
-check_prerequisites() {
-    log_info "Checking prerequisites..."
-    
-    for cmd in kind kubectl docker helm; do
-        if ! command -v "$cmd" &> /dev/null; then
-            log_error "$cmd is not installed"
-            exit 1
-        fi
-    done
-    
-    if ! docker info &> /dev/null; then
-        log_error "Docker is not running"
-        exit 1
-    fi
-    
-    log_success "All prerequisites met"
-}
 
 create_cluster() {
     local clusters
@@ -43,10 +25,9 @@ create_cluster() {
     log_info "Creating Kind cluster '${CLUSTER_NAME}'..."
     kind_create_cluster "${CLUSTER_NAME}" "${KIND_CONFIG}"
     kind_configure_context "${CLUSTER_NAME}" "${KIND_CONFIG}"
-    
-    kubectl wait --for=condition=Ready --timeout=120s -n kube-system pod -l component=kube-apiserver --context "kind-${CLUSTER_NAME}"
-    kubectl wait --for=condition=Ready nodes --all --timeout=120s --context "kind-${CLUSTER_NAME}"
-    
+    kubectl wait --for=condition=Ready nodes --all --timeout=120s \
+        --context "kind-${CLUSTER_NAME}" >/dev/null
+
     log_success "Cluster '${CLUSTER_NAME}' created and ready"
 }
 
@@ -59,30 +40,11 @@ display_info() {
     kubectl get nodes --context "kind-${CLUSTER_NAME}"
 }
 
-cleanup() {
-    log_info "Cleaning up k1 cluster..."
-    kind delete cluster --name "${CLUSTER_NAME}"
-    local clusters
-    clusters=$(kind get clusters)
-    if grep -Fxq "${CLUSTER_NAME}" <<<"${clusters}"; then
-        log_error "Cluster '${CLUSTER_NAME}' still exists after deletion"
-        return 1
-    fi
-    log_success "Cluster '${CLUSTER_NAME}' is absent"
-}
-
 main() {
-    case "${1:-}" in
-        cleanup)
-            cleanup
-            ;;
-        *)
-            check_prerequisites
-            create_cluster
-            display_info
-            ;;
-    esac
+    create_cluster
+    kind_configure_registry "${CLUSTER_NAME}"
+    display_info
 }
 
 trap 'log_error "Script interrupted"; exit 1' INT TERM
-main "$@"
+main
