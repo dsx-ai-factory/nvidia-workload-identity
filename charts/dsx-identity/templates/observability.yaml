@@ -1,0 +1,108 @@
+{{- if and .Values.identityController.enabled .Values.observability.metrics.enabled }}
+{{- $controllerName := include "dsx-identity.identityControllerFullname" . }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $controllerName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dsx-identity.identityControllerLabels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ include "dsx-identity.identityControllerName" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: metrics
+      port: {{ .Values.observability.metrics.port }}
+      targetPort: metrics
+{{- if .Values.observability.metrics.serviceMonitor.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ $controllerName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dsx-identity.identityControllerLabels" . | nindent 4 }}
+    {{- with .Values.observability.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "dsx-identity.identityControllerName" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.observability.metrics.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.observability.metrics.serviceMonitor.scrapeTimeout }}
+{{- end }}
+---
+{{- end }}
+{{/* Exchange metrics use the OTel Prometheus exporter configured by the chart. */}}
+{{- if and .Values.exchange.enabled .Values.observability.metrics.enabled .Values.observability.metrics.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: spiffe-exchange
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dsx-identity.labels" (dict "root" . "name" "spiffe-exchange") | nindent 4 }}
+    {{- with .Values.observability.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "dsx-identity.selectorLabels" (dict "root" . "name" "spiffe-exchange") | nindent 6 }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.observability.metrics.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.observability.metrics.serviceMonitor.scrapeTimeout }}
+---
+{{- end }}
+{{/*
+The headless Service exposes one metrics target per CSI DaemonSet Pod. This
+avoids load balancing a Prometheus scrape across nodes.
+*/}}
+{{- if and .Values.vmSupport.enabled .Values.observability.metrics.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: exchange-proxy-csi
+  namespace: {{ .Values.vmSupport.proxyNamespace }}
+  labels:
+    {{- include "dsx-identity.labels" (dict "root" . "name" "exchange-proxy-csi") | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "dsx-identity.selectorLabels" (dict "root" . "name" "exchange-proxy-csi") | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ .Values.observability.metrics.port }}
+      targetPort: metrics
+{{- if .Values.observability.metrics.serviceMonitor.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: exchange-proxy-csi
+  namespace: {{ .Values.vmSupport.proxyNamespace }}
+  labels:
+    {{- include "dsx-identity.labels" (dict "root" . "name" "exchange-proxy-csi") | nindent 4 }}
+    {{- with .Values.observability.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "dsx-identity.selectorLabels" (dict "root" . "name" "exchange-proxy-csi") | nindent 6 }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.observability.metrics.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.observability.metrics.serviceMonitor.scrapeTimeout }}
+{{- end }}
+{{- end }}

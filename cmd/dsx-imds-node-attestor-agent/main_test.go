@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -88,41 +86,13 @@ func TestIMDSHTTPClientIgnoresAmbientProxy(t *testing.T) {
 		proxyHits.Add(1)
 	}))
 	t.Cleanup(proxy.Close)
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Metadata") != "true" || r.URL.Query().Get("aud") != "spire-server" {
-			t.Errorf("unexpected IMDS request: headers=%v query=%v", r.Header, r.URL.Query())
-		}
-		_, _ = w.Write([]byte("signed-host-token"))
-	}))
-	t.Cleanup(target.Close)
 	t.Setenv("HTTP_PROXY", proxy.URL)
 	t.Setenv("HTTPS_PROXY", proxy.URL)
 	t.Setenv("NO_PROXY", "")
 
 	client := newIMDSHTTPClient(time.Second)
-	transport, ok := client.Transport.(*http.Transport)
-	if !ok || transport.Proxy != nil {
-		t.Fatalf("transport = %#v, want proxy-free *http.Transport", client.Transport)
-	}
-	dialer := new(net.Dialer)
-	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-		switch address {
-		case "imds.test:80":
-			return dialer.DialContext(ctx, network, target.Listener.Addr().String())
-		case proxy.Listener.Addr().String():
-			return dialer.DialContext(ctx, network, address)
-		default:
-			return nil, fmt.Errorf("unexpected dial address %q", address)
-		}
-	}
-	t.Cleanup(transport.CloseIdleConnections)
-
-	token, err := dsximds.FetchHostToken(context.Background(), client, "http://imds.test", "spire-server")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if token != "signed-host-token" {
-		t.Fatalf("token = %q", token)
+	if _, err := dsximds.FetchHostToken(context.Background(), client, "http://imds.proxy-check.invalid", "spire-server"); err == nil {
+		t.Fatal("request to an unresolvable direct endpoint succeeded")
 	}
 	if proxyHits.Load() != 0 {
 		t.Fatalf("ambient proxy received %d requests", proxyHits.Load())

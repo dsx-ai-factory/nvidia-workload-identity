@@ -14,6 +14,7 @@ import (
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/go-jose/go-jose/v4"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 )
@@ -194,7 +195,10 @@ func (c mqttOAuthConfig) credentialsProvider(ctx context.Context) (mqtt.Credenti
 		TokenURL: c.tokenURL,
 		Scopes:   []string{"mqtt"},
 	}
-	tokenContext := context.WithValue(ctx, oauth2.HTTPClient, &http.Client{Timeout: 10 * time.Second})
+	tokenContext := context.WithValue(ctx, oauth2.HTTPClient, &http.Client{
+		Transport: otelhttp.NewTransport(http.DefaultTransport),
+		Timeout:   10 * time.Second,
+	})
 	// DSX auth-callout expects username "oauthtoken" and the access token as the MQTT password.
 	return func() (string, string) {
 		secret, err := readClientSecret(c.clientSecretFile)

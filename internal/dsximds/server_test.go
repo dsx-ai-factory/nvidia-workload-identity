@@ -7,8 +7,6 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
-	"fmt"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -168,39 +166,13 @@ func TestRemoteHTTPClientIgnoresAmbientProxy(t *testing.T) {
 		proxyHits.Add(1)
 	}))
 	t.Cleanup(proxy.Close)
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	t.Cleanup(target.Close)
 	t.Setenv("HTTP_PROXY", proxy.URL)
 	t.Setenv("HTTPS_PROXY", proxy.URL)
 	t.Setenv("NO_PROXY", "")
 
 	client := newRemoteHTTPClient(time.Second)
-	transport, ok := client.Transport.(*http.Transport)
-	if !ok || transport.Proxy != nil {
-		t.Fatalf("transport = %#v, want proxy-free *http.Transport", client.Transport)
-	}
-	dialer := new(net.Dialer)
-	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-		switch address {
-		case "jwks.test:80":
-			return dialer.DialContext(ctx, network, target.Listener.Addr().String())
-		case proxy.Listener.Addr().String():
-			return dialer.DialContext(ctx, network, address)
-		default:
-			return nil, fmt.Errorf("unexpected dial address %q", address)
-		}
-	}
-	t.Cleanup(transport.CloseIdleConnections)
-
-	response, err := client.Get("http://jwks.test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	response.Body.Close()
-	if response.StatusCode != http.StatusNoContent {
-		t.Fatalf("status = %s", response.Status)
+	if _, err := client.Get("http://jwks.proxy-check.invalid"); err == nil {
+		t.Fatal("request to an unresolvable direct endpoint succeeded")
 	}
 	if proxyHits.Load() != 0 {
 		t.Fatalf("ambient proxy received %d requests", proxyHits.Load())

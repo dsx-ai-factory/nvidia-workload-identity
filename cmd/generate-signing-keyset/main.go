@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -9,10 +10,14 @@ import (
 	_ "crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/go-jose/go-jose/v4"
+
+	"dsx-identity/internal/telemetry"
 )
 
 type generatedKeyset struct {
@@ -44,14 +49,28 @@ func generate() (generatedKeyset, error) {
 	}, nil
 }
 
-func main() {
+func run() error {
+	var logLevel slog.Level
+	flag.TextVar(&logLevel, "log-level", slog.LevelInfo, "log level (debug, info, warn, error)")
+	flag.Parse()
+
+	if _, err := telemetry.Setup(context.Background(), "generate-signing-keyset", os.Stderr, logLevel); err != nil {
+		return fmt.Errorf("configure OpenTelemetry: %w", err)
+	}
+
 	result, err := generate()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		return fmt.Errorf("write signing keyset: %w", err)
+	}
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		slog.Error("Generate signing keyset", "error", err)
 		os.Exit(1)
 	}
 }

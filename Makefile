@@ -34,6 +34,10 @@ test-helm:
 	@$(MISE_EXEC) helm lint charts/dsx-identity -f scripts/k2-values.yaml
 	@$(MISE_EXEC) helm template dsx-identity charts/dsx-identity --namespace dsx-identity -f scripts/k1-values.yaml >/dev/null
 	@$(MISE_EXEC) helm template dsx-identity charts/dsx-identity --namespace dsx-identity -f scripts/k2-values.yaml >/dev/null
+	@$(MISE_EXEC) helm template dsx-identity charts/dsx-identity --namespace dsx-identity \
+		-f scripts/k2-values.yaml --set observability.metrics.enabled=true \
+		--set observability.metrics.port=19464 \
+		--set observability.metrics.serviceMonitor.enabled=true >/dev/null
 	@$(MISE_EXEC) helm lint third-party/dsx-exchange/deploy/nats-event-bus -f scripts/k1/event-bus/values.yaml
 	@$(MISE_EXEC) helm template event-bus third-party/dsx-exchange/deploy/nats-event-bus -f scripts/k1/event-bus/values.yaml >/dev/null
 	@$(MISE_EXEC) skaffold diagnose --yaml-only >/dev/null

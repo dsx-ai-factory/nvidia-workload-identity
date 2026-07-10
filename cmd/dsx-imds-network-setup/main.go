@@ -19,6 +19,8 @@ import (
 	"github.com/google/nftables/expr"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
+
+	"dsx-identity/internal/telemetry"
 )
 
 const (
@@ -43,12 +45,18 @@ var (
 	udnIfName *string
 )
 
-func runCommand() error {
-	flag.TextVar(&logLevel, "log-level", slog.LevelInfo, "Log level (debug, info, warn, error)")
+func runCommand() (runErr error) {
+	flag.TextVar(&logLevel, "log-level", slog.LevelInfo, "log level (debug, info, warn, error)")
 	udnIfName = flag.String("udn-if-name", defaultUDNIfName, "UDN interface name")
 	flag.Parse()
 
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})))
+	sdk, err := telemetry.Setup(context.Background(), "dsx-imds-network-setup", os.Stdout, logLevel)
+	if err != nil {
+		return fmt.Errorf("configure OpenTelemetry: %w", err)
+	}
+	defer func() {
+		runErr = errors.Join(runErr, sdk.Shutdown(context.Background()))
+	}()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

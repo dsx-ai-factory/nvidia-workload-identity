@@ -1,9 +1,14 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
+
+	"dsx-identity/internal/telemetry"
 )
 
 var (
@@ -15,16 +20,22 @@ var (
 	logLevel      slog.Level
 )
 
-func main() {
+func run() (runErr error) {
 	flag.StringVar(&nodeID, "node-id", "", "Node ID (overrides -node-id-env)")
 	flag.StringVar(&nodeIDEnv, "node-id-env", "MY_NODE_NAME", "Env var for node ID")
 	flag.StringVar(&csiSocketPath, "csi-socket-path", "/exchange-proxy-csi/csi.sock", "CSI socket path")
 	flag.StringVar(&pluginName, "plugin-name", "csi.exchange.nvidia.com", "CSI plugin name")
 	flag.StringVar(&socketDir, "socket-dir", "/run/exchange-proxy", "Directory containing exchange socket")
-	flag.TextVar(&logLevel, "log-level", slog.LevelInfo, "Log level (debug, info, warn, error)")
+	flag.TextVar(&logLevel, "log-level", slog.LevelInfo, "log level (debug, info, warn, error)")
 	flag.Parse()
 
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})))
+	sdk, err := telemetry.Setup(context.Background(), "exchange-proxy-csi", os.Stdout, logLevel)
+	if err != nil {
+		return fmt.Errorf("configure OpenTelemetry: %w", err)
+	}
+	defer func() {
+		runErr = errors.Join(runErr, sdk.Shutdown(context.Background()))
+	}()
 
 	// Get node ID
 	id := os.Getenv(nodeIDEnv)
@@ -32,12 +43,10 @@ func main() {
 		id = nodeID
 	}
 	if id == "" {
-		slog.Error("Node ID is required")
-		os.Exit(1)
+		return errors.New("node ID is required")
 	}
 	if socketDir == "" {
-		slog.Error("Socket directory is required")
-		os.Exit(1)
+		return errors.New("socket directory is required")
 	}
 
 	slog.Info("Starting exchange-proxy-csi",
@@ -52,8 +61,12 @@ func main() {
 		socketDir:  socketDir,
 	}
 
-	if err := Serve(csiSocketPath, driver); err != nil {
-		slog.Error("Server failed", "error", err)
+	return Serve(csiSocketPath, driver)
+}
+
+func main() {
+	if err := run(); err != nil {
+		slog.Error("Exchange proxy CSI failed", "error", err)
 		os.Exit(1)
 	}
 }

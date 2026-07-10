@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -17,9 +18,14 @@ import (
 
 	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp/filters"
 	"golang.org/x/oauth2"
+	"google.golang.org/grpc"
 
 	"dsx-identity/internal/jwtsvidutil"
+	"dsx-identity/internal/telemetry"
 	"dsx-identity/internal/tokenexchange"
 )
 
@@ -72,15 +78,16 @@ type MetadataServer struct {
 
 func newExchangeHTTPClient(socketPath string) *http.Client {
 	dialer := new(net.Dialer)
-	return &http.Client{
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{
-			// Force every exchange request through the CSI-provided local socket.
-			// The URL host cannot bypass the node-local proxy over the network.
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				return dialer.DialContext(ctx, "unix", socketPath)
-			},
+	transport := &http.Transport{
+		// Force every exchange request through the CSI-provided local socket.
+		// The URL host cannot bypass the node-local proxy over the network.
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return dialer.DialContext(ctx, "unix", socketPath)
 		},
+	}
+	return &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: otelhttp.NewTransport(transport),
 	}
 }
 
@@ -89,7 +96,7 @@ func newMetadataMux(server *MetadataServer) *http.ServeMux {
 	mux.HandleFunc("GET /latest/meta-data/identity", server.handleIdentity)
 	mux.HandleFunc("GET /2009-04-04/meta-data/identity", server.handleIdentity)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		slog.Debug("Health check", "remote_addr", r.RemoteAddr)
+		slog.DebugContext(r.Context(), "Health check", "remote_addr", r.RemoteAddr)
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprint(w, "OK")
 	})
@@ -100,7 +107,7 @@ func newMetadataMux(server *MetadataServer) *http.ServeMux {
 func (s *MetadataServer) fetchJWTSVID(ctx context.Context, audiences []string) (*jwtsvid.SVID, error) {
 	socketAddr := fmt.Sprintf("unix://%s", s.spireSocketPath)
 
-	slog.Debug("Fetching SPIRE JWT-SVID",
+	slog.DebugContext(ctx, "Fetching SPIRE JWT-SVID",
 		"socket_path", s.spireSocketPath,
 		"socket_addr", socketAddr,
 		"audiences", audiences)
@@ -113,9 +120,12 @@ func (s *MetadataServer) fetchJWTSVID(ctx context.Context, audiences []string) (
 	svids, err := workloadapi.FetchJWTSVIDs(ctx, jwtsvid.Params{
 		Audience:       audiences[0],
 		ExtraAudiences: extraAudiences,
-	}, workloadapi.WithAddr(socketAddr))
+	},
+		workloadapi.WithAddr(socketAddr),
+		workloadapi.WithDialOptions(grpc.WithStatsHandler(otelgrpc.NewClientHandler())),
+	)
 	if err != nil {
-		slog.Error("Failed to fetch SPIRE JWT-SVID",
+		slog.ErrorContext(ctx, "Failed to fetch SPIRE JWT-SVID",
 			"audiences", audiences,
 			"error", err)
 		return nil, fmt.Errorf("fetch SPIRE JWT-SVID: %w", err)
@@ -126,7 +136,7 @@ func (s *MetadataServer) fetchJWTSVID(ctx context.Context, audiences []string) (
 		return nil, err
 	}
 
-	slog.Info("Fetched SPIRE JWT-SVID",
+	slog.InfoContext(ctx, "Fetched SPIRE JWT-SVID",
 		"spiffe_id", selected.ID.String(),
 		"audiences", audiences,
 		"expiry", selected.Expiry,
@@ -137,22 +147,22 @@ func (s *MetadataServer) fetchJWTSVID(ctx context.Context, audiences []string) (
 
 // exchangeSPIRESVID exchanges a SPIRE JWT-SVID over the CSI Unix socket.
 func (s *MetadataServer) exchangeSPIRESVID(ctx context.Context, token string) (*oauth2.Token, error) {
-	slog.Debug("Creating token exchange request",
+	slog.DebugContext(ctx, "Creating token exchange request",
 		"exchange_socket", s.exchangeSocket,
 		"token_length", len(token))
 
-	slog.Info("Sending token exchange request", "exchange_socket", s.exchangeSocket)
+	slog.InfoContext(ctx, "Sending token exchange request", "exchange_socket", s.exchangeSocket)
 
 	// HTTP over Unix socket uses a dummy host (the socket handles routing).
 	resp, err := tokenexchange.Exchange(ctx, s.httpClient, "http://exchange/v1/exchange", token)
 	if err != nil {
-		slog.Error("Failed to exchange JWT",
+		slog.ErrorContext(ctx, "Failed to exchange JWT",
 			"exchange_socket", s.exchangeSocket,
 			"error", err)
 		return nil, err
 	}
 
-	slog.Info("Successfully received exchange response", "expiry", resp.Expiry)
+	slog.InfoContext(ctx, "Successfully received exchange response", "expiry", resp.Expiry)
 
 	return resp, nil
 }
@@ -204,7 +214,7 @@ func isForwardedRequest(h http.Header) bool {
 // Multiple aud parameters can be provided. The first is the primary audience,
 // and additional ones are included as extra audiences in the JWT.
 func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) {
-	slog.Info("Received identity request",
+	slog.InfoContext(r.Context(), "Received identity request",
 		"remote_addr", r.RemoteAddr,
 		"method", r.Method,
 		"path", r.URL.Path,
@@ -212,21 +222,21 @@ func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) 
 
 	// Reject forwarded requests - metadata service must only accept direct connections
 	if isForwardedRequest(r.Header) {
-		slog.Warn("Rejecting forwarded request", "remote_addr", r.RemoteAddr)
+		slog.WarnContext(r.Context(), "Rejecting forwarded request", "remote_addr", r.RemoteAddr)
 		http.Error(w, "Forwarded requests not allowed", http.StatusForbidden)
 		return
 	}
 
 	// Require Metadata: true header to prevent SSRF attacks
 	if r.Header.Get("Metadata") != "true" {
-		slog.Warn("Missing or invalid Metadata header", "remote_addr", r.RemoteAddr)
+		slog.WarnContext(r.Context(), "Missing or invalid Metadata header", "remote_addr", r.RemoteAddr)
 		http.Error(w, "Metadata: true header is required", http.StatusBadRequest)
 		return
 	}
 
 	audiences := r.URL.Query()["aud"]
 	if len(audiences) == 0 || audiences[0] == "" {
-		slog.Warn("Missing audience in request", "remote_addr", r.RemoteAddr)
+		slog.WarnContext(r.Context(), "Missing audience in request", "remote_addr", r.RemoteAddr)
 		http.Error(w, "aud query parameter is required", http.StatusBadRequest)
 		return
 	}
@@ -236,32 +246,32 @@ func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	slog.Debug("Parsed identity request",
+	slog.DebugContext(r.Context(), "Parsed identity request",
 		"audiences", audiences,
 		"remote_addr", r.RemoteAddr)
 
 	ctx := r.Context()
 
-	slog.Info("Fetching SPIRE JWT-SVID from local socket",
+	slog.InfoContext(r.Context(), "Fetching SPIRE JWT-SVID from local socket",
 		"audiences", audiences,
 		"socket_path", s.spireSocketPath)
 
 	spireSVID, err := s.fetchJWTSVID(ctx, audiences)
 	if err != nil {
-		slog.Error("Failed to fetch SPIRE JWT-SVID",
+		slog.ErrorContext(r.Context(), "Failed to fetch SPIRE JWT-SVID",
 			"error", err,
 			"remote_addr", r.RemoteAddr)
 		http.Error(w, fmt.Sprintf("Failed to fetch SPIRE JWT-SVID: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	slog.Info("Exchanging SPIRE JWT-SVID",
+	slog.InfoContext(r.Context(), "Exchanging SPIRE JWT-SVID",
 		"original_spiffe_id", spireSVID.ID.String(),
 		"audiences", audiences)
 
 	exchangeResp, err := s.exchangeSPIRESVID(ctx, spireSVID.Marshal())
 	if err != nil {
-		slog.Error("Failed to exchange JWT",
+		slog.ErrorContext(r.Context(), "Failed to exchange JWT",
 			"original_spiffe_id", spireSVID.ID.String(),
 			"error", err,
 			"remote_addr", r.RemoteAddr)
@@ -273,7 +283,7 @@ func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) 
 	// SPIFFE claims only to expose the subject. Relying parties verify its signature.
 	dsxJWT, err := jwtsvid.ParseInsecure(exchangeResp.AccessToken, audiences)
 	if err != nil {
-		slog.Error("Failed to extract SPIFFE ID from exchanged JWT",
+		slog.ErrorContext(r.Context(), "Failed to extract SPIFFE ID from exchanged JWT",
 			"error", err,
 			"remote_addr", r.RemoteAddr)
 		http.Error(w, "Failed to process exchanged JWT", http.StatusInternalServerError)
@@ -287,7 +297,7 @@ func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) 
 		SpiffeID:  newSpiffeID,
 	}
 
-	slog.Info("Successfully exchanged JWT",
+	slog.InfoContext(r.Context(), "Successfully exchanged JWT",
 		"original_spiffe_id", spireSVID.ID.String(),
 		"new_spiffe_id", newSpiffeID,
 		"expires_in", exchangeResp.ExpiresIn,
@@ -303,7 +313,7 @@ func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) 
 		var marshalErr error
 		responseBody, marshalErr = json.Marshal(resp)
 		if marshalErr != nil {
-			slog.Error("Failed to marshal JSON response",
+			slog.ErrorContext(r.Context(), "Failed to marshal JSON response",
 				"error", marshalErr,
 				"remote_addr", r.RemoteAddr)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -313,21 +323,21 @@ func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(responseBody)))
 	if _, writeErr := w.Write(responseBody); writeErr != nil {
-		slog.Error("Failed to write response",
+		slog.ErrorContext(r.Context(), "Failed to write response",
 			"error", writeErr,
 			"remote_addr", r.RemoteAddr)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	slog.Debug("Response sent successfully",
+	slog.DebugContext(r.Context(), "Response sent successfully",
 		"format", responseFormat,
 		"remote_addr", r.RemoteAddr)
 }
 
-func main() {
-	var level slog.Level
-	flag.TextVar(&level, "log-level", slog.LevelInfo, "Log level (debug, info, warn, error)")
+func run() (runErr error) {
+	var logLevel slog.Level
+	flag.TextVar(&logLevel, "log-level", slog.LevelInfo, "log level (debug, info, warn, error)")
 	var (
 		listenAddr      = flag.String("listen", ":80", "HTTP server listen address")
 		exchangeSocket  = flag.String("exchange-socket", "", "Path to exchange service Unix socket")
@@ -336,22 +346,23 @@ func main() {
 	)
 	flag.Parse()
 
+	sdk, err := telemetry.Setup(context.Background(), "metadata-service", os.Stdout, logLevel)
+	if err != nil {
+		return fmt.Errorf("configure OpenTelemetry: %w", err)
+	}
+	defer func() {
+		runErr = errors.Join(runErr, sdk.Shutdown(context.Background()))
+	}()
 	if *exchangeSocket == "" {
-		fmt.Fprintln(os.Stderr, "error: --exchange-socket is required")
-		os.Exit(1)
+		return errors.New("--exchange-socket is required")
 	}
 	if *svidHint != "dsx-imds" && *svidHint != "dsx-imds-vm" {
-		fmt.Fprintln(os.Stderr, "error: --svid-hint must be dsx-imds or dsx-imds-vm")
-		os.Exit(1)
+		return errors.New("--svid-hint must be dsx-imds or dsx-imds-vm")
 	}
-
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: level,
-	})))
 
 	slog.Info("Starting SPIFFE Metadata Service",
 		"listen_addr", *listenAddr,
-		"log_level", level.String(),
+		"log_level", logLevel.String(),
 		"exchange_socket", *exchangeSocket,
 		"spire_socket", *spireSocketPath,
 		"svid_hint", *svidHint)
@@ -365,22 +376,29 @@ func main() {
 
 	ln, err := net.Listen("tcp", *listenAddr)
 	if err != nil {
-		slog.Error("Failed to create listener", "error", err)
-		panic(err)
+		return fmt.Errorf("create listener: %w", err)
 	}
 
 	// Wrap listener to set TTL=1 on all connections
 	ttlLn := &ttlListener{Listener: ln}
 	httpServer := &http.Server{
-		Handler:           newMetadataMux(server),
+		Handler: otelhttp.NewHandler(newMetadataMux(server), "metadata-service",
+			otelhttp.WithFilter(filters.None(filters.Path("/health")))),
 		ReadHeaderTimeout: 5 * time.Second,
 		WriteTimeout:      35 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 
 	slog.Info("Starting HTTP server", "listen_addr", *listenAddr, "ip_ttl", 1)
-	if err := httpServer.Serve(ttlLn); err != nil {
-		slog.Error("HTTP server failed", "error", err)
-		panic(err)
+	if err := httpServer.Serve(ttlLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("serve HTTP: %w", err)
+	}
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		slog.Error("Metadata service failed", "error", err)
+		os.Exit(1)
 	}
 }

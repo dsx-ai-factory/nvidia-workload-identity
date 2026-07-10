@@ -2,6 +2,10 @@ package main
 
 import (
 	"context"
+	"flag"
+	"fmt"
+	"log/slog"
+	"os"
 	"sync/atomic"
 
 	"github.com/hashicorp/hcl"
@@ -13,6 +17,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"dsx-identity/internal/dsximds"
+	"dsx-identity/internal/telemetry"
 )
 
 type Config struct {
@@ -77,10 +82,26 @@ func (p *Plugin) Attest(stream serverv1.NodeAttestor_AttestServer) error {
 	})
 }
 
-func main() {
+func run() error {
+	var logLevel slog.Level
+	flag.TextVar(&logLevel, "log-level", slog.LevelInfo, "log level (debug, info, warn, error)")
+	flag.Parse()
+
+	if _, err := telemetry.Setup(context.Background(), "dsx-imds-node-attestor-server", os.Stderr, logLevel); err != nil {
+		return fmt.Errorf("configure OpenTelemetry: %w", err)
+	}
+
 	plugin := new(Plugin)
 	pluginmain.Serve(
 		serverv1.NodeAttestorPluginServer(plugin),
 		configv1.ConfigServiceServer(plugin),
 	)
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		slog.Error("DSX IMDS node attestor server failed", "error", err)
+		os.Exit(1)
+	}
 }

@@ -19,15 +19,19 @@ metadata:
   name: exchange-proxy-csi
   namespace: {{ .Values.vmSupport.proxyNamespace }}
   labels:
-    app: exchange-proxy-csi
+    {{- include "dsx-identity.labels" (dict "root" . "name" "exchange-proxy-csi") | nindent 4 }}
 spec:
   selector:
     matchLabels:
-      app: exchange-proxy-csi
+      {{- include "dsx-identity.selectorLabels" (dict "root" . "name" "exchange-proxy-csi") | nindent 6 }}
   template:
     metadata:
       labels:
-        app: exchange-proxy-csi
+        {{- include "dsx-identity.labels" (dict "root" . "name" "exchange-proxy-csi") | nindent 8 }}
+      {{- with (include "dsx-identity.observabilityPodAnnotations" (dict "root" . "containerNames" "exchange-proxy-csi")) }}
+      annotations:
+        {{- . | nindent 8 }}
+      {{- end }}
     spec:
       serviceAccountName: exchange-proxy-csi
       containers:
@@ -51,11 +55,22 @@ spec:
           args:
             - --socket-dir=/run/exchange-proxy
             - --csi-socket-path=/exchange-proxy-csi/csi.sock
+            - --log-level={{ .Values.observability.logLevel }}
+          {{- if .Values.observability.metrics.enabled }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.observability.metrics.port }}
+          {{- end }}
+          # This standalone DaemonSet owns its metrics listener.
           env:
             - name: MY_NODE_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            {{- include "dsx-identity.observabilityEnv" (dict
+                  "root" .
+                  "serviceName" "exchange-proxy-csi"
+                  "metricsExporter" (ternary "prometheus" "none" .Values.observability.metrics.enabled)) | nindent 12 }}
           # NodePublishVolume requires bind mounts into kubelet's pod tree.
           securityContext:
             privileged: true
@@ -153,6 +168,16 @@ spec:
               - name: dsx-imds-network-setup
                 image: "{{ .Values.vmSupport.imdsNetworkSetup.image.repository }}:{{ .Values.vmSupport.imdsNetworkSetup.image.tag | default $imageTag }}"
                 imagePullPolicy: {{ .Values.vmSupport.imdsNetworkSetup.image.pullPolicy }}
+                command:
+                  - /usr/local/bin/dsx-imds-network-setup
+                args:
+                  - --log-level={{ .Values.observability.logLevel }}
+                # virt-launcher owns Pod annotations and the shared network namespace.
+                env:
+                  {{- include "dsx-identity.observabilityEnv" (dict
+                        "root" .
+                        "serviceName" "dsx-imds-network-setup"
+                        "metricsExporter" "none") | nindent 18 }}
                 resources:
                   {{- toYaml .Values.vmSupport.resources.networkSetup | nindent 18 }}
                 securityContext:
@@ -172,12 +197,18 @@ spec:
                   - /usr/local/bin/metadata-service
                 args:
                   - --listen=:80
-                  - --log-level={{ .Values.vmSupport.policy.logLevel }}
+                  - --log-level={{ .Values.observability.logLevel }}
                   - --svid-hint={{ .Values.vmSupport.policy.svidHint }}
                   - --exchange-socket=/var/run/secrets/exchange.io/exchange.sock
                 ports:
                   - name: http
                     containerPort: 80
+                # virt-launcher owns Pod annotations and the shared network namespace.
+                env:
+                  {{- include "dsx-identity.observabilityEnv" (dict
+                        "root" .
+                        "serviceName" "metadata-service"
+                        "metricsExporter" "none") | nindent 18 }}
                 resources:
                   {{- toYaml .Values.vmSupport.resources.metadata | nindent 18 }}
                 securityContext:

@@ -2,7 +2,11 @@ package main
 
 import (
 	"context"
+	"flag"
+	"fmt"
+	"log/slog"
 	"net/http"
+	"os"
 	"sync/atomic"
 	"time"
 
@@ -10,11 +14,13 @@ import (
 	"github.com/spiffe/spire-plugin-sdk/pluginmain"
 	agentv1 "github.com/spiffe/spire-plugin-sdk/proto/spire/plugin/agent/nodeattestor/v1"
 	configv1 "github.com/spiffe/spire-plugin-sdk/proto/spire/service/common/config/v1"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"dsx-identity/internal/dsximds"
 	"dsx-identity/internal/stricturl"
+	"dsx-identity/internal/telemetry"
 )
 
 const defaultEndpoint = "http://169.254.169.254"
@@ -24,7 +30,7 @@ func newIMDSHTTPClient(timeout time.Duration) *http.Client {
 	// Contact the configured metadata endpoint directly. Do not proxy or follow redirects.
 	transport.Proxy = nil
 	return &http.Client{
-		Transport: transport,
+		Transport: otelhttp.NewTransport(transport),
 		Timeout:   timeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
@@ -78,10 +84,26 @@ func (p *Plugin) AidAttestation(stream agentv1.NodeAttestor_AidAttestationServer
 	})
 }
 
-func main() {
+func run() error {
+	var logLevel slog.Level
+	flag.TextVar(&logLevel, "log-level", slog.LevelInfo, "log level (debug, info, warn, error)")
+	flag.Parse()
+
+	if _, err := telemetry.Setup(context.Background(), "dsx-imds-node-attestor-agent", os.Stderr, logLevel); err != nil {
+		return fmt.Errorf("configure OpenTelemetry: %w", err)
+	}
+
 	plugin := &Plugin{client: newIMDSHTTPClient(10 * time.Second)}
 	pluginmain.Serve(
 		agentv1.NodeAttestorPluginServer(plugin),
 		configv1.ConfigServiceServer(plugin),
 	)
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		slog.Error("DSX IMDS node attestor agent failed", "error", err)
+		os.Exit(1)
+	}
 }

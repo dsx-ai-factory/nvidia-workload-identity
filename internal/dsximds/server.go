@@ -8,6 +8,7 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"dsx-identity/internal/identity"
 	"dsx-identity/internal/stricturl"
@@ -46,7 +47,7 @@ func newRemoteHTTPClient(timeout time.Duration) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	// Fetch JWKS directly from the configured endpoint. Ignore ambient proxies.
 	transport.Proxy = nil
-	return &http.Client{Transport: transport, Timeout: timeout}
+	return &http.Client{Transport: otelhttp.NewTransport(transport), Timeout: timeout}
 }
 
 func newRemoteVerifier(ctx context.Context, jwksURL, audience string, trustDomain spiffeid.TrustDomain, timeout time.Duration) (*Verifier, error) {

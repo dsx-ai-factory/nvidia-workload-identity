@@ -29,7 +29,7 @@ The umbrella chart injects the sidecar and shared volume through
 | `--retries` | `3` | Attempts for each Workload API fetch and token exchange |
 | `--exit-after-fetch` | `false` | Exit after the first successful write |
 | `--health-port` | `8080` | Port for `/healthz` |
-| `--verbose` | `true` | Enable operational logging |
+| `--log-level` | `info` | Log level: debug, info, warn, or error |
 
 The output directory is mode `0700` and the token file is atomically replaced
 with mode `0600`. A failed refresh keeps an unexpired token available. An

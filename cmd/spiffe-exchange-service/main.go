@@ -22,10 +22,15 @@ import (
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp/filters"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 
 	"dsx-identity/internal/identity"
 	"dsx-identity/internal/stricturl"
+	"dsx-identity/internal/telemetry"
 )
 
 const (
@@ -55,11 +60,13 @@ type ExchangeServer struct {
 }
 
 func NewExchangeServer(ctx context.Context, keys *signingKeyset, registry *keyRegistry, socketPath, jwksURL string) (*ExchangeServer, error) {
-	opts := []workloadapi.JWTSourceOption{}
-	if socketPath != "" {
-		opts = append(opts, workloadapi.WithClientOptions(workloadapi.WithAddr(socketPath)))
+	clientOptions := []workloadapi.ClientOption{
+		workloadapi.WithDialOptions(grpc.WithStatsHandler(otelgrpc.NewClientHandler())),
 	}
-	jwts, err := workloadapi.NewJWTSource(ctx, opts...)
+	if socketPath != "" {
+		clientOptions = append(clientOptions, workloadapi.WithAddr(socketPath))
+	}
+	jwts, err := workloadapi.NewJWTSource(ctx, workloadapi.WithClientOptions(clientOptions...))
 	if err != nil {
 		return nil, fmt.Errorf("create JWT source: %w", err)
 	}
@@ -96,7 +103,7 @@ func writeTokenError(w http.ResponseWriter, statusCode int, errorCode, descripti
 }
 
 func (s *ExchangeServer) handleTokenExchange(w http.ResponseWriter, r *http.Request) {
-	slog.Info("Received token exchange request", "method", r.Method, "path", r.URL.Path, "remote_addr", r.RemoteAddr)
+	slog.InfoContext(r.Context(), "Received token exchange request", "method", r.Method, "path", r.URL.Path, "remote_addr", r.RemoteAddr)
 	contentType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || contentType != ContentTypeFormURLEncoded {
 		writeTokenError(w, http.StatusUnsupportedMediaType, "invalid_request", "Content-Type must be application/x-www-form-urlencoded")
@@ -150,7 +157,7 @@ func (s *ExchangeServer) handleTokenExchange(w http.ResponseWriter, r *http.Requ
 	}
 	token, err := s.resignJWT(validatedSVID.Claims, newID)
 	if err != nil {
-		slog.Error("Failed to sign JWT", "error", err)
+		slog.ErrorContext(r.Context(), "Failed to sign JWT", "error", err)
 		writeTokenError(w, http.StatusInternalServerError, "server_error", "Failed to sign JWT")
 		return
 	}
@@ -169,7 +176,7 @@ func (s *ExchangeServer) handleTokenExchange(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(responseBody)))
 	if _, err := w.Write(responseBody); err != nil {
-		slog.Error("Failed to write response", "error", err)
+		slog.ErrorContext(r.Context(), "Failed to write response", "error", err)
 	}
 }
 
@@ -263,8 +270,8 @@ func serveHTTP(ctx context.Context, server *http.Server) error {
 }
 
 func run() (runErr error) {
-	var level slog.Level
-	flag.TextVar(&level, "log-level", slog.LevelInfo, "log level (debug, info, warn, error)")
+	var logLevel slog.Level
+	flag.TextVar(&logLevel, "log-level", slog.LevelInfo, "log level (debug, info, warn, error)")
 	var (
 		listenAddr        = flag.String("listen", ":8080", "HTTP server listen address")
 		socketPath        = flag.String("socket", "", "SPIFFE Workload API socket path")
@@ -281,7 +288,14 @@ func run() (runErr error) {
 	)
 	flag.Parse()
 
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level})))
+	sdk, err := telemetry.Setup(context.Background(), "spiffe-exchange", os.Stdout, logLevel)
+	if err != nil {
+		return fmt.Errorf("configure OpenTelemetry: %w", err)
+	}
+	defer func() {
+		runErr = errors.Join(runErr, sdk.Shutdown(context.Background()))
+	}()
+
 	parsedJWKSURL, err := stricturl.ParseHTTP(*jwksURL)
 	if err != nil {
 		return fmt.Errorf("--jwks-url %w", err)
@@ -321,8 +335,9 @@ func run() (runErr error) {
 	server.keySync = syncer
 
 	httpServer := &http.Server{
-		Addr:              *listenAddr,
-		Handler:           server.handler(),
+		Addr: *listenAddr,
+		Handler: otelhttp.NewHandler(server.handler(), "spiffe-exchange",
+			otelhttp.WithFilter(filters.None(filters.Path("/live"), filters.Path("/ready")))),
 		ReadHeaderTimeout: 5 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,

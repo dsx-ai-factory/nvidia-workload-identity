@@ -5,7 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -18,10 +18,14 @@ import (
 
 	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"golang.org/x/oauth2"
+	"google.golang.org/grpc"
 
 	"dsx-identity/internal/jwtsvidutil"
 	"dsx-identity/internal/stricturl"
+	"dsx-identity/internal/telemetry"
 	"dsx-identity/internal/tokenexchange"
 )
 
@@ -143,7 +147,7 @@ func fetchJWTSVIDWithRetry(ctx context.Context, jwtSource jwtSVIDSource, audienc
 		lastErr = err
 		if attempt < maxRetries {
 			backoff := time.Duration(attempt) * time.Second
-			log.Printf("Attempt %d failed: %v. Retrying in %v...", attempt, err, backoff)
+			slog.WarnContext(ctx, "SPIRE JWT-SVID fetch failed", "attempt", attempt, "error", err, "retry_in", backoff)
 			if err := wait(ctx, backoff); err != nil {
 				return nil, err
 			}
@@ -212,7 +216,7 @@ func startHealthServer(address string, handler http.Handler) (*http.Server, erro
 	server := &http.Server{Addr: address, Handler: handler}
 	go func() {
 		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
-			log.Printf("Health server failed: %v", err)
+			slog.Error("Health server failed", "error", err)
 		}
 	}()
 	return server, nil
@@ -231,7 +235,7 @@ func exchangeSPIRESVIDWithRetry(ctx context.Context, httpClient *http.Client, ex
 		lastErr = err
 		if attempt < maxRetries {
 			backoff := time.Duration(attempt) * time.Second
-			log.Printf("Exchange attempt %d failed: %v. Retrying in %v...", attempt, err, backoff)
+			slog.WarnContext(ctx, "Token exchange failed", "attempt", attempt, "error", err, "retry_in", backoff)
 			if err := wait(ctx, backoff); err != nil {
 				return nil, err
 			}
@@ -241,19 +245,27 @@ func exchangeSPIRESVIDWithRetry(ctx context.Context, httpClient *http.Client, ex
 	return nil, fmt.Errorf("failed to exchange JWT after %d attempts: %w", maxRetries, lastErr)
 }
 
-func run() error {
+func run() (runErr error) {
 	var (
 		socketPath         = flag.String("socket", "unix:///var/run/secrets/spire.io/spire-agent.sock", "Path to SPIRE Workload API socket")
 		audience           = flag.String("audience", "spiffe://example.org", "JWT audience")
 		outputPath         = flag.String("output", "/var/run/secrets/nvidia.com/dsx/token", "output file path for the DSX JWT")
 		maxRetries         = flag.Int("retries", 3, "Maximum number of retry attempts")
-		verbose            = flag.Bool("verbose", true, "Enable verbose logging")
+		logLevel           slog.Level
 		exitAfterFetch     = flag.Bool("exit-after-fetch", false, "Exit after fetching the initial JWT (for init container use)")
 		exchangeServiceURL = flag.String("exchange-service-url", "", "URL of the SPIFFE exchange service")
 		healthPort         = flag.Int("health-port", 8080, "Port for the /healthz endpoint")
 		svidHint           = flag.String("svid-hint", "", "Optional exact JWT-SVID hint override")
 	)
+	flag.TextVar(&logLevel, "log-level", slog.LevelInfo, "log level (debug, info, warn, error)")
 	flag.Parse()
+	sdk, err := telemetry.Setup(context.Background(), "dsx-token-fetcher", os.Stdout, logLevel)
+	if err != nil {
+		return fmt.Errorf("configure OpenTelemetry: %w", err)
+	}
+	defer func() {
+		runErr = errors.Join(runErr, sdk.Shutdown(context.Background()))
+	}()
 
 	if *exchangeServiceURL == "" {
 		return errors.New("--exchange-service-url is required")
@@ -267,17 +279,15 @@ func run() error {
 	}
 	var ready atomic.Bool
 
-	if *verbose {
-		log.Printf("Starting DSX token-fetcher")
-		log.Printf("Socket: %s", *socketPath)
-		log.Printf("Audience: %s", *audience)
-		log.Printf("Output: %s", *outputPath)
-		log.Printf("Max retries: %d", *maxRetries)
-		log.Printf("Exit after fetch: %t", *exitAfterFetch)
-		log.Printf("Exchange service URL: %s", *exchangeServiceURL)
-		log.Printf("Health port: %d", *healthPort)
-		log.Printf("SVID hint: %s", *svidHint)
-	}
+	slog.Info("Starting DSX token fetcher",
+		"socket", *socketPath,
+		"audience", *audience,
+		"output", *outputPath,
+		"max_retries", *maxRetries,
+		"exit_after_fetch", *exitAfterFetch,
+		"exchange_service_url", *exchangeServiceURL,
+		"health_port", *healthPort,
+		"svid_hint", *svidHint)
 
 	mux := http.NewServeMux()
 	mux.Handle("/healthz", healthHandler(&ready))
@@ -288,7 +298,8 @@ func run() error {
 	defer healthServer.Close()
 
 	httpClient := &http.Client{
-		Timeout: 30 * time.Second,
+		Transport: otelhttp.NewTransport(http.DefaultTransport),
+		Timeout:   30 * time.Second,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -312,36 +323,31 @@ func run() error {
 		if _, err := os.Stat(socketFilePath); err == nil {
 			break
 		}
-		if *verbose {
-			log.Println("Waiting for SPIRE agent socket...")
-		}
+		slog.InfoContext(ctx, "Waiting for SPIRE agent socket")
 		if err := wait(ctx, 2*time.Second); err != nil {
 			return nil
 		}
 	}
 
-	if *verbose {
-		log.Println("SPIRE agent socket found, connecting...")
-	}
+	slog.InfoContext(ctx, "SPIRE agent socket found")
 
-	jwtSource, err := workloadapi.New(ctx, workloadapi.WithAddr(*socketPath))
+	jwtSource, err := workloadapi.New(ctx,
+		workloadapi.WithAddr(*socketPath),
+		workloadapi.WithDialOptions(grpc.WithStatsHandler(otelgrpc.NewClientHandler())),
+	)
 	if err != nil {
 		return fmt.Errorf("create Workload API client: %w", err)
 	}
 	defer jwtSource.Close()
 
 	refresh := func(refreshCtx context.Context) (time.Time, error) {
-		if *verbose {
-			log.Println("Fetching SPIRE JWT-SVID...")
-		}
+		slog.InfoContext(refreshCtx, "Fetching SPIRE JWT-SVID")
 		spireSVID, err := fetchJWTSVIDWithRetry(refreshCtx, jwtSource, *audience, *svidHint, *maxRetries)
 		if err != nil {
 			return time.Time{}, fmt.Errorf("fetch SPIRE JWT-SVID: %w", err)
 		}
 
-		if *verbose {
-			log.Printf("Exchanging JWT via %s", *exchangeServiceURL)
-		}
+		slog.InfoContext(refreshCtx, "Exchanging SPIRE JWT-SVID", "exchange_service_url", *exchangeServiceURL)
 		exchangeResp, err := exchangeSPIRESVIDWithRetry(refreshCtx, httpClient, *exchangeServiceURL, spireSVID.Marshal(), *maxRetries)
 		if err != nil {
 			return time.Time{}, fmt.Errorf("exchange SPIRE JWT-SVID: %w", err)
@@ -353,10 +359,10 @@ func run() error {
 			return time.Time{}, fmt.Errorf("write DSX JWT: %w", err)
 		}
 
-		if *verbose {
-			log.Printf("Exchanged SPIRE JWT-SVID for identity: %s", spireSVID.ID)
-			log.Printf("DSX JWT written to %s (%d characters)", *outputPath, len(exchangeResp.AccessToken))
-		}
+		slog.InfoContext(refreshCtx, "Stored exchanged DSX JWT",
+			"spiffe_id", spireSVID.ID.String(),
+			"output", *outputPath,
+			"token_length", len(exchangeResp.AccessToken))
 		return exchangeResp.Expiry, nil
 	}
 
@@ -370,24 +376,20 @@ func run() error {
 				return nil
 			}
 			if retry {
-				log.Printf("Unable to refresh JWT: %v; existing token remains valid, retrying", refreshErr)
+				slog.WarnContext(ctx, "Unable to refresh DSX JWT, existing token remains valid", "error", refreshErr)
 				continue
 			}
 			return errors.Join(fmt.Errorf("refresh JWT: %w", refreshErr), invalidateErr)
 		}
 
 		if !ready.Swap(true) {
-			if *verbose {
-				log.Println("Health check is now ready")
-			}
+			slog.InfoContext(ctx, "Health check is ready")
 		}
 		currentExpiry = expiryTime
 
 		// Exit after initial fetch if running as init container
 		if *exitAfterFetch {
-			if *verbose {
-				log.Println("Initial JWT fetch complete, exiting (init container mode)")
-			}
+			slog.InfoContext(ctx, "Initial JWT fetch complete", "exit_after_fetch", true)
 			return nil
 		}
 
@@ -395,10 +397,7 @@ func run() error {
 		issuedAt := time.Now()
 		refreshInterval := calculateRefreshTime(issuedAt, expiryTime)
 
-		if *verbose {
-			log.Printf("JWT expires at: %s", expiryTime.Format(time.RFC3339))
-			log.Printf("Next refresh in: %v (80%% of lifetime)", refreshInterval)
-		}
+		slog.InfoContext(ctx, "Scheduled DSX JWT refresh", "expires_at", expiryTime, "refresh_in", refreshInterval)
 
 		// Wait until it's time to refresh
 		if err := wait(ctx, refreshInterval); err != nil {
@@ -409,7 +408,7 @@ func run() error {
 
 func main() {
 	if err := run(); err != nil {
-		log.Print(err)
+		slog.Error("DSX token fetcher failed", "error", err)
 		os.Exit(1)
 	}
 }
