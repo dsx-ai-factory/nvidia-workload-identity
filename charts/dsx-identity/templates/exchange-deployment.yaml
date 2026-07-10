@@ -8,7 +8,7 @@ metadata:
   name: spiffe-exchange
   namespace: {{ .Release.Namespace }}
   labels:
-    app: spiffe-exchange
+    {{- include "dsx-identity.labels" (dict "root" . "name" "spiffe-exchange") | nindent 4 }}
 spec:
   replicas: {{ .Values.exchange.replicas }}
   strategy:
@@ -18,11 +18,15 @@ spec:
       maxSurge: 1
   selector:
     matchLabels:
-      app: spiffe-exchange
+      {{- include "dsx-identity.selectorLabels" (dict "root" . "name" "spiffe-exchange") | nindent 6 }}
   template:
     metadata:
       labels:
-        app: spiffe-exchange
+        {{- include "dsx-identity.labels" (dict "root" . "name" "spiffe-exchange") | nindent 8 }}
+      {{- with (include "dsx-identity.observabilityPodAnnotations" (dict "root" . "containerNames" "spiffe-exchange")) }}
+      annotations:
+        {{- . | nindent 8 }}
+      {{- end }}
     spec:
       serviceAccountName: spiffe-exchange-sa
       securityContext:
@@ -44,6 +48,10 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.exchange.service.port }}
+            {{- if .Values.observability.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.observability.metrics.port }}
+            {{- end }}
           command:
             - /usr/local/bin/spiffe-exchange-service
           args:
@@ -60,7 +68,7 @@ spec:
             - --mqtt-oauth-token-url={{ required "exchange.mqtt.oauth2.tokenURL is required" .Values.exchange.mqtt.oauth2.tokenURL }}
             - --mqtt-oauth-client-id={{ required "exchange.mqtt.oauth2.clientID is required" .Values.exchange.mqtt.oauth2.clientID }}
             - --mqtt-oauth-client-secret=/run/secrets/spiffe-exchange-mqtt/client-secret
-            - --log-level={{ .Values.exchange.logLevel }}
+            - --log-level={{ .Values.observability.logLevel }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -78,11 +86,16 @@ spec:
             - name: mqtt-oauth
               mountPath: /run/secrets/spiffe-exchange-mqtt
               readOnly: true
+          # Exchange owns its Pod ports, including the metrics listener.
           env:
             - name: POD_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            {{- include "dsx-identity.observabilityEnv" (dict
+                  "root" .
+                  "serviceName" "spiffe-exchange"
+                  "metricsExporter" (ternary "prometheus" "none" .Values.observability.metrics.enabled)) | nindent 12 }}
           startupProbe:
             httpGet:
               path: /live
@@ -125,5 +138,5 @@ spec:
   minAvailable: 1
   selector:
     matchLabels:
-      app: spiffe-exchange
+      {{- include "dsx-identity.selectorLabels" (dict "root" . "name" "spiffe-exchange") | nindent 6 }}
 {{- end }}

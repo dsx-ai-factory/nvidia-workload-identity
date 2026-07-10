@@ -32,21 +32,21 @@
 - Exchange key propagation is flat. Every Exchange in one Event Bus topic space uses a globally unique shard ID, publishes only its local public keys at `spiffe-exchange/v1/pub-keys/shard/<shard-id>/kid/<kid>`, subscribes to `spiffe-exchange/v1/pub-keys/shard/+/kid/+`, retains all valid public keys by globally unique `kid`, and serves the aggregate JWKS.
 - Do not add bundle endpoints, federated trust, federation CA synchronization, or federation-only routes and certificates.
 - Each Exchange accepts only SPIRE JWT-SVIDs issued by its local SPIRE and rejects SPIRE JWT-SVIDs issued by every nonlocal shard.
-- The DSX Event Bus and OAuth2 provider are external to the umbrella. Local E2E deploys one instance in k1. Data Hall shards do not deploy either component.
+- The DSX Event Bus and OAuth2 provider are external to the identity chart. Local E2E deploys one instance in k1. Data Hall shards do not deploy either component.
 - Every Exchange uses OAuth2 client credentials for NATS with only `spiffe-exchange.>` publish/subscribe access. Anonymous broker access is disabled.
 - Run two active Exchange replicas per shard with unique per-Pod MQTT client IDs. Rolling updates and Pod disruption must keep one replica available.
 - Expose only the MQTT and OAuth token endpoints required by Exchanges placed outside the Event Bus cluster.
-- Kyverno is external. Its DSX identity policies belong in the umbrella. The Kyverno runtime does not.
+- Kyverno is external. Its DSX identity policies belong in the identity chart. The Kyverno runtime does not.
 - Relying parties use any reachable Exchange aggregate JWKS. Repository validation deploys OpenBao in k1 only for convenience.
 - Cross-shard trust exists only through exchanged DSX tokens and propagated public keys.
 
 ## Helm and deployment
 
-- `charts/dsx-identity` is the single production identity umbrella installed in each shard.
+- `charts/dsx-identity` is the single production identity chart installed in each shard.
 - Depend directly on the official SPIRE chart. Template repository-owned Exchange, controller, metadata, CSI, and policy resources directly. Configure node-attestor plugins through SPIRE values. Do not create separately packaged local wrapper charts.
 - Install the official SPIRE CRD chart first where its APIs are required.
-- DSX Event Bus, Keycloak, Kyverno runtime, cluster infrastructure, OpenBao, nginx, VMs, and E2E clients remain external to the umbrella.
-- CI packages and publishes only artifacts the repository actually produces: the umbrella chart and current images.
+- DSX Event Bus, Keycloak, Kyverno runtime, cluster infrastructure, OpenBao, nginx, VMs, and E2E clients remain external to the identity chart.
+- CI packages and publishes only artifacts the repository actually produces: the identity chart and current images.
 - Apply every resource in an admission-compatible deployment phase before readiness waits. Split phases only to establish an API or admission webhook required to accept later resources.
 - Put each required API, admission, or infrastructure status gate in its provider Skaffold config's deploy after-hook. Every direct consumer must require that provider. Do not rely on config traversal order or a designated first consumer.
 - Deploy after-hooks intentionally wait for the required provider config's resources before checking its explicit contract. Keep each provider config cohesive instead of disabling status checks to avoid a real dependency.
@@ -117,6 +117,16 @@ spiffe://nca-<16-digits>.ds9.dsx.nvid.id/<dpu|host|vm>/<id>
 - Extract preload images from charts/manifests rather than hardcoding image arrays. Image loads must fail visibly.
 - Give containers resource requests, limits, and appropriate security contexts. KubeVirt uses cached `containerDisk` volumes with `IfNotPresent`.
 - Use Go 1.26+ and the repository's pinned `go-spiffe`. Follow standard formatting, context cancellation, structured logging, flag-based CLI configuration, and focused unit tests for business logic.
+- Use slog with JSON handlers for first-party Go logging. Configure application logging with `--log-level` and initialize logging and OpenTelemetry through the shared telemetry package. Do not use Zap.
+- Use the DSX OTel Operator SDK injection as the shared configuration mechanism for chart-owned applications and repository-owned SPIRE plugin hosts. Do not require operators to duplicate standard OTel configuration under SPIRE values.
+- Shared chart settings must apply to every in-scope component. Do not describe a setting as global or shared when a component hard-codes an exception.
+- Comment non-obvious Helm value precedence, conditional rendering, and cross-resource contracts next to the relevant value or template. Explain why the structure exists without narrating YAML syntax.
+- Keep README prose focused on architecture and operator intent. Put concrete configuration keys and values in concise YAML examples, not prose. Omit ports and implementation details unless they are part of an external contract.
+- Preserve useful README diagrams and runnable examples when shortening prose. Do not replace concrete operator guidance with vague summaries.
+- Write the README for readers who understand SPIFFE and Kubernetes but have no prior DSX Identity context. Introduce DSX-specific components and trust paths before their configuration.
+- Describe the real deployed architecture first in all documentation. Keep Kind clusters, k1 and k2 fixture names, E2E-only components, and local workarounds in explicit local E2E sections after the production architecture and contracts.
+- Show DPUs, bare-metal hosts, and KubeVirt VMs as first-class actors in the README architecture overview. Keep attestor names such as `k8s_psat` in lower-level identity delivery and trust-path documentation.
+- Call `charts/dsx-identity` the identity chart. Do not call it a production umbrella.
 - Use `http.Header` methods instead of direct header-map access. Parse structured header values with the relevant standard-library grammar.
 - Never call `os.Exit` outside `main`. Put command work and deferred cleanup in an error-returning function so `main` translates failure to `os.Exit` only after those defers run.
 - Use two-space YAML indentation, descriptive labels, ConfigMaps/Secrets for configuration, and least-privilege service accounts.

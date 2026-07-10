@@ -5,13 +5,18 @@ metadata:
   name: spiffe-exchange
   namespace: {{ .Release.Namespace }}
   labels:
-    app: spiffe-exchange
+    {{- include "dsx-identity.labels" (dict "root" . "name" "spiffe-exchange") | nindent 4 }}
 spec:
   selector:
-    app: spiffe-exchange
+    {{- include "dsx-identity.selectorLabels" (dict "root" . "name" "spiffe-exchange") | nindent 4 }}
   ports:
     - name: http
       port: {{ .Values.exchange.service.port }}
-      targetPort: {{ .Values.exchange.service.port }}
+      targetPort: http
+    {{- if .Values.observability.metrics.enabled }}
+    - name: metrics
+      port: {{ .Values.observability.metrics.port }}
+      targetPort: metrics
+    {{- end }}
   type: {{ .Values.exchange.service.type }}
 {{- end }}

@@ -28,8 +28,12 @@ spec:
         - --svid-hint=dsx-pod
         - --output=/var/run/secrets/nvidia.com/dsx/token
         - --retries=10
-        - --verbose=true
+        - --log-level=info
         - --exchange-service-url=http://spiffe-exchange.dsx-identity.svc.cluster.local:8080
+      # Local E2E has no OTel collector. Production injection uses chart values.
+      env:
+        - name: OTEL_SDK_DISABLED
+          value: "true"
       securityContext:
         allowPrivilegeEscalation: false
         capabilities:

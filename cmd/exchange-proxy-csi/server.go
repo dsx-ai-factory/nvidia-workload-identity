@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 )
 
@@ -26,8 +27,7 @@ func Serve(socketPath string, driver *Driver) error {
 	if err != nil {
 		return err
 	}
-
-	server := grpc.NewServer()
+	server := grpc.NewServer(grpc.StatsHandler(otelgrpc.NewServerHandler()))
 	csi.RegisterIdentityServer(server, driver)
 	csi.RegisterNodeServer(server, driver)
 

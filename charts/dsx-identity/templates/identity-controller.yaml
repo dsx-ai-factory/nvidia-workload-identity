@@ -67,6 +67,10 @@ spec:
     metadata:
       labels:
         {{- include "dsx-identity.identityControllerLabels" . | nindent 8 }}
+      {{- with (include "dsx-identity.observabilityPodAnnotations" (dict "root" . "containerNames" "controller")) }}
+      annotations:
+        {{- . | nindent 8 }}
+      {{- end }}
     spec:
       serviceAccountName: {{ $name }}
       securityContext:
@@ -86,9 +90,23 @@ spec:
             - --class-name={{ $.Release.Namespace }}-{{ $.Release.Name }}
             - --dpu-holder-namespace={{ required "identityController.dpuHolder.namespace is required" $values.dpuHolder.namespace }}
             - --dpu-holder-service-account={{ required "identityController.dpuHolder.serviceAccount is required" $values.dpuHolder.serviceAccount }}
+            - --log-level={{ .Values.observability.logLevel }}
+            {{- if .Values.observability.metrics.enabled }}
+            - --metrics-bind-address=:{{ .Values.observability.metrics.port }}
+            {{- else }}
+            - --metrics-bind-address=0
+            {{- end }}
+          # controller-runtime owns the controller metrics endpoint.
+          env:
+            {{- include "dsx-identity.observabilityEnv" (dict
+                  "root" .
+                  "serviceName" "dsx-identity-controller"
+                  "metricsExporter" "none") | nindent 12 }}
           ports:
+            {{- if .Values.observability.metrics.enabled }}
             - name: metrics
-              containerPort: 8080
+              containerPort: {{ .Values.observability.metrics.port }}
+            {{- end }}
             - name: health
               containerPort: 8081
           livenessProbe:

@@ -1,4 +1,4 @@
-# k2 umbrella chart values for the Data Hall SPIRE and Exchange shard
+# k2 identity chart values for the Data Hall SPIRE and Exchange shard
 # Used by: make identities
 
 global:
@@ -10,10 +10,22 @@ global:
     clusterName: "k2"
     jwtIssuer: "spiffe://k2.sjc-1.nvidia.com"
 
+# Local E2E has no collector, so it does not export telemetry signals.
+observability:
+  env:
+    OTEL_SDK_DISABLED: "true"
+  metrics:
+    enabled: false
+
 spire:
   spire-server:
     defaultX509SvidTTL: "5m"
     defaultJwtSvidTTL: "5m"
+    # The external plugin inherits the SPIRE server environment. Local E2E has
+    # no OTel collector, so disable its SDK with the standard general setting.
+    extraEnv:
+      - name: OTEL_SDK_DISABLED
+        value: "true"
     initContainers:
       - name: install-dsx-imds-node-attestor-server
         image: dsx-identity/dsx-imds-node-attestor-server:0.1.0
@@ -63,7 +75,8 @@ spire:
             type: raw
             podSelector:
               matchLabels:
-                app: spiffe-exchange
+                app.kubernetes.io/name: spiffe-exchange
+                app.kubernetes.io/instance: dsx-identity
             spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/ns/{{ .PodMeta.Namespace }}/sa/{{ .PodSpec.ServiceAccountName }}"
           dsx-imds-host:
             type: raw
@@ -102,6 +115,11 @@ spire:
   upstream-spire-agent:
     nameOverride: dsx-imds-agent
     bundleConfigMap: spire-bundle
+    # The external plugin inherits the SPIRE agent environment. Local E2E has
+    # no OTel collector, so disable its SDK with the standard general setting.
+    extraEnvVars:
+      - name: OTEL_SDK_DISABLED
+        value: "true"
     serviceAccount:
       name: dsx-identity-dsx-imds-agent
     server:
@@ -153,6 +171,10 @@ spire:
           - --listen=127.0.0.1:18080
           - --svid-hint=dsx-imds
           - --exchange-socket=/var/run/secrets/exchange.io/exchange.sock
+        # Native sidecars do not inherit the SPIRE agent container environment.
+        env:
+          - name: OTEL_SDK_DISABLED
+            value: "true"
         startupProbe:
           httpGet:
             host: 127.0.0.1

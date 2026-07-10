@@ -107,7 +107,8 @@ manifests:
       - ../scripts/k2/kubevirt/release
 deploy:
   kubeContext: kind-k2
-  statusCheckDeadlineSeconds: 360
+  # KubeVirt pulls several large upstream images in sequence before reporting Available.
+  statusCheckDeadlineSeconds: 600
   tolerateFailuresUntilDeadline: true
   kubectl:
     hooks:
@@ -119,7 +120,7 @@ deploy:
               - --for=condition=Available
               - --namespace=kubevirt
               - --context=kind-k2
-              - --timeout=360s
+              - --timeout=600s
               - kubevirt/kubevirt
 ---
 apiVersion: skaffold/v4beta14

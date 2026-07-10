@@ -1,4 +1,4 @@
-# DSX identity umbrella. Override the trust domain and cluster name per shard.
+# DSX identity chart. Override the trust domain and cluster name per shard.
 global:
   imageTag: ""
   installAndUpgradeHooks:
@@ -17,6 +17,12 @@ spire:
   spire-server:
     defaultX509SvidTTL: 1h
     defaultJwtSvidTTL: 5m
+    # External plugin subprocesses inherit the documented DSX OTel injection
+    # from the SPIRE server container.
+    podAnnotations:
+      instrumentation.opentelemetry.io/inject-sdk: dsx-obs/default-instrumentation
+      instrumentation.opentelemetry.io/container-names: spire-server
+      sidecar.opentelemetry.io/inject: dsx-obs/default-sidecar
     controllerManager:
       reconcile:
         clusterFederatedTrustDomains: false
@@ -55,6 +61,26 @@ spire:
   spiffe-csi-driver:
     enabled: true
 
+observability:
+  # One level configures every chart-owned first-party Go process.
+  logLevel: info
+  # Standard OTel environment settings shared by first-party applications.
+  # The DSX Operator injection supplies its resource and endpoint settings.
+  env: {}
+  # Additional annotations are merged with SDK injection annotations.
+  podAnnotations: {}
+  metrics:
+    # Configures the Prometheus endpoints owned by chart workloads. Injected
+    # processes do not open listeners in consumer-owned Pod network namespaces.
+    enabled: true
+    port: 9464
+    serviceMonitor:
+      # The Prometheus Operator and its CRDs are external to this chart.
+      enabled: false
+      interval: 30s
+      scrapeTimeout: 10s
+      labels: {}
+
 exchange:
   enabled: true
   image:
@@ -67,7 +93,6 @@ exchange:
     type: ClusterIP
     port: 8080
   jwksURL: ""
-  logLevel: info
   # Must match the Event Bus retained-message maxAge and cover DSX JWT validity.
   publicKeyLeaseTTL: 10m
   # Globally unique across every Exchange sharing this Event Bus fabric.
@@ -170,7 +195,6 @@ vmSupport:
       name: kubevirt-controller
       namespace: kubevirt
     svidHint: dsx-imds-vm
-    logLevel: info
 
 identityController:
   enabled: false

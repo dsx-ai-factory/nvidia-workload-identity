@@ -53,10 +53,10 @@ func (d *Driver) Probe(context.Context, *csi.ProbeRequest) (*csi.ProbeResponse, 
 
 // Node Server
 
-func (d *Driver) NodePublishVolume(_ context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
+func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
 	ephemeralMode := req.GetVolumeContext()["csi.storage.k8s.io/ephemeral"]
 
-	slog.Debug("NodePublishVolume",
+	slog.DebugContext(ctx, "NodePublishVolume",
 		"volume_id", req.VolumeId,
 		"target_path", req.TargetPath,
 		"ephemeral", ephemeralMode)
@@ -92,12 +92,12 @@ func (d *Driver) NodePublishVolume(_ context.Context, req *csi.NodePublishVolume
 		return nil, status.Errorf(codes.Internal, "failed to bind mount: %v", err)
 	}
 
-	slog.Info("Volume published", "volume_id", req.VolumeId, "target_path", req.TargetPath)
+	slog.InfoContext(ctx, "Volume published", "volume_id", req.VolumeId, "target_path", req.TargetPath)
 	return &csi.NodePublishVolumeResponse{}, nil
 }
 
-func (d *Driver) NodeUnpublishVolume(_ context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
-	slog.Debug("NodeUnpublishVolume",
+func (d *Driver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
+	slog.DebugContext(ctx, "NodeUnpublishVolume",
 		"volume_id", req.VolumeId,
 		"target_path", req.TargetPath)
 
@@ -118,7 +118,7 @@ func (d *Driver) NodeUnpublishVolume(_ context.Context, req *csi.NodeUnpublishVo
 		return nil, status.Errorf(codes.Internal, "failed to remove target path: %v", err)
 	}
 
-	slog.Info("Volume unpublished", "volume_id", req.VolumeId)
+	slog.InfoContext(ctx, "Volume unpublished", "volume_id", req.VolumeId)
 	return &csi.NodeUnpublishVolumeResponse{}, nil
 }
 

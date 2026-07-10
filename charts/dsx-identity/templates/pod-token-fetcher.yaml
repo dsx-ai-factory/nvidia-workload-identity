@@ -37,6 +37,13 @@ spec:
                   - --svid-hint=dsx-pod
                   - --output={{ .Values.podTokenFetcher.outputPath }}
                   - --exchange-service-url=http://spiffe-exchange.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.exchange.service.port }}
+                  - --log-level={{ .Values.observability.logLevel }}
+                # The consumer owns Pod annotations and the shared network namespace.
+                env:
+                  {{- include "dsx-identity.observabilityEnv" (dict
+                        "root" .
+                        "serviceName" "dsx-token-fetcher"
+                        "metricsExporter" "none") | nindent 18 }}
                 securityContext:
                   allowPrivilegeEscalation: false
                   capabilities:
