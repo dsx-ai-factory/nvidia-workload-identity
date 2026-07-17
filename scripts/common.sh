@@ -72,13 +72,21 @@ kind_create_cluster() {
     if [[ -z "${KIND_DIND_SERVICE_HOST:-}" ]]; then
         kind create cluster --config="${config}" --name="${cluster_name}"
     else
-        kind create cluster --name="${cluster_name}" --config=<(yq eval '
+        local kubeconfig
+        kubeconfig=$(kind_kubeconfig_path "${cluster_name}")
+        mkdir -p "$(dirname "${kubeconfig}")"
+        kind create cluster --name="${cluster_name}" --kubeconfig="${kubeconfig}" --config=<(yq eval '
             .networking.apiServerAddress = "0.0.0.0" |
             (.nodes[] | select(.role == "control-plane").kubeadmConfigPatches) += [
               "kind: ClusterConfiguration\napiServer:\n  certSANs:\n    - " + strenv(KIND_DIND_SERVICE_HOST) + "\n"
             ]
         ' "${config}")
     fi
+}
+
+kind_kubeconfig_path() {
+    local cluster_name="$1"
+    printf '%s/.kube/kind-%s' "${PROJECT_ROOT}" "${cluster_name}"
 }
 
 kind_configure_registry() {
@@ -96,10 +104,13 @@ kind_configure_context() {
     local config="$2"
     [[ -z "${KIND_DIND_SERVICE_HOST:-}" ]] && return
 
-    local api_port
+    local api_port kubeconfig
+    kubeconfig=$(kind_kubeconfig_path "${cluster_name}")
+    kind export kubeconfig --name "${cluster_name}" --kubeconfig="${kubeconfig}"
     api_port=$(yq -er '.networking.apiServerPort' "${config}")
-    kubectl config set-cluster "kind-${cluster_name}" \
-        --server="https://${KIND_DIND_SERVICE_HOST}:${api_port}" >/dev/null
+    CLUSTER_NAME_VALUE=${cluster_name} API_PORT_VALUE=${api_port} yq -i '
+        (.clusters[] | select(.name == "kind-" + strenv(CLUSTER_NAME_VALUE)).cluster.server) =
+        "https://" + strenv(KIND_DIND_SERVICE_HOST) + ":" + strenv(API_PORT_VALUE)' "${kubeconfig}"
 }
 
 # Cluster availability checks

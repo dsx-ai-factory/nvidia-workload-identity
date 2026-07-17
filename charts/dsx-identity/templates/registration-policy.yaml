@@ -1,0 +1,76 @@
+{{- if .Values.admission.enabled }}
+{{- $deploymentUsers := list -}}
+{{- $deploymentGroups := list -}}
+{{- range $index, $subject := required "admission.deploymentSubjects is required" .Values.admission.deploymentSubjects -}}
+{{- $kind := required (printf "admission.deploymentSubjects[%d].kind is required" $index) $subject.kind -}}
+{{- $name := required (printf "admission.deploymentSubjects[%d].name is required" $index) $subject.name -}}
+{{- if eq $kind "User" -}}
+{{- $deploymentUsers = append $deploymentUsers $name -}}
+{{- else if eq $kind "Group" -}}
+{{- $deploymentGroups = append $deploymentGroups $name -}}
+{{- else if eq $kind "ServiceAccount" -}}
+{{- $namespace := required (printf "admission.deploymentSubjects[%d].namespace is required" $index) $subject.namespace -}}
+{{- $deploymentUsers = append $deploymentUsers (printf "system:serviceaccount:%s:%s" $namespace $name) -}}
+{{- else -}}
+{{- fail (printf "admission.deploymentSubjects[%d].kind must be User, Group, or ServiceAccount" $index) -}}
+{{- end -}}
+{{- end -}}
+{{- if and (eq (len $deploymentUsers) 0) (eq (len $deploymentGroups) 0) -}}
+{{- fail "admission.deploymentSubjects must contain at least one subject" -}}
+{{- end -}}
+{{- $controllerUser := printf "system:serviceaccount:%s:%s" .Release.Namespace (include "dsx-identity.identityControllerFullname" .) -}}
+{{- $controllerManagerUser := printf "system:serviceaccount:%s:%s-server" .Release.Namespace .Release.Name -}}
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: protect-dsx-spire-registrations
+  labels:
+    {{- include "dsx-identity.labels" (dict "name" "registration-policy" "root" .) | nindent 4 }}
+  annotations:
+    meta.helm.sh/release-name: {{ .Release.Name | quote }}
+    meta.helm.sh/release-namespace: {{ .Release.Namespace | quote }}
+    policies.kyverno.io/title: Protect DSX SPIRE Registrations
+    policies.kyverno.io/category: SPIFFE
+spec:
+  background: false
+  webhookConfiguration:
+    failurePolicy: Fail
+  rules:
+    - name: authorize-cluster-static-entry-writes
+      match:
+        any:
+          - resources:
+              kinds:
+                - ClusterStaticEntry
+      validate:
+        failureAction: Enforce
+        cel:
+          expressions:
+            - expression: >-
+                !(['CREATE', 'UPDATE', 'DELETE'].exists(operation, operation == request.operation)) ||
+                request.userInfo.username == '{{ $controllerUser }}' ||
+                (request.operation == 'UPDATE' &&
+                 has(request.subResource) &&
+                 (request.subResource == 'status' || request.subResource == 'finalizers') &&
+                 request.userInfo.username == '{{ $controllerManagerUser }}')
+              message: Only the DSX Identity Controller and controller-manager status updates may write ClusterStaticEntry resources.
+    - name: authorize-cluster-spiffe-id-writes
+      match:
+        any:
+          - resources:
+              kinds:
+                - ClusterSPIFFEID
+      validate:
+        failureAction: Enforce
+        cel:
+          expressions:
+            - expression: >-
+                !(['CREATE', 'UPDATE', 'DELETE'].exists(operation, operation == request.operation)) ||
+                {{ toJson $deploymentUsers }}.exists(username, username == request.userInfo.username) ||
+                {{ toJson $deploymentGroups }}.exists(group, group in request.userInfo.groups) ||
+                (request.operation == 'UPDATE' &&
+                 has(request.subResource) &&
+                 (request.subResource == 'status' || request.subResource == 'finalizers') &&
+                 request.userInfo.username == '{{ $controllerManagerUser }}')
+              message: Only configured deployment subjects and controller-manager status updates may write ClusterSPIFFEID resources.
+{{- end }}

@@ -13,6 +13,9 @@ spec:
     - name: http
       port: {{ .Values.exchange.service.port }}
       targetPort: http
+      {{- with .Values.exchange.service.nodePort }}
+      nodePort: {{ . }}
+      {{- end }}
     {{- if .Values.observability.metrics.enabled }}
     - name: metrics
       port: {{ .Values.observability.metrics.port }}

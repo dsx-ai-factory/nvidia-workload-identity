@@ -2,7 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +15,31 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
+	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
+	"golang.org/x/oauth2"
 )
+
+type fakeSVIDFetcher struct {
+	svid *jwtsvid.SVID
+	err  error
+}
+
+func (f fakeSVIDFetcher) Fetch(context.Context, []string) (*jwtsvid.SVID, error) {
+	return f.svid, f.err
+}
+
+type fakeTokenExchanger struct {
+	token *oauth2.Token
+	err   error
+}
+
+func (f fakeTokenExchanger) Exchange(context.Context, string) (*oauth2.Token, error) {
+	return f.token, f.err
+}
 
 func TestIdentityRequest_Validation(t *testing.T) {
 	tests := []struct {
@@ -46,6 +74,12 @@ func TestIdentityRequest_Validation(t *testing.T) {
 			wantStatus:     http.StatusBadRequest,
 		},
 		{
+			name:           "empty additional aud parameter",
+			query:          "?aud=test&aud=",
+			metadataHeader: "true",
+			wantStatus:     http.StatusBadRequest,
+		},
+		{
 			name:           "unsupported response type",
 			query:          "?aud=test",
 			metadataHeader: "true",
@@ -54,11 +88,7 @@ func TestIdentityRequest_Validation(t *testing.T) {
 		},
 	}
 
-	server := &MetadataServer{
-		exchangeSocket:  "/nonexistent/exchange.sock",
-		spireSocketPath: "/nonexistent/socket",
-		httpClient:      http.DefaultClient,
-	}
+	server := new(MetadataServer)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -118,11 +148,7 @@ func TestIdentityRequest_RejectsForwardedRequests(t *testing.T) {
 		},
 	}
 
-	server := &MetadataServer{
-		exchangeSocket:  "/nonexistent/exchange.sock",
-		spireSocketPath: "/nonexistent/socket",
-		httpClient:      http.DefaultClient,
-	}
+	server := new(MetadataServer)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -156,6 +182,9 @@ func TestExchangeSPIRESVIDUsesCSIUnixSocket(t *testing.T) {
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/exchange" {
 			t.Errorf("request = %s %s", r.Method, r.URL.Path)
 		}
+		if r.Host != "exchange" {
+			t.Errorf("authority = %q, want exchange", r.Host)
+		}
 		if err := r.ParseForm(); err != nil {
 			t.Error(err)
 		}
@@ -168,8 +197,11 @@ func TestExchangeSPIRESVIDUsesCSIUnixSocket(t *testing.T) {
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(func() { _ = server.Close() })
 
-	metadata := &MetadataServer{exchangeSocket: socketPath, httpClient: newExchangeHTTPClient(socketPath)}
-	token, err := metadata.exchangeSPIRESVID(context.Background(), "local-svid")
+	client, err := newExchangeClient("unix://" + socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := client.Exchange(context.Background(), "local-svid")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,9 +214,79 @@ func TestExchangeSPIRESVIDRejectsUnavailableCSIUnixSocket(t *testing.T) {
 	t.Parallel()
 
 	socketPath := filepath.Join(t.TempDir(), "missing.sock")
-	metadata := &MetadataServer{exchangeSocket: socketPath, httpClient: newExchangeHTTPClient(socketPath)}
-	if _, err := metadata.exchangeSPIRESVID(context.Background(), "local-svid"); err == nil {
+	client, err := newExchangeClient("unix://" + socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Exchange(context.Background(), "local-svid"); err == nil {
 		t.Fatal("expected unavailable Exchange proxy socket to fail")
+	}
+}
+
+func TestExchangeSPIRESVIDUsesDirectServiceURL(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/exchange" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"exchanged","token_type":"Bearer","expires_in":60}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := newExchangeClient(server.URL + "/v1/exchange")
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := client.Exchange(context.Background(), "local-svid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token.AccessToken != "exchanged" || !token.Expiry.After(time.Now()) {
+		t.Fatalf("token = %#v", token)
+	}
+}
+
+func TestDirectExchangeVerifiesTLSCertificate(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"exchanged","token_type":"Bearer","expires_in":60}`))
+	}))
+	t.Cleanup(server.Close)
+	client, err := newExchangeClient(server.URL + "/v1/exchange")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Exchange(context.Background(), "local-svid"); err == nil {
+		t.Fatal("self-signed Exchange certificate was accepted")
+	}
+}
+
+func TestExchangeTransportConfiguration(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name    string
+		url     string
+		wantErr string
+	}{
+		{name: "missing", wantErr: "required"},
+		{name: "Unix endpoint", url: "unix:///exchange.sock"},
+		{name: "HTTP endpoint", url: "http://exchange.example.com/v1/exchange"},
+		{name: "HTTPS endpoint", url: "https://exchange.example.com/v1/exchange"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := newExchangeClient(test.url)
+			if test.wantErr == "" && err != nil {
+				t.Fatal(err)
+			}
+			if test.wantErr != "" && (err == nil || !strings.Contains(err.Error(), test.wantErr)) {
+				t.Fatalf("error = %v, want containing %q", err, test.wantErr)
+			}
+		})
 	}
 }
 
@@ -318,24 +420,14 @@ func TestAcceptHeaderParsing(t *testing.T) {
 			wantFormat:   "text/plain",
 		},
 		{
-			name:         "higher quality type is selected",
-			acceptHeader: "text/plain;q=0.9, application/json",
-			wantFormat:   "application/json",
-		},
-		{
-			name:         "first supported type is selected",
-			acceptHeader: "text/plain, application/json",
-			wantFormat:   "text/plain",
-		},
-		{
 			name:         "unsupported type is rejected",
 			acceptHeader: "application/xml",
 			wantErr:      true,
 		},
 		{
-			name:         "unsupported alternative is ignored",
-			acceptHeader: "application/xml, text/plain",
-			wantFormat:   "text/plain",
+			name:         "media type list is rejected",
+			acceptHeader: "application/json, text/plain",
+			wantErr:      true,
 		},
 		{
 			name:         "optional whitespace is parsed",
@@ -348,9 +440,9 @@ func TestAcceptHeaderParsing(t *testing.T) {
 			wantFormat:   "application/json",
 		},
 		{
-			name:         "zero quality is rejected",
-			acceptHeader: "application/json;q=0",
-			wantErr:      true,
+			name:         "media type parameters are ignored",
+			acceptHeader: "application/json; charset=utf-8",
+			wantFormat:   "application/json",
 		},
 	}
 
@@ -367,106 +459,108 @@ func TestAcceptHeaderParsing(t *testing.T) {
 	}
 }
 
-func TestTTLListener_SetsTTLOnAcceptedConnections(t *testing.T) {
-	// Create a TCP listener on a random port
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+func TestTTLListenerSetsResponseTTL(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("failed to create listener: %v", err)
+		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer listener.Close()
 
-	// Wrap with ttlListener
-	ttlLn := &ttlListener{Listener: ln}
-
-	// Channel to receive the TTL value from the accepted connection
-	ttlChan := make(chan int, 1)
-	errChan := make(chan error, 1)
-
+	accepted := make(chan net.Conn, 1)
+	acceptErr := make(chan error, 1)
 	go func() {
-		conn, err := ttlLn.Accept()
-		if err != nil {
-			errChan <- err
-			return
-		}
-		defer conn.Close()
-
-		// Read the TTL value from the connection
-		tcpConn, ok := conn.(*net.TCPConn)
-		if !ok {
-			errChan <- nil
-			ttlChan <- -1
-			return
-		}
-
-		rawConn, err := tcpConn.SyscallConn()
-		if err != nil {
-			errChan <- err
-			return
-		}
-
-		var ttl int
-		var controlErr error
-		rawConn.Control(func(fd uintptr) {
-			ttl, controlErr = syscall.GetsockoptInt(int(fd), syscall.IPPROTO_IP, syscall.IP_TTL)
-		})
-		if controlErr != nil {
-			errChan <- controlErr
-			return
-		}
-
-		errChan <- nil
-		ttlChan <- ttl
+		conn, err := (ttlListener{Listener: listener}).Accept()
+		accepted <- conn
+		acceptErr <- err
 	}()
 
-	// Connect to the listener
-	conn, err := net.Dial("tcp", ln.Addr().String())
+	client, err := net.Dial("tcp4", listener.Addr().String())
 	if err != nil {
-		t.Fatalf("failed to dial: %v", err)
+		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer client.Close()
 
-	// Wait for the accept goroutine to finish
-	if err := <-errChan; err != nil {
-		t.Fatalf("accept goroutine error: %v", err)
+	server := <-accepted
+	if err := <-acceptErr; err != nil {
+		t.Fatal(err)
 	}
-
-	ttl := <-ttlChan
+	defer server.Close()
+	rawConn, err := server.(*net.TCPConn).SyscallConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ttl int
+	if err := rawConn.Control(func(fd uintptr) {
+		ttl, err = syscall.GetsockoptInt(int(fd), syscall.IPPROTO_IP, syscall.IP_TTL)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
 	if ttl != 1 {
-		t.Errorf("TTL = %d, want 1", ttl)
+		t.Fatalf("TTL = %d, want 1", ttl)
 	}
 }
 
-func TestTTLListener_PassesThroughAddr(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("failed to create listener: %v", err)
+func TestIdentityFailureDoesNotExposeInternalError(t *testing.T) {
+	t.Parallel()
+
+	server := &MetadataServer{
+		svids: fakeSVIDFetcher{err: errors.New("private SPIRE socket detail")},
 	}
-	defer ln.Close()
+	request := httptest.NewRequest(http.MethodGet, "/latest/meta-data/identity?aud=test", nil)
+	request.Header.Set("Metadata", "true")
+	recorder := httptest.NewRecorder()
+	server.handleIdentity(recorder, request)
 
-	ttlLn := &ttlListener{Listener: ln}
-
-	// Addr should pass through to the underlying listener
-	if ttlLn.Addr().String() != ln.Addr().String() {
-		t.Errorf("Addr() = %q, want %q", ttlLn.Addr().String(), ln.Addr().String())
+	if recorder.Code != http.StatusServiceUnavailable || recorder.Body.String() != "identity service unavailable\n" {
+		t.Fatalf("response = %d %q", recorder.Code, recorder.Body.String())
 	}
 }
 
-func TestTTLListener_PassesThroughClose(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+func TestIdentitySuccessDisablesCaching(t *testing.T) {
+	t.Parallel()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		t.Fatalf("failed to create listener: %v", err)
+		t.Fatal(err)
 	}
-
-	ttlLn := &ttlListener{Listener: ln}
-
-	// Close should pass through
-	if err := ttlLn.Close(); err != nil {
-		t.Errorf("Close() error = %v", err)
+	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.ES256, Key: key}, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
+	now := time.Now()
+	token, err := jwt.Signed(signer).Claims(jwt.Claims{
+		Issuer:   "spiffe://ds9.dsx.nvid.id",
+		Subject:  "spiffe://operator-1.ds9.dsx.nvid.id/host/worker-1",
+		Audience: jwt.Audience{"test"},
+		IssuedAt: jwt.NewNumericDate(now),
+		Expiry:   jwt.NewNumericDate(now.Add(time.Minute)),
+	}).Serialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &MetadataServer{
+		svids: fakeSVIDFetcher{
+			svid: &jwtsvid.SVID{ID: spiffeid.RequireFromString("spiffe://example.org/host/worker-1")},
+		},
+		exchange: fakeTokenExchanger{
+			token: &oauth2.Token{AccessToken: token, ExpiresIn: 60},
+		},
+	}
+	request := httptest.NewRequest(http.MethodGet, "/latest/meta-data/identity?aud=test", nil)
+	request.Header.Set("Metadata", "true")
+	recorder := httptest.NewRecorder()
+	server.handleIdentity(recorder, request)
 
-	// Verify the underlying listener is closed
-	_, err = ln.Accept()
-	if err == nil {
-		t.Error("expected Accept to fail after Close")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("response = %d %q", recorder.Code, recorder.Body.String())
+	}
+	if got := recorder.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q", got)
+	}
+	if got := recorder.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q", got)
 	}
 }

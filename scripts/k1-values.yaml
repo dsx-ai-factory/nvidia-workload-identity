@@ -2,83 +2,30 @@
 # Used by: make identities
 
 global:
-  imageTag: ""
-  installAndUpgradeHooks:
-    enabled: true
   spire:
     trustDomain: "sjc-1.nvidia.com"
     clusterName: "k1"
     jwtIssuer: "spiffe://sjc-1.nvidia.com"
 
-# Local E2E has no collector, so it does not export telemetry signals.
-observability:
-  env:
-    OTEL_SDK_DISABLED: "true"
-  metrics:
-    enabled: false
-
 spire:
   spire-server:
-    defaultX509SvidTTL: "5m"
-    defaultJwtSvidTTL: "5m"
+    customPlugins:
+      nodeAttestor:
+        dsx_imds:
+          plugin_data:
+            audience: spiffe://sjc-1.nvidia.com/spire/server
+            trust_domain: sjc-1.nvidia.com
     controllerManager:
-      identities:
-        clusterSPIFFEIDs:
-          exchange-service:
-            type: raw
-            podSelector:
-              matchLabels:
-                app.kubernetes.io/name: spiffe-exchange
-                app.kubernetes.io/instance: dsx-identity
-            spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/ns/{{ .PodMeta.Namespace }}/sa/{{ .PodSpec.ServiceAccountName }}"
-          dsx-pod:
-            type: raw
-            podSelector:
-              matchExpressions:
-              - key: spiffe.nvidia.com/tenant
-                operator: Exists
-              - key: spiffe.nvidia.com/service
-                operator: In
-                values:
-                - dsx
-              - key: spiffe.nvidia.com/resource-type
-                operator: In
-                values:
-                - dpu
-                - host
-                - vm
-              - key: spiffe.nvidia.com/resource-id
-                operator: Exists
-            spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/tenant/{{ index .PodMeta.Labels \"spiffe.nvidia.com/tenant\" }}/service/dsx/{{ index .PodMeta.Labels \"spiffe.nvidia.com/resource-type\" }}/{{ index .PodMeta.Labels \"spiffe.nvidia.com/resource-id\" }}/pod/{{ .PodMeta.UID }}"
+      # Kind's control-plane node emulates the external DPU boundary.
+      parentIDTemplate: 'spiffe://{{ .TrustDomain }}/spire/agent/{{ if eq .NodeMeta.Name "k1-control-plane" }}k8s_psat/{{ .ClusterName }}/{{ .NodeMeta.UID }}{{ else }}dsx_imds/tenant/$OPERATOR_TENANT/host/{{ .NodeMeta.Name }}{{ end }}'
 exchange:
-  enabled: true
-  image:
-    repository: dsx-identity/spiffe-exchange-service
-    tag: ""
-    pullPolicy: IfNotPresent
-  imagePullSecrets: []
-  jwksURL: http://spiffe-exchange.dsx-identity.svc.cluster.local:8080/.well-known/jwks.json
   shardID: k1
-  signingKeysetSecret: spiffe-exchange-signing-keyset
   mqtt:
     brokerURL: tcp://nats:1883
     oauth2:
       tokenURL: http://keycloak-service.dsx-identity.svc.cluster.local:8080/realms/event-bus/protocol/openid-connect/token
-      clientID: spiffe-exchange
-      clientSecretSecret: spiffe-exchange-mqtt-oauth
-      clientSecretKey: client-secret
 
 podTokenFetcher:
-  # The k1 E2E workload declares its token-fetcher explicitly. k1 does not
-  # install Kyverno in the multi-cluster profile.
-  enabled: false
-  image:
-    repository: dsx-identity/dsx-token-fetcher
-    tag: ""
-    pullPolicy: IfNotPresent
-
-vmSupport:
-  enabled: false
-
-identityController:
+  # The k1 E2E workload declares its token fetcher explicitly so this shard
+  # exercises the same binary without selecting the Pod injection policy.
   enabled: false

@@ -2,7 +2,7 @@
 
 `dsx-imds-network-setup` runs as a sidecar in a KubeVirt `virt-launcher` Pod. It
 configures that Pod network namespace so the KubeVirt VM can reach the
-`metadata-service` sidecar at `169.254.169.254`.
+DSX IMDS (`metadata-service`) sidecar at `169.254.169.254`.
 
 The KubeVirt VM connects through a tap interface and a `k6t-*` Linux bridge in
 the `virt-launcher` Pod. The metadata-service shares the Pod network namespace,
@@ -20,7 +20,7 @@ flowchart LR
     VM["KubeVirt VM"] -->|"request to 169.254.169.254"| Tap["virt-launcher Pod tap interface"]
     Tap --> Bridge["virt-launcher Pod Linux bridge"]
     Bridge -->|"nftables destination MAC rewrite"| Veth["imds-vm and imds-ctr veth pair"]
-    Veth --> Metadata["metadata-service sidecar"]
+    Veth --> Metadata["DSX IMDS sidecar"]
     Metadata -->|"reply route and neighbor entry"| Veth
     Veth --> Bridge
     Bridge --> Tap
@@ -147,7 +147,7 @@ Request path:
 
 ```text
 KubeVirt VM -> tap interface -> KubeVirt bridge -> nftables destination MAC rewrite
-  -> imds-vm -> imds-ctr -> metadata-service sidecar
+  -> imds-vm -> imds-ctr -> DSX IMDS sidecar
 ```
 
 The nftables rewrite is the request-path decision that keeps the frame from
@@ -156,14 +156,14 @@ following the gateway MAC to the bridge uplink.
 Reply path:
 
 ```text
-metadata-service sidecar -> imds-ctr -> VM /32 route and permanent neighbor
+DSX IMDS sidecar -> imds-ctr -> VM /32 route and permanent neighbor
   -> imds-vm -> KubeVirt bridge -> tap interface -> KubeVirt VM
 ```
 
 The local-route deletion allows the `/32` route to win. The route chooses the
 veth path and the neighbor entry supplies the VM MAC used by the bridge.
 
-The umbrella chart injects the sidecar through
+The identity chart injects the sidecar through
 `charts/dsx-identity/templates/vm-support.yaml`.
 
 ## Flags

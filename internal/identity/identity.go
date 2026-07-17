@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 const (
@@ -21,7 +22,6 @@ const (
 )
 
 var (
-	tenantPattern  = regexp.MustCompile(`^nca-[0-9]{16}$`)
 	segmentPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]*$`)
 	podUIDPattern  = regexp.MustCompile(`^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$`)
 	rolePattern    = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
@@ -36,9 +36,10 @@ const (
 	ResourceVM   ResourceType = "vm"
 )
 
-// ValidTenant reports whether tenant is nca- followed by 16 decimal digits.
+// ValidTenant reports whether tenant can form the leading DNS label of a DSX
+// trust domain without changing the supplied value.
 func ValidTenant(tenant string) bool {
-	return tenantPattern.MatchString(tenant)
+	return len(validation.IsDNS1123Label(tenant)) == 0
 }
 
 // ValidResourceID reports whether id is one valid DSX resource path segment.
@@ -92,8 +93,8 @@ func ParseDSXID(id spiffeid.ID) (Subject, error) {
 	return parseResourcePath(tenant, segments)
 }
 
-// ExchangeSPIFFEID changes only the subject encoding of a validated local
-// SPIRE JWT-SVID. The resource suffix is preserved unchanged.
+// ExchangeSPIFFEID changes only the encoding of a validated local SPIFFE ID.
+// It has no tenant input because the tenant in the local subject is preserved.
 func ExchangeSPIFFEID(id spiffeid.ID) (spiffeid.ID, error) {
 	subject, err := parseSPIFFEID(id)
 	if err != nil {
@@ -128,7 +129,8 @@ func (s Subject) DSXID() (spiffeid.ID, error) {
 
 // parseResourcePath parses this shared suffix:
 //
-//	<dpu|host|vm>/<id>[/process/<name>|/pod/<uuid>][/role/<role>]
+//	<dpu|host|vm>/<id>[/process/<name>][/role/<role>]
+//	host/<id>/pod/<uuid>[/role/<role>]
 //
 // Sharing this parser prevents the two encodings from accepting different
 // subjects.
@@ -194,6 +196,9 @@ func (s Subject) validate() error {
 		}
 		if s.WorkloadType == "pod" && !ValidPodUID(s.WorkloadID) {
 			return fmt.Errorf("invalid pod UID %q", s.WorkloadID)
+		}
+		if s.WorkloadType == "pod" && s.ResourceType != ResourceHost {
+			return fmt.Errorf("pod identity requires host resource type")
 		}
 	}
 	if s.Role != "" && !rolePattern.MatchString(s.Role) {

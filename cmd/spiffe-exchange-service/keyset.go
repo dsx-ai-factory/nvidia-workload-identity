@@ -16,7 +16,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/jellydator/ttlcache/v3"
@@ -188,6 +187,18 @@ func newKeyRegistry() *keyRegistry {
 	)}
 }
 
+func (r *keyRegistry) start() {
+	go r.byKID.Start()
+}
+
+func (r *keyRegistry) stop() {
+	r.byKID.Stop()
+}
+
+func (r *keyRegistry) contains(keyID string) bool {
+	return r.byKID.Get(keyID) != nil
+}
+
 func (r *keyRegistry) replace(keyID string, publication publishedKey) error {
 	if publication.key.KeyID != keyID {
 		return fmt.Errorf("topic kid %q does not match JWK kid %q", keyID, publication.key.KeyID)
@@ -223,7 +234,7 @@ func signingAlgorithms(keys jose.JSONWebKeySet) []string {
 func validateKeyID(keyID string) error {
 	// A kid occupies one MQTT topic segment. Wildcards and separators would
 	// change subscription scope instead of naming a key.
-	if keyID == "" || strings.ContainsFunc(keyID, unicode.IsSpace) || strings.ContainsAny(keyID, "/+#") {
+	if !validTopicSegment(keyID) {
 		return fmt.Errorf("kid %q is not a valid MQTT topic segment", keyID)
 	}
 	return nil

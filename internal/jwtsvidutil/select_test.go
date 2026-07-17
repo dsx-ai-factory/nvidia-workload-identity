@@ -17,7 +17,9 @@ func TestSelectByHint(t *testing.T) {
 	}{
 		{name: "exact", svids: []*jwtsvid.SVID{nil, {Hint: "other"}, {Hint: "dsx-imds"}}, hint: "dsx-imds", want: &jwtsvid.SVID{Hint: "dsx-imds"}},
 		{name: "missing", svids: []*jwtsvid.SVID{{Hint: "other"}}, hint: "dsx-imds", wantErr: true},
-		{name: "duplicate", svids: []*jwtsvid.SVID{{Hint: "dsx-imds"}, {Hint: "dsx-imds"}}, hint: "dsx-imds", wantErr: true},
+		{name: "duplicate host", svids: []*jwtsvid.SVID{{Hint: "dsx-imds"}, {Hint: "dsx-imds"}}, hint: "dsx-imds", wantErr: true},
+		{name: "duplicate VM", svids: []*jwtsvid.SVID{{Hint: "dsx-imds-vm"}, {Hint: "dsx-imds-vm"}}, hint: "dsx-imds-vm", wantErr: true},
+		{name: "duplicate Pod", svids: []*jwtsvid.SVID{{Hint: "dsx-pod"}, {Hint: "dsx-pod"}}, hint: "dsx-pod", wantErr: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()

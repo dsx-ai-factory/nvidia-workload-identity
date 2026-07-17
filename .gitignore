@@ -25,6 +25,7 @@ go.work.sum
 
 # Build artifacts
 /.mise/
+/.kube/
 /dist/
 /build/
 /target/

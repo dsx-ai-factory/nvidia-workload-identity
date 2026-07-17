@@ -1,0 +1,11 @@
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: e2e-registration-admission-probe
+spec:
+  className: dsx-identity-dsx-identity
+  hint: dsx-imds
+  spiffeIDTemplate: spiffe://{{ .TrustDomain }}/tenant/operator-1/service/dsx/host/e2e-registration-admission-probe
+  podSelector:
+    matchLabels:
+      identity.dsx.nvidia.com/admission-probe: e2e

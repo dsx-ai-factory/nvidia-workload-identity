@@ -10,9 +10,8 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -33,50 +32,92 @@ const (
 	defaultSpireSocketPath = "/var/run/secrets/spire.io/spire-agent.sock"
 )
 
-// ttlListener wraps a net.Listener and sets IP TTL=1 on accepted connections.
-// This ensures response packets cannot traverse more than one network hop.
-type ttlListener struct {
-	net.Listener
-}
-
-func (l *ttlListener) Accept() (net.Conn, error) {
-	conn, err := l.Listener.Accept()
-	if err != nil {
-		return nil, err
-	}
-
-	if tcpConn, ok := conn.(*net.TCPConn); ok {
-		if rawConn, err := tcpConn.SyscallConn(); err == nil {
-			rawConn.Control(func(fd uintptr) {
-				// Set IP_TTL for IPv4
-				if err := syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IP, syscall.IP_TTL, 1); err != nil {
-					slog.Debug("Failed to set IP_TTL", "error", err)
-				}
-				// Set IPV6_UNICAST_HOPS for IPv6
-				if err := syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IPV6, syscall.IPV6_UNICAST_HOPS, 1); err != nil {
-					slog.Debug("Failed to set IPV6_UNICAST_HOPS", "error", err)
-				}
-			})
-		}
-	}
-
-	return conn, nil
-}
-
 type IdentityResponse struct {
 	Token     string `json:"token"`
 	ExpiresIn int64  `json:"expires_in"` // Seconds until expiration (OAuth2 RFC 6749)
 	SpiffeID  string `json:"spiffe_id"`
 }
 
-type MetadataServer struct {
-	exchangeSocket  string
-	spireSocketPath string
-	svidHint        string
-	httpClient      *http.Client
+type ttlListener struct {
+	net.Listener
 }
 
-func newExchangeHTTPClient(socketPath string) *http.Client {
+func (l ttlListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	tcpConn := conn.(*net.TCPConn)
+	rawConn, err := tcpConn.SyscallConn()
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	var socketErr error
+	err = rawConn.Control(func(fd uintptr) {
+		if tcpConn.RemoteAddr().(*net.TCPAddr).IP.To4() != nil {
+			socketErr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IP, syscall.IP_TTL, 1)
+		} else {
+			socketErr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IPV6, syscall.IPV6_UNICAST_HOPS, 1)
+		}
+	})
+	if err == nil {
+		err = socketErr
+	}
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return conn, nil
+}
+
+type MetadataServer struct {
+	svids    svidFetcher
+	exchange tokenExchanger
+}
+
+type svidFetcher interface {
+	Fetch(context.Context, []string) (*jwtsvid.SVID, error)
+}
+
+type tokenExchanger interface {
+	Exchange(context.Context, string) (*oauth2.Token, error)
+}
+
+type workloadSVIDFetcher struct {
+	socketPath string
+	hint       string
+}
+
+type exchangeClient struct {
+	endpoint   string
+	httpClient *http.Client
+}
+
+func newExchangeClient(exchangeURL string) (*exchangeClient, error) {
+	if exchangeURL == "" {
+		return nil, errors.New("--exchange-service-url is required")
+	}
+	u, err := url.Parse(exchangeURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse Exchange URL: %w", err)
+	}
+	if u.Scheme == "unix" {
+		return &exchangeClient{
+			endpoint:   "http://exchange/v1/exchange",
+			httpClient: newUnixHTTPClient(u.Path),
+		}, nil
+	}
+	return &exchangeClient{
+		endpoint: exchangeURL,
+		httpClient: &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: otelhttp.NewTransport(http.DefaultTransport),
+		},
+	}, nil
+}
+
+func newUnixHTTPClient(socketPath string) *http.Client {
 	dialer := new(net.Dialer)
 	transport := &http.Transport{
 		// Force every exchange request through the CSI-provided local socket.
@@ -103,12 +144,11 @@ func newMetadataMux(server *MetadataServer) *http.ServeMux {
 	return mux
 }
 
-// fetchJWTSVID fetches a JWT-SVID from the local SPIRE Workload API.
-func (s *MetadataServer) fetchJWTSVID(ctx context.Context, audiences []string) (*jwtsvid.SVID, error) {
-	socketAddr := fmt.Sprintf("unix://%s", s.spireSocketPath)
+func (f workloadSVIDFetcher) Fetch(ctx context.Context, audiences []string) (*jwtsvid.SVID, error) {
+	socketAddr := fmt.Sprintf("unix://%s", f.socketPath)
 
 	slog.DebugContext(ctx, "Fetching SPIRE JWT-SVID",
-		"socket_path", s.spireSocketPath,
+		"socket_path", f.socketPath,
 		"socket_addr", socketAddr,
 		"audiences", audiences)
 
@@ -131,7 +171,7 @@ func (s *MetadataServer) fetchJWTSVID(ctx context.Context, audiences []string) (
 		return nil, fmt.Errorf("fetch SPIRE JWT-SVID: %w", err)
 	}
 
-	selected, err := jwtsvidutil.SelectByHint(svids, s.svidHint)
+	selected, err := jwtsvidutil.SelectByHint(svids, f.hint)
 	if err != nil {
 		return nil, err
 	}
@@ -145,19 +185,17 @@ func (s *MetadataServer) fetchJWTSVID(ctx context.Context, audiences []string) (
 	return selected, nil
 }
 
-// exchangeSPIRESVID exchanges a SPIRE JWT-SVID over the CSI Unix socket.
-func (s *MetadataServer) exchangeSPIRESVID(ctx context.Context, token string) (*oauth2.Token, error) {
+func (c *exchangeClient) Exchange(ctx context.Context, token string) (*oauth2.Token, error) {
 	slog.DebugContext(ctx, "Creating token exchange request",
-		"exchange_socket", s.exchangeSocket,
+		"exchange_endpoint", c.endpoint,
 		"token_length", len(token))
 
-	slog.InfoContext(ctx, "Sending token exchange request", "exchange_socket", s.exchangeSocket)
+	slog.InfoContext(ctx, "Sending token exchange request", "exchange_endpoint", c.endpoint)
 
-	// HTTP over Unix socket uses a dummy host (the socket handles routing).
-	resp, err := tokenexchange.Exchange(ctx, s.httpClient, "http://exchange/v1/exchange", token)
+	resp, err := tokenexchange.Exchange(ctx, c.httpClient, c.endpoint, token)
 	if err != nil {
 		slog.ErrorContext(ctx, "Failed to exchange JWT",
-			"exchange_socket", s.exchangeSocket,
+			"exchange_endpoint", c.endpoint,
 			"error", err)
 		return nil, err
 	}
@@ -171,39 +209,21 @@ func determineResponseFormat(acceptHeader string) (string, error) {
 	if acceptHeader == "" {
 		return "application/json", nil
 	}
-	selected := ""
-	selectedQuality := -1.0
-	for value := range strings.SplitSeq(acceptHeader, ",") {
-		mediaType, params, err := mime.ParseMediaType(value)
-		if err != nil {
-			return "", fmt.Errorf("invalid Accept header: %w", err)
-		}
-		if mediaType != "application/json" && mediaType != "text/plain" {
-			continue
-		}
-		quality := 1.0
-		if rawQuality, ok := params["q"]; ok {
-			quality, err = strconv.ParseFloat(rawQuality, 64)
-			if err != nil || quality < 0 || quality > 1 {
-				return "", fmt.Errorf("invalid Accept quality %q", rawQuality)
-			}
-		}
-		if quality > 0 && quality > selectedQuality {
-			selected = mediaType
-			selectedQuality = quality
-		}
+	mediaType, _, err := mime.ParseMediaType(acceptHeader)
+	if err != nil {
+		return "", fmt.Errorf("parse Accept header: %w", err)
 	}
-	if selected == "" {
-		return "", fmt.Errorf("Accept header does not allow application/json or text/plain")
+	if mediaType == "application/json" || mediaType == "text/plain" {
+		return mediaType, nil
 	}
-	return selected, nil
+	return "", fmt.Errorf("Accept header does not allow application/json or text/plain")
 }
 
 // isForwardedRequest returns true if the request contains forwarding headers,
 // indicating it came through a proxy rather than directly from a client.
 func isForwardedRequest(h http.Header) bool {
 	for _, key := range []string{"Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto"} {
-		if _, present := h[key]; present {
+		if len(h.Values(key)) > 0 {
 			return true
 		}
 	}
@@ -235,10 +255,17 @@ func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) 
 	}
 
 	audiences := r.URL.Query()["aud"]
-	if len(audiences) == 0 || audiences[0] == "" {
+	if len(audiences) == 0 {
 		slog.WarnContext(r.Context(), "Missing audience in request", "remote_addr", r.RemoteAddr)
 		http.Error(w, "aud query parameter is required", http.StatusBadRequest)
 		return
+	}
+	for _, audience := range audiences {
+		if audience == "" {
+			slog.WarnContext(r.Context(), "Empty audience in request", "remote_addr", r.RemoteAddr)
+			http.Error(w, "aud query parameters must not be empty", http.StatusBadRequest)
+			return
+		}
 	}
 	responseFormat, err := determineResponseFormat(r.Header.Get("Accept"))
 	if err != nil {
@@ -252,16 +279,14 @@ func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) 
 
 	ctx := r.Context()
 
-	slog.InfoContext(r.Context(), "Fetching SPIRE JWT-SVID from local socket",
-		"audiences", audiences,
-		"socket_path", s.spireSocketPath)
+	slog.InfoContext(r.Context(), "Fetching SPIRE JWT-SVID from local socket", "audiences", audiences)
 
-	spireSVID, err := s.fetchJWTSVID(ctx, audiences)
+	spireSVID, err := s.svids.Fetch(ctx, audiences)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "Failed to fetch SPIRE JWT-SVID",
 			"error", err,
 			"remote_addr", r.RemoteAddr)
-		http.Error(w, fmt.Sprintf("Failed to fetch SPIRE JWT-SVID: %v", err), http.StatusInternalServerError)
+		http.Error(w, "identity service unavailable", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -269,13 +294,13 @@ func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) 
 		"original_spiffe_id", spireSVID.ID.String(),
 		"audiences", audiences)
 
-	exchangeResp, err := s.exchangeSPIRESVID(ctx, spireSVID.Marshal())
+	exchangeResp, err := s.exchange.Exchange(ctx, spireSVID.Marshal())
 	if err != nil {
 		slog.ErrorContext(r.Context(), "Failed to exchange JWT",
 			"original_spiffe_id", spireSVID.ID.String(),
 			"error", err,
 			"remote_addr", r.RemoteAddr)
-		http.Error(w, fmt.Sprintf("Failed to exchange JWT: %v", err), http.StatusInternalServerError)
+		http.Error(w, "identity service unavailable", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -286,7 +311,7 @@ func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) 
 		slog.ErrorContext(r.Context(), "Failed to extract SPIFFE ID from exchanged JWT",
 			"error", err,
 			"remote_addr", r.RemoteAddr)
-		http.Error(w, "Failed to process exchanged JWT", http.StatusInternalServerError)
+		http.Error(w, "identity service unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	newSpiffeID := dsxJWT.ID.String()
@@ -304,6 +329,7 @@ func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) 
 		"remote_addr", r.RemoteAddr)
 
 	w.Header().Set("Content-Type", responseFormat)
+	w.Header().Set("Cache-Control", "no-store")
 
 	// Preserialize response body so we can send the Content-Length header
 	var responseBody []byte
@@ -326,7 +352,6 @@ func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) 
 		slog.ErrorContext(r.Context(), "Failed to write response",
 			"error", writeErr,
 			"remote_addr", r.RemoteAddr)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -339,10 +364,10 @@ func run() (runErr error) {
 	var logLevel slog.Level
 	flag.TextVar(&logLevel, "log-level", slog.LevelInfo, "log level (debug, info, warn, error)")
 	var (
-		listenAddr      = flag.String("listen", ":80", "HTTP server listen address")
-		exchangeSocket  = flag.String("exchange-socket", "", "Path to exchange service Unix socket")
-		spireSocketPath = flag.String("spire-socket", defaultSpireSocketPath, "Path to SPIRE agent socket")
-		svidHint        = flag.String("svid-hint", "dsx-imds", "Exact JWT-SVID hint (dsx-imds or dsx-imds-vm)")
+		listenAddr         = flag.String("listen", ":80", "HTTP server listen address")
+		exchangeServiceURL = flag.String("exchange-service-url", "", "RFC 8693 endpoint of the shard-local Exchange")
+		spireSocketPath    = flag.String("spire-socket", defaultSpireSocketPath, "Path to SPIRE agent socket")
+		svidHint           = flag.String("svid-hint", "dsx-imds", "Exact JWT-SVID hint (dsx-imds or dsx-imds-vm)")
 	)
 	flag.Parse()
 
@@ -353,25 +378,24 @@ func run() (runErr error) {
 	defer func() {
 		runErr = errors.Join(runErr, sdk.Shutdown(context.Background()))
 	}()
-	if *exchangeSocket == "" {
-		return errors.New("--exchange-socket is required")
-	}
-	if *svidHint != "dsx-imds" && *svidHint != "dsx-imds-vm" {
-		return errors.New("--svid-hint must be dsx-imds or dsx-imds-vm")
+	exchange, err := newExchangeClient(*exchangeServiceURL)
+	if err != nil {
+		return err
 	}
 
 	slog.Info("Starting SPIFFE Metadata Service",
 		"listen_addr", *listenAddr,
 		"log_level", logLevel.String(),
-		"exchange_socket", *exchangeSocket,
+		"exchange_service_url", *exchangeServiceURL,
 		"spire_socket", *spireSocketPath,
 		"svid_hint", *svidHint)
 
 	server := &MetadataServer{
-		exchangeSocket:  *exchangeSocket,
-		spireSocketPath: *spireSocketPath,
-		svidHint:        *svidHint,
-		httpClient:      newExchangeHTTPClient(*exchangeSocket),
+		svids: workloadSVIDFetcher{
+			socketPath: *spireSocketPath,
+			hint:       *svidHint,
+		},
+		exchange: exchange,
 	}
 
 	ln, err := net.Listen("tcp", *listenAddr)
@@ -379,8 +403,6 @@ func run() (runErr error) {
 		return fmt.Errorf("create listener: %w", err)
 	}
 
-	// Wrap listener to set TTL=1 on all connections
-	ttlLn := &ttlListener{Listener: ln}
 	httpServer := &http.Server{
 		Handler: otelhttp.NewHandler(newMetadataMux(server), "metadata-service",
 			otelhttp.WithFilter(filters.None(filters.Path("/health")))),
@@ -389,8 +411,8 @@ func run() (runErr error) {
 		IdleTimeout:       60 * time.Second,
 	}
 
-	slog.Info("Starting HTTP server", "listen_addr", *listenAddr, "ip_ttl", 1)
-	if err := httpServer.Serve(ttlLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	slog.Info("Starting HTTP server", "listen_addr", *listenAddr, "ip_ttl", 1, "ipv6_hop_limit", 1)
+	if err := httpServer.Serve(ttlListener{Listener: ln}); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("serve HTTP: %w", err)
 	}
 	return nil

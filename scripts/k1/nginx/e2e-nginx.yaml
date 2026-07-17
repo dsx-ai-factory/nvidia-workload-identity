@@ -10,10 +10,7 @@ metadata:
   namespace: dsx-identity-e2e
   labels:
     app: e2e-nginx
-    spiffe.nvidia.com/tenant: nca-0000000000000001
     spiffe.nvidia.com/service: dsx
-    spiffe.nvidia.com/resource-type: host
-    spiffe.nvidia.com/resource-id: e2e-nginx
 spec:
   initContainers:
     - name: dsx-token-fetcher
@@ -26,11 +23,10 @@ spec:
         - --socket=unix:///var/run/secrets/spire.io/spire-agent.sock
         - --audience=spiffe://ds9.dsx.nvid.id/openbao
         - --svid-hint=dsx-pod
-        - --output=/var/run/secrets/nvidia.com/dsx/token
-        - --retries=10
+        - --output=/run/secrets/nvidia.com/dsx/token
         - --log-level=info
-        - --exchange-service-url=http://spiffe-exchange.dsx-identity.svc.cluster.local:8080
-      # Local E2E has no OTel collector. Production injection uses chart values.
+        - --exchange-service-url=http://spiffe-exchange.dsx-identity.svc.cluster.local:8080/v1/exchange
+      # Local E2E has no OTel collector.
       env:
         - name: OTEL_SDK_DISABLED
           value: "true"
@@ -60,7 +56,7 @@ spec:
           mountPath: /var/run/secrets/spire.io
           readOnly: true
         - name: dsx-token
-          mountPath: /var/run/secrets/nvidia.com/dsx
+          mountPath: /run/secrets/nvidia.com/dsx
   containers:
     - name: nginx
       image: nginx:1.27.4-alpine
@@ -73,11 +69,8 @@ spec:
           cpu: 100m
           memory: 64Mi
       volumeMounts:
-        - name: spiffe-csi
-          mountPath: /var/run/secrets/spire.io
-          readOnly: true
         - name: dsx-token
-          mountPath: /var/run/secrets/nvidia.com/dsx
+          mountPath: /run/secrets/nvidia.com/dsx
           readOnly: true
     - name: identity-probe
       image: dsx-identity/e2e-probe:0.1.0
@@ -95,9 +88,15 @@ spec:
         capabilities:
           drop: ["ALL"]
         readOnlyRootFilesystem: true
+        runAsGroup: 65532
+        runAsNonRoot: true
+        runAsUser: 65532
       volumeMounts:
         - name: spiffe-csi
           mountPath: /var/run/secrets/spire.io
+          readOnly: true
+        - name: dsx-token
+          mountPath: /run/secrets/nvidia.com/dsx
           readOnly: true
   volumes:
     - name: spiffe-csi

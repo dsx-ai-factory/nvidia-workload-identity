@@ -8,14 +8,14 @@ socket into a consumer Pod.
 flowchart LR
     Proxy["Node-local Exchange proxy container"] -->|"exchange.sock"| SocketDir["Node-local socket directory"]
     Kubelet["Kubernetes kubelet process"] -->|"NodePublishVolume"| Driver["exchange-proxy-csi DaemonSet Pod"]
-    Driver -->|"bind mount for read-only CSI request"| Consumer["virt-launcher metadata-service sidecar"]
+    Driver -->|"bind mount for read-only CSI request"| Consumer["virt-launcher DSX IMDS sidecar"]
     SocketDir --> Driver
     Consumer -->|"HTTP over Unix socket"| Proxy
-    Proxy -->|"TCP"| Exchange["Local Exchange Service"]
+    Proxy -->|"verified TLS"| Exchange["Shard-local Exchange Service"]
 ```
 
-The umbrella chart deploys the driver, node-driver-registrar, and proxy in
-`charts/dsx-identity/templates/vm-support.yaml`. The VM metadata-service uses
+The identity chart deploys the driver, node-driver-registrar, and proxy in
+`charts/dsx-identity/templates/vm-support.yaml`. The VM DSX IMDS sidecar uses
 the mounted socket to reach its local Exchange.
 
 ## Flags
@@ -23,10 +23,8 @@ the mounted socket to reach its local Exchange.
 | Flag | Default | Purpose |
 | --- | --- | --- |
 | `--node-id` | empty | Explicit CSI node ID |
-| `--node-id-env` | `MY_NODE_NAME` | Environment variable used when `--node-id` is empty |
 | `--csi-socket-path` | `/exchange-proxy-csi/csi.sock` | CSI gRPC Unix socket |
-| `--plugin-name` | `csi.exchange.nvidia.com` | Registered CSI driver name |
-| `--socket-dir` | `/run/exchange-proxy` | Directory exposed to ephemeral volumes |
+| `--socket-dir` | `/run/dsx` | Directory exposed to ephemeral volumes |
 | `--log-level` | `info` | JSON log level: `debug`, `info`, `warn`, or `error` |
 
 The driver supports only read-only ephemeral volumes. It requires Linux bind

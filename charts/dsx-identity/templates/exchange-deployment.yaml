@@ -23,6 +23,7 @@ spec:
     metadata:
       labels:
         {{- include "dsx-identity.labels" (dict "root" . "name" "spiffe-exchange") | nindent 8 }}
+        {{- include "dsx-identity.dsxWorkloadLabel" . | nindent 8 }}
       {{- with (include "dsx-identity.observabilityPodAnnotations" (dict "root" . "containerNames" "spiffe-exchange")) }}
       annotations:
         {{- . | nindent 8 }}
@@ -39,6 +40,14 @@ spec:
           type: RuntimeDefault
       {{- with .Values.exchange.imagePullSecrets }}
       imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.exchange.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.exchange.tolerations }}
+      tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:

@@ -25,6 +25,33 @@ app.kubernetes.io/name: {{ .name }}
 app.kubernetes.io/instance: {{ .root.Release.Name }}
 {{- end -}}
 
+{{- define "dsx-identity.dsxWorkloadLabel" -}}
+spiffe.nvidia.com/service: dsx
+{{- end -}}
+
+{{- define "dsx-identity.operatorTenant" -}}
+{{- $tenant := required "global.operatorTenant is required" .Values.global.operatorTenant -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$" $tenant) -}}
+{{- fail "global.operatorTenant must be a DNS label" -}}
+{{- end -}}
+{{- $controllerTenant := "" -}}
+{{- $spireServer := index .Values.spire "spire-server" -}}
+{{- range $spireServer.controllerManager.extraEnv -}}
+{{- if eq .name "OPERATOR_TENANT" -}}
+{{- $controllerTenant = required "spire.spire-server.controllerManager.extraEnv OPERATOR_TENANT value is required" .value -}}
+{{- end -}}
+{{- end -}}
+{{- if ne $controllerTenant $tenant -}}
+{{- fail "global.operatorTenant must match spire.spire-server.controllerManager.extraEnv OPERATOR_TENANT" -}}
+{{- end -}}
+{{- $tenant -}}
+{{- end -}}
+
+{{- define "dsx-identity.operatorPodSPIFFEIDTemplate" -}}
+{{- $tenant := include "dsx-identity.operatorTenant" . -}}
+{{- printf "spiffe://{{ .TrustDomain }}/tenant/%s/service/dsx/host/{{ .NodeMeta.Name }}/pod/{{ .PodMeta.UID }}{{ with index .PodMeta.Labels \"spiffe.nvidia.com/role\" }}/role/{{ . }}{{ end }}" $tenant -}}
+{{- end -}}
+
 {{/*
 Merge user Pod annotations without mutating .Values. The DSX observability
 stack owns both referenced resources, as required by its onboarding guide.

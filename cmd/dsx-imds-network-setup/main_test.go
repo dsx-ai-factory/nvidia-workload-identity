@@ -6,16 +6,25 @@ import (
 	"testing"
 )
 
+type fakeNetworkSetup struct {
+	called chan struct{}
+	err    error
+}
+
+func (f fakeNetworkSetup) Setup(context.Context) error {
+	if f.called != nil {
+		close(f.called)
+	}
+	return f.err
+}
+
 func TestRunWaitsForCancellationAfterSetup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	setupCalled := make(chan struct{})
 	done := make(chan error, 1)
 
 	go func() {
-		done <- run(ctx, func(context.Context) error {
-			close(setupCalled)
-			return nil
-		})
+		done <- run(ctx, fakeNetworkSetup{called: setupCalled})
 	}()
 
 	<-setupCalled
@@ -33,7 +42,7 @@ func TestRunWaitsForCancellationAfterSetup(t *testing.T) {
 
 func TestRunReturnsSetupError(t *testing.T) {
 	want := errors.New("setup failed")
-	err := run(context.Background(), func(context.Context) error { return want })
+	err := run(context.Background(), fakeNetworkSetup{err: want})
 	if !errors.Is(err, want) {
 		t.Fatalf("run error = %v, want %v", err, want)
 	}
@@ -43,7 +52,7 @@ func TestRunTreatsCancellationDuringSetupAsShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if err := run(ctx, func(context.Context) error { return context.Canceled }); err != nil {
+	if err := run(ctx, fakeNetworkSetup{err: context.Canceled}); err != nil {
 		t.Fatalf("run error = %v, want nil", err)
 	}
 }

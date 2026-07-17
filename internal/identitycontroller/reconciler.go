@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	spirev1alpha1 "github.com/spiffe/spire-controller-manager/api/v1alpha1"
@@ -34,14 +35,17 @@ const (
 )
 
 // Config holds shard-wide controller values. TrustDomain encodes local SPIRE
-// IDs. OperatorTenant applies to DPU identities. ClassName is placed on every
-// entry. The DPU holder fields supply selectors for every DPU entry.
+// IDs. OperatorTenant supplies the tenant segment for DPU subjects and the
+// host-agent parent of a VM. A tenant supplied by LaunchLayer remains on the
+// standalone host or VM subject. ClassName is placed on every entry.
+// DPUTokenFetcherSelectors select the process that calls the Workload API and
+// writes the DPU token file.
 type Config struct {
-	TrustDomain          string
-	OperatorTenant       string
-	ClassName            string
-	DPUHolderNamespace   string
-	DPUHolderServiceAcct string
+	TrustDomain              string
+	OperatorTenant           string
+	ClassName                string
+	DPUTokenFetcherSelectors []string
+	DPUMetadataSelectors     []string
 }
 
 // Holder contains stable SPIRE namespace and service account selectors. PodUID
@@ -63,7 +67,26 @@ func (c Config) Validate() error {
 	if c.ClassName == "" {
 		return errors.New("class name is required")
 	}
-	return (Holder{Namespace: c.DPUHolderNamespace, ServiceAccount: c.DPUHolderServiceAcct}).validate()
+	if len(c.DPUTokenFetcherSelectors) == 0 {
+		return errors.New("at least one DPU token fetcher selector is required")
+	}
+	for _, selector := range c.DPUTokenFetcherSelectors {
+		if selector == "" {
+			return errors.New("DPU token fetcher selector must not be empty")
+		}
+		if !strings.HasPrefix(selector, "unix:") {
+			return fmt.Errorf("DPU token fetcher selector %q must use the Unix WorkloadAttestor", selector)
+		}
+	}
+	if len(c.DPUMetadataSelectors) == 0 {
+		return errors.New("at least one DPU metadata selector is required")
+	}
+	for _, selector := range c.DPUMetadataSelectors {
+		if selector == "" {
+			return errors.New("DPU metadata selector must not be empty")
+		}
+	}
+	return nil
 }
 
 func (c Config) trustDomain() (spiffeid.TrustDomain, error) {
@@ -114,9 +137,57 @@ func reconcileSource(
 		// A source update is the meaningful retry trigger for invalid input.
 		return ctrl.Result{}, nil
 	}
+	if err := validateEntryConflicts(ctx, c, entry); err != nil {
+		if _, deleteErr := deleteEntry(ctx, c, entryName); deleteErr != nil {
+			return ctrl.Result{}, errors.Join(err, deleteErr)
+		}
+		if recorder != nil {
+			recorder.Event(source, "Warning", "ConflictingIdentity", err.Error())
+		}
+		return ctrl.Result{}, err
+	}
 	// This controller exclusively owns derived entry fields. Server-side apply
 	// restores drift without merging another writer's values.
 	return ctrl.Result{}, c.Patch(ctx, entry, client.Apply, client.FieldOwner(fieldOwner), client.ForceOwnership)
+}
+
+func validateEntryConflicts(ctx context.Context, c client.Client, desired *spirev1alpha1.ClusterStaticEntry) error {
+	var entries spirev1alpha1.ClusterStaticEntryList
+	if err := c.List(ctx, &entries, client.MatchingLabels{"app.kubernetes.io/managed-by": fieldOwner}); err != nil {
+		return fmt.Errorf("list managed identities: %w", err)
+	}
+	for i := range entries.Items {
+		entry := &entries.Items[i]
+		if entry.Name == desired.Name {
+			continue
+		}
+		if entry.Spec.SPIFFEID == desired.Spec.SPIFFEID {
+			return fmt.Errorf("SPIFFE ID %q is already managed by %q", desired.Spec.SPIFFEID, entry.Name)
+		}
+		if entry.Spec.Hint == "dsx-imds-vm" && desired.Spec.Hint == "dsx-imds-vm" &&
+			vmHoldersOverlap(entry.Spec.Selectors, desired.Spec.Selectors) {
+			return fmt.Errorf("VM holder selectors overlap with managed identity %q", entry.Name)
+		}
+	}
+	return nil
+}
+
+func vmHoldersOverlap(a, b []string) bool {
+	selector := func(selectors []string, prefix string) string {
+		for _, value := range selectors {
+			if suffix, ok := strings.CutPrefix(value, prefix); ok {
+				return suffix
+			}
+		}
+		return ""
+	}
+	if selector(a, "k8s:ns:") != selector(b, "k8s:ns:") ||
+		selector(a, "k8s:sa:") != selector(b, "k8s:sa:") {
+		return false
+	}
+	aUID := selector(a, "k8s:pod-uid:")
+	bUID := selector(b, "k8s:pod-uid:")
+	return aUID == "" || bUID == "" || aUID == bUID
 }
 
 // deleteEntry is idempotent because a missing child is already deleted.
@@ -125,11 +196,7 @@ func deleteEntry(ctx context.Context, c client.Client, name string) (ctrl.Result
 	return ctrl.Result{}, client.IgnoreNotFound(c.Delete(ctx, entry))
 }
 
-func newEntry(source client.Object, spiffeID, parentID spiffeid.ID, hint, className string, holder Holder) (*spirev1alpha1.ClusterStaticEntry, error) {
-	selectors, err := holder.selectors()
-	if err != nil {
-		return nil, err
-	}
+func newEntry(source client.Object, spiffeID, parentID spiffeid.ID, hint, className string, selectors []string) (*spirev1alpha1.ClusterStaticEntry, error) {
 	gvk := source.GetObjectKind().GroupVersionKind()
 	if gvk.Group == "" || gvk.Kind == "" {
 		return nil, errors.New("source group and kind are required")
@@ -205,6 +272,10 @@ func (h Holder) selectors() ([]string, error) {
 		selectors = append(selectors, "k8s:pod-uid:"+h.PodUID)
 	}
 	return selectors, nil
+}
+
+func (h Holder) empty() bool {
+	return h.Namespace == "" && h.ServiceAccount == "" && h.PodUID == ""
 }
 
 func childName(source client.Object) string {

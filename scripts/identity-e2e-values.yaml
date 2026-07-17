@@ -1,0 +1,93 @@
+# Settings shared by every local E2E identity shard.
+global:
+  operatorTenant: operator-1
+
+# Local E2E has no collector.
+observability:
+  env:
+    OTEL_SDK_DISABLED: "true"
+  metrics:
+    enabled: false
+
+admission:
+  deploymentSubjects:
+    - kind: Group
+      name: kubeadm:cluster-admins
+
+spire:
+  spire-server:
+    persistence:
+      size: 256Mi
+    defaultX509SvidTTL: "5m"
+    extraEnv:
+      - name: OTEL_SDK_DISABLED
+        value: "true"
+    initContainers:
+      - name: install-dsx-imds-node-attestor-server
+        image: dsx-identity/dsx-imds-node-attestor-server:0.1.0
+        imagePullPolicy: IfNotPresent
+        args:
+          - /plugins/dsx-imds-node-attestor-server
+        securityContext:
+          runAsUser: 0
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+        volumeMounts:
+          - name: dsx-imds-server-plugin
+            mountPath: /plugins
+    extraVolumes:
+      - name: dsx-imds-server-plugin
+        emptyDir: {}
+    extraVolumeMounts:
+      - name: dsx-imds-server-plugin
+        mountPath: /opt/spire/plugins
+        readOnly: true
+    customPlugins:
+      nodeAttestor:
+        dsx_imds:
+          plugin_cmd: /opt/spire/plugins/dsx-imds-node-attestor-server
+          plugin_checksum: ""
+          plugin_data:
+            jwks_url: http://spiffe-exchange.dsx-identity.svc.cluster.local:8080/.well-known/jwks.json
+    controllerManager:
+      extraEnv:
+        - name: OPERATOR_TENANT
+          value: operator-1
+  # This agent on the Kind seed node emulates the external DPU boundary.
+  spire-agent:
+    enabled: true
+    nodeSelector:
+      node-role.kubernetes.io/control-plane: ""
+    tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+  spiffe-csi-driver:
+    tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+
+exchange:
+  replicas: 1
+  # The seed node emulates the external DPU execution boundary.
+  nodeSelector:
+    node-role.kubernetes.io/control-plane: ""
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
+  # The external E2E test process reaches Exchange through the Kind node.
+  service:
+    type: NodePort
+    nodePort: 30080
+  jwksURL: http://spiffe-exchange.dsx-identity.svc.cluster.local:8080/.well-known/jwks.json

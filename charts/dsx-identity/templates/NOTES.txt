@@ -2,6 +2,7 @@ DSX identity has been deployed.
 
 Trust Domain: {{ .Values.global.spire.trustDomain }}
 Cluster Name: {{ .Values.global.spire.clusterName }}
+Operator Tenant: {{ .Values.global.operatorTenant }}
 
 Components:
   - SPIRE: {{ if .Values.spire.enabled }}enabled{{ else }}disabled{{ end }}

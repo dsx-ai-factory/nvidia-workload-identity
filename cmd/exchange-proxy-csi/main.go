@@ -13,19 +13,15 @@ import (
 
 var (
 	nodeID        string
-	nodeIDEnv     string
 	csiSocketPath string
-	pluginName    string
 	socketDir     string
 	logLevel      slog.Level
 )
 
 func run() (runErr error) {
-	flag.StringVar(&nodeID, "node-id", "", "Node ID (overrides -node-id-env)")
-	flag.StringVar(&nodeIDEnv, "node-id-env", "MY_NODE_NAME", "Env var for node ID")
+	flag.StringVar(&nodeID, "node-id", "", "Node ID")
 	flag.StringVar(&csiSocketPath, "csi-socket-path", "/exchange-proxy-csi/csi.sock", "CSI socket path")
-	flag.StringVar(&pluginName, "plugin-name", "csi.exchange.nvidia.com", "CSI plugin name")
-	flag.StringVar(&socketDir, "socket-dir", "/run/exchange-proxy", "Directory containing exchange socket")
+	flag.StringVar(&socketDir, "socket-dir", "/run/dsx", "Directory containing exchange socket")
 	flag.TextVar(&logLevel, "log-level", slog.LevelInfo, "log level (debug, info, warn, error)")
 	flag.Parse()
 
@@ -37,12 +33,7 @@ func run() (runErr error) {
 		runErr = errors.Join(runErr, sdk.Shutdown(context.Background()))
 	}()
 
-	// Get node ID
-	id := os.Getenv(nodeIDEnv)
-	if nodeID != "" {
-		id = nodeID
-	}
-	if id == "" {
+	if nodeID == "" {
 		return errors.New("node ID is required")
 	}
 	if socketDir == "" {
@@ -50,15 +41,15 @@ func run() (runErr error) {
 	}
 
 	slog.Info("Starting exchange-proxy-csi",
-		"node_id", id,
-		"plugin_name", pluginName,
+		"node_id", nodeID,
+		"plugin_name", PluginName,
 		"socket_dir", socketDir,
 		"csi_socket", csiSocketPath)
 
 	driver := &Driver{
-		nodeID:     id,
-		pluginName: pluginName,
-		socketDir:  socketDir,
+		nodeID:    nodeID,
+		socketDir: socketDir,
+		mountOps:  systemMounts{},
 	}
 
 	return Serve(csiSocketPath, driver)

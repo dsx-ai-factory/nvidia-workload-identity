@@ -61,7 +61,7 @@ func runCommand() (runErr error) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	return run(ctx, setupPodNetwork)
+	return run(ctx, podNetworkSetup{})
 }
 
 func main() {
@@ -71,8 +71,18 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, setup func(context.Context) error) error {
-	if err := setup(ctx); err != nil {
+type networkSetup interface {
+	Setup(context.Context) error
+}
+
+type podNetworkSetup struct{}
+
+func (podNetworkSetup) Setup(ctx context.Context) error {
+	return setupPodNetwork(ctx)
+}
+
+func run(ctx context.Context, setup networkSetup) error {
+	if err := setup.Setup(ctx); err != nil {
 		if ctx.Err() != nil {
 			return nil
 		}
