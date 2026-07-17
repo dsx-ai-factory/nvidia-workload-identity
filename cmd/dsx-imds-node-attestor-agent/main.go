@@ -19,7 +19,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"dsx-identity/internal/dsximds"
-	"dsx-identity/internal/stricturl"
 	"dsx-identity/internal/telemetry"
 )
 
@@ -58,8 +57,8 @@ func (p *Plugin) Configure(_ context.Context, req *configv1.ConfigureRequest) (*
 	if err := hcl.Decode(config, req.HclConfiguration); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "decode configuration: %v", err)
 	}
-	if _, err := stricturl.ParseHTTPOrigin(config.Endpoint); err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "endpoint %v", err)
+	if config.Endpoint == "" {
+		return nil, status.Error(codes.InvalidArgument, "endpoint is required")
 	}
 	if config.Audience == "" {
 		return nil, status.Error(codes.InvalidArgument, "audience is required")

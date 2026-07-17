@@ -42,8 +42,11 @@ variables:
   PIPELINE_TRIGGER: "13"
   GIT_SUBMODULE_STRATEGY: recursive
   KIND_DIND_SERVICE_HOST: docker
+  KUBECONFIG: "$CI_PROJECT_DIR/.kube/kind-k1:$CI_PROJECT_DIR/.kube/kind-k2"
   AL2023_KERNEL_IMAGE: public.ecr.aws/amazonlinux/amazonlinux:2023.9.20251110.1
   DOCKER_PLATFORMS: "linux/amd64,linux/arm64"
+  MISE_VERSION: 2026.4.28
+  MISE_SHA256: ef2502a93bd3e30aea906c683b0cb410695e910ea1ca51a00f24d8ad1a7c95d5
 
 compute-next-release-version:
   extends:
@@ -99,11 +102,15 @@ validate:
         prefix: mise-
         files:
           - mise.toml
+          - mise.lock
       paths:
         - "$MISE_DATA_DIR"
   before_script:
-    - apk add --no-cache bash build-base ca-certificates curl git make mise
-    - mise install
+    - apk add --no-cache bash build-base ca-certificates curl git make
+    - curl -fsSL "https://github.com/jdx/mise/releases/download/v${MISE_VERSION}/mise-v${MISE_VERSION}-linux-x64-musl" -o /usr/local/bin/mise
+    - echo "${MISE_SHA256}  /usr/local/bin/mise" | sha256sum -c -
+    - chmod +x /usr/local/bin/mise
+    - mise install --locked
   script:
     - make validate
   rules:
@@ -125,10 +132,15 @@ e2e:
         prefix: mise-
         files:
           - mise.toml
+          - mise.lock
       paths:
         - "$MISE_DATA_DIR"
   before_script:
-    - apk add --no-cache bash ca-certificates curl docker-cli docker-cli-buildx git make mise openssh-client openssl python3 util-linux
+    - apk add --no-cache bash ca-certificates curl docker-cli docker-cli-buildx git make openssh-client openssl python3 util-linux
+    - curl -fsSL "https://github.com/jdx/mise/releases/download/v${MISE_VERSION}/mise-v${MISE_VERSION}-linux-x64-musl" -o /usr/local/bin/mise
+    - echo "${MISE_SHA256}  /usr/local/bin/mise" | sha256sum -c -
+    - chmod +x /usr/local/bin/mise
+    - mise install --locked
     # Preload matching AL2023 modules into the host kernel shared by DinD and
     # Kind before creating clusters.
     - |

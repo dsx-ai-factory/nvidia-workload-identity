@@ -19,11 +19,11 @@ channels:
     parameters:
       shard_id:
         description: Stable Exchange shard identifier.
-        x-pattern: '^[A-Za-z0-9._:-]+$'
+        x-pattern: '^[^/+#]+$'
         examples: [k1]
       kid:
         description: Globally unique public JWK key ID.
-        x-pattern: '^[^/+#[:space:]]+$'
+        x-pattern: '^[^/+#]+$'
     messages:
       publicKey:
         $ref: '#/components/messages/PublicKey'

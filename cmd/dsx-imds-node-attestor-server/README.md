@@ -6,20 +6,24 @@ plugin and returns the DSX subject as a reattestable SPIRE agent ID.
 
 ```mermaid
 sequenceDiagram
-    participant WA as Kubernetes WorkloadAttestor
-    participant MS as DPU metadata-service process
-    participant EX as Local Exchange Pod
+    participant DI as DSX IMDS process
+    participant DA as External DPU SPIRE agent<br/>runtime WorkloadAttestor
+    participant NI as Paired DPU intercept and NICo or Carbide IMDS
+    participant EX as Shard-local Exchange Pod
     participant AP as dsx_imds NodeAttestor agent plugin
     participant HA as Bare-metal host SPIRE agent
     participant SS as Local SPIRE server Pod
     participant SP as dsx_imds NodeAttestor server plugin
     participant JWKS as Reachable Exchange aggregate JWKS endpoint
-    WA->>MS: Select host identity for local SPIRE JWT-SVID
-    MS->>EX: Exchange local SPIRE JWT-SVID
-    EX-->>MS: Host DSX JWT
+    DI->>DA: Request host SPIRE JWT-SVID by dsx-imds hint
+    DA-->>DI: Local host SPIRE JWT-SVID
+    DI->>EX: Exchange local SPIRE JWT-SVID
+    EX-->>DI: Host DSX JWT
     HA->>AP: Begin node attestation
-    AP->>MS: GET identity with Metadata: true
-    MS-->>AP: Host DSX JWT
+    AP->>NI: GET link-local identity with Metadata: true
+    NI->>DI: Pass through identity request
+    DI-->>NI: Host DSX JWT
+    NI-->>AP: Host DSX JWT
     AP-->>HA: Host DSX JWT attestation payload
     HA->>SS: Send attestation payload
     SS->>SP: Verify host DSX JWT
@@ -33,15 +37,17 @@ CLI flags. Configure it in the SPIRE server HCL:
 
 ```hcl
 plugin_data {
-  jwks_url = "http://spiffe-exchange.dsx-identity.svc.cluster.local:8080/.well-known/jwks.json"
+  jwks_url = "https://exchange.shard.example.com/.well-known/jwks.json"
   audience = "spiffe://k2.sjc-1.nvidia.com/spire/server"
   trust_domain = "k2.sjc-1.nvidia.com"
 }
 ```
 
 All three fields are required. `jwks_url` may name any reachable Exchange's
-flat aggregate JWKS. The umbrella E2E configuration stages the plugin and
-configures SPIRE in `scripts/k2-values.yaml`.
+flat aggregate JWKS. The standard OIDC remote key set caches keys and refreshes
+when it encounters an unknown `kid`. The local E2E configuration stages the
+plugin in `scripts/identity-e2e-values.yaml` and supplies each shard's plugin
+data in its shard values file.
 
 ## Testing
 

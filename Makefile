@@ -8,6 +8,7 @@
 MISE ?= mise
 MISE_EXEC := $(MISE) exec --
 SKAFFOLD_RUN := $(MISE_EXEC) skaffold run --iterative-status-check=false
+IDENTITY_E2E_VALUES := -f scripts/identity-e2e-values.yaml
 
 # Default target
 help: ## Show this help message
@@ -30,14 +31,21 @@ test-shell:
 
 test-helm:
 	@$(MISE_EXEC) ./scripts/prepare-chart-dependencies.sh
-	@$(MISE_EXEC) helm lint charts/dsx-identity -f scripts/k1-values.yaml
-	@$(MISE_EXEC) helm lint charts/dsx-identity -f scripts/k2-values.yaml
-	@$(MISE_EXEC) helm template dsx-identity charts/dsx-identity --namespace dsx-identity -f scripts/k1-values.yaml >/dev/null
-	@$(MISE_EXEC) helm template dsx-identity charts/dsx-identity --namespace dsx-identity -f scripts/k2-values.yaml >/dev/null
+	@$(MISE_EXEC) helm lint charts/dsx-identity $(IDENTITY_E2E_VALUES) -f scripts/k1-values.yaml
+	@$(MISE_EXEC) helm lint charts/dsx-identity $(IDENTITY_E2E_VALUES) -f scripts/k2-values.yaml
+	@$(MISE_EXEC) helm template dsx-identity charts/dsx-identity --namespace dsx-identity $(IDENTITY_E2E_VALUES) -f scripts/k1-values.yaml >/dev/null
+	@$(MISE_EXEC) helm template dsx-identity charts/dsx-identity --namespace dsx-identity $(IDENTITY_E2E_VALUES) -f scripts/k2-values.yaml >/dev/null
 	@$(MISE_EXEC) helm template dsx-identity charts/dsx-identity --namespace dsx-identity \
-		-f scripts/k2-values.yaml --set observability.metrics.enabled=true \
+		$(IDENTITY_E2E_VALUES) -f scripts/k2-values.yaml \
+		--set observability.metrics.enabled=true \
 		--set observability.metrics.port=19464 \
 		--set observability.metrics.serviceMonitor.enabled=true >/dev/null
+	@$(MISE_EXEC) helm template dsx-imds-host-agent charts/dsx-identity/charts/spire-0.27.1.tgz \
+		--namespace dsx-identity -f scripts/dsx-imds-host-agent-values.yaml \
+		-f scripts/k1/dsx-imds-host-agent-values.yaml >/dev/null
+	@$(MISE_EXEC) helm template dsx-imds-host-agent charts/dsx-identity/charts/spire-0.27.1.tgz \
+		--namespace dsx-identity -f scripts/dsx-imds-host-agent-values.yaml \
+		-f scripts/k2/dsx-imds-host-agent-values.yaml >/dev/null
 	@$(MISE_EXEC) helm lint third-party/dsx-exchange/deploy/nats-event-bus -f scripts/k1/event-bus/values.yaml
 	@$(MISE_EXEC) helm template event-bus third-party/dsx-exchange/deploy/nats-event-bus -f scripts/k1/event-bus/values.yaml >/dev/null
 	@$(MISE_EXEC) skaffold diagnose --yaml-only >/dev/null

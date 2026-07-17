@@ -27,7 +27,7 @@ func newFakeMounts() *fakeMounts {
 	return mounts
 }
 
-func (m *fakeMounts) mount(source, target string) error {
+func (m *fakeMounts) Mount(source, target string) error {
 	if m.mountStarted != nil {
 		close(m.mountStarted)
 		<-m.mountRelease
@@ -39,7 +39,7 @@ func (m *fakeMounts) mount(source, target string) error {
 	return nil
 }
 
-func (m *fakeMounts) unmount(target string) error {
+func (m *fakeMounts) Unmount(target string) error {
 	m.records.Lock()
 	defer m.records.Unlock()
 	delete(m.records.mounted, target)
@@ -47,7 +47,7 @@ func (m *fakeMounts) unmount(target string) error {
 	return nil
 }
 
-func (m *fakeMounts) sameFile(source, target string) (bool, error) {
+func (m *fakeMounts) SameFile(source, target string) (bool, error) {
 	m.records.Lock()
 	defer m.records.Unlock()
 	return m.records.mounted[target] == source, nil
@@ -63,10 +63,7 @@ func testDriver(t *testing.T, mounts *fakeMounts) (*Driver, *csi.NodePublishVolu
 	t.Helper()
 	socketDir := t.TempDir()
 	targetPath := filepath.Join(t.TempDir(), "target")
-	driver := &Driver{socketDir: socketDir}
-	driver.mounts.mount = mounts.mount
-	driver.mounts.unmount = mounts.unmount
-	driver.mounts.sameFile = mounts.sameFile
+	driver := &Driver{socketDir: socketDir, mountOps: mounts}
 	request := &csi.NodePublishVolumeRequest{
 		VolumeId:         "volume",
 		TargetPath:       targetPath,

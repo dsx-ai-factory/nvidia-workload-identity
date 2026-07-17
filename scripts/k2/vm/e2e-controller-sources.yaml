@@ -9,9 +9,6 @@ metadata:
   name: e2e-controller-host-source
 spec:
   type: host
-  tenantID: nca-0000000000000001
+  tenantID: tenant-2
   resourceID: e2e-controller-host-source
   parentID: e2e-controller-dpu
-  holder:
-    namespace: dsx-identity
-    serviceAccount: dsx-identity-dsx-imds-agent

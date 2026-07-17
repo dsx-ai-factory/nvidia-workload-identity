@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-
-	"dsx-identity/internal/stricturl"
 )
 
 // Bound the response before converting it to an in-memory attestation payload.
@@ -22,19 +20,14 @@ func FetchHostToken(ctx context.Context, client *http.Client, endpoint, audience
 		return "", fmt.Errorf("audience is required")
 	}
 
-	u, err := stricturl.ParseHTTPOrigin(endpoint)
-	if err != nil {
-		return "", fmt.Errorf("invalid IMDS endpoint %q: %w", endpoint, err)
-	}
-	u.Path = "/latest/meta-data/identity"
-	query := u.Query()
-	query.Set("aud", audience)
-	u.RawQuery = query.Encode()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return "", fmt.Errorf("create IMDS request: %w", err)
 	}
+	req.URL.Path = "/latest/meta-data/identity"
+	query := req.URL.Query()
+	query.Set("aud", audience)
+	req.URL.RawQuery = query.Encode()
 	req.Header.Set("Metadata", "true")
 	// Node attestation sends only the compact JWT. The server verifies its signed expiry.
 	req.Header.Set("Accept", "text/plain")

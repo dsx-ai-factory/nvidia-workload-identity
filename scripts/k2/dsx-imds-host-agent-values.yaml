@@ -1,0 +1,14 @@
+global:
+  spire:
+    clusterName: k2
+    trustDomain: k2.sjc-1.nvidia.com
+    jwtIssuer: spiffe://k2.sjc-1.nvidia.com
+
+spire-agent:
+  nodeSelector:
+    kubernetes.io/hostname: k2-worker
+  customPlugins:
+    nodeAttestor:
+      dsx_imds:
+        plugin_data:
+          audience: spiffe://k2.sjc-1.nvidia.com/spire/server

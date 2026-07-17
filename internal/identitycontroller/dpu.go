@@ -3,6 +3,7 @@ package identitycontroller
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	spirev1alpha1 "github.com/spiffe/spire-controller-manager/api/v1alpha1"
@@ -25,8 +26,8 @@ var DPUGVK = schema.GroupVersionKind{
 
 // DPUReconciler maps each read-only DPU source to one entry. metadata.name is
 // the DPU resource ID and OperatorTenant is its tenant. The parent agent is
-// /spire/agent/dsx_dpu/<dpu-name>, the hint is dsx-dpu, and holder selectors
-// come from the configured DPU namespace and service account.
+// /spire/agent/dsx_dpu/<dpu-name>, the hint is dsx-dpu, and configured Unix
+// selectors identify the token fetcher that calls the Workload API.
 type DPUReconciler struct {
 	client.Client
 	Config   Config
@@ -64,8 +65,5 @@ func (r *DPUReconciler) desiredEntry(dpu *unstructured.Unstructured) (*spirev1al
 	if err != nil {
 		return nil, fmt.Errorf("DPU parent ID: %w", err)
 	}
-	return newEntry(dpu, spiffeID, parentID, "dsx-dpu", r.Config.ClassName, Holder{
-		Namespace:      r.Config.DPUHolderNamespace,
-		ServiceAccount: r.Config.DPUHolderServiceAcct,
-	})
+	return newEntry(dpu, spiffeID, parentID, "dsx-dpu", r.Config.ClassName, slices.Clone(r.Config.DPUTokenFetcherSelectors))
 }

@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
-	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
@@ -29,7 +28,6 @@ import (
 	"google.golang.org/grpc"
 
 	"dsx-identity/internal/identity"
-	"dsx-identity/internal/stricturl"
 	"dsx-identity/internal/telemetry"
 )
 
@@ -37,6 +35,8 @@ const (
 	GrantTypeTokenExchange    = "urn:ietf:params:oauth:grant-type:token-exchange"
 	TokenTypeJWT              = "urn:ietf:params:oauth:token-type:jwt"
 	ContentTypeFormURLEncoded = "application/x-www-form-urlencoded"
+	maxExchangeRequestBytes   = 1 << 20
+	discoveryCacheControl     = "public, max-age=60"
 )
 
 type TokenExchangeResponse struct {
@@ -71,6 +71,10 @@ func NewExchangeServer(ctx context.Context, keys *signingKeyset, registry *keyRe
 		return nil, fmt.Errorf("create JWT source: %w", err)
 	}
 	return &ExchangeServer{keys: keys, registry: registry, jwtSource: jwts, jwksURL: jwksURL}, nil
+}
+
+func (s *ExchangeServer) Close() error {
+	return s.jwtSource.Close()
 }
 
 func (s *ExchangeServer) resignJWT(originalClaims map[string]any, newSubject spiffeid.ID) (string, error) {
@@ -109,10 +113,7 @@ func (s *ExchangeServer) handleTokenExchange(w http.ResponseWriter, r *http.Requ
 		writeTokenError(w, http.StatusUnsupportedMediaType, "invalid_request", "Content-Type must be application/x-www-form-urlencoded")
 		return
 	}
-	if r.URL.RawQuery != "" {
-		writeTokenError(w, http.StatusBadRequest, "invalid_request", "Query parameters are not allowed")
-		return
-	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxExchangeRequestBytes)
 	if err := r.ParseForm(); err != nil {
 		writeTokenError(w, http.StatusBadRequest, "invalid_request", "Failed to parse form data")
 		return
@@ -130,29 +131,21 @@ func (s *ExchangeServer) handleTokenExchange(w http.ResponseWriter, r *http.Requ
 		writeTokenError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("subject_token_type must be %s", TokenTypeJWT))
 		return
 	}
-
-	// Classify malformed claims and unsupported algorithms as an RFC 8693
-	// request error before the Workload API performs issuer-local verification.
-	parsedJWT, err := jwt.ParseSigned(subjectToken, []jose.SignatureAlgorithm{
-		jose.RS256, jose.RS384, jose.RS512,
-		jose.ES256, jose.ES384, jose.ES512,
-	})
-	if err == nil {
-		var claims jwt.Claims
-		err = parsedJWT.UnsafeClaimsWithoutVerification(&claims)
-	}
-	if err != nil {
-		writeTokenError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("Invalid subject_token: %v", err))
+	if requestedTokenType := r.PostForm.Get("requested_token_type"); requestedTokenType != "" && requestedTokenType != TokenTypeJWT {
+		writeTokenError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("requested_token_type must be %s", TokenTypeJWT))
 		return
 	}
+
 	validatedSVID, err := jwtsvid.ParseAndValidate(subjectToken, s.jwtSource, nil)
 	if err != nil {
-		writeTokenError(w, http.StatusUnauthorized, "invalid_grant", fmt.Sprintf("JWT validation failed: %v", err))
+		slog.WarnContext(r.Context(), "Rejected token exchange", "reason", "local_svid_verification", "error", err)
+		writeTokenError(w, http.StatusUnauthorized, "invalid_grant", "subject_token validation failed")
 		return
 	}
 	newID, err := identity.ExchangeSPIFFEID(validatedSVID.ID)
 	if err != nil {
-		writeTokenError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("Failed to transform SPIFFE ID: %v", err))
+		slog.WarnContext(r.Context(), "Rejected token exchange", "reason", "unsupported_subject", "error", err)
+		writeTokenError(w, http.StatusBadRequest, "invalid_request", "subject_token subject is not supported")
 		return
 	}
 	token, err := s.resignJWT(validatedSVID.Claims, newID)
@@ -161,6 +154,7 @@ func (s *ExchangeServer) handleTokenExchange(w http.ResponseWriter, r *http.Requ
 		writeTokenError(w, http.StatusInternalServerError, "server_error", "Failed to sign JWT")
 		return
 	}
+	slog.InfoContext(r.Context(), "Accepted token exchange", "decision", "allow", "subject", newID.String(), "audience_count", len(validatedSVID.Audience))
 
 	responseBody, err := json.Marshal(TokenExchangeResponse{
 		AccessToken:     token,
@@ -187,6 +181,7 @@ func (s *ExchangeServer) handleJWKS(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", discoveryCacheControl)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(responseBody)))
 	if _, err := w.Write(responseBody); err != nil {
 		slog.Error("Failed to write JWKS response", "error", err)
@@ -204,6 +199,7 @@ func (s *ExchangeServer) handleOIDCDiscovery(w http.ResponseWriter, _ *http.Requ
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", discoveryCacheControl)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(responseBody)))
 	if _, err := w.Write(responseBody); err != nil {
 		slog.Error("Failed to write OIDC discovery response", "error", err)
@@ -296,10 +292,6 @@ func run() (runErr error) {
 		runErr = errors.Join(runErr, sdk.Shutdown(context.Background()))
 	}()
 
-	parsedJWKSURL, err := stricturl.ParseHTTP(*jwksURL)
-	if err != nil {
-		return fmt.Errorf("--jwks-url %w", err)
-	}
 	if *mqttClientID == "" {
 		*mqttClientID = "spiffe-exchange-" + *shardID
 	}
@@ -308,27 +300,28 @@ func run() (runErr error) {
 	if err != nil {
 		return fmt.Errorf("load signing keyset: %w", err)
 	}
-	if *publicKeyLeaseTTL < 2*time.Second {
-		return fmt.Errorf("--public-key-lease-ttl must be at least 2s: %s", publicKeyLeaseTTL.String())
-	}
 	registry := newKeyRegistry()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	mqttOAuth := mqttOAuthConfig{tokenURL: *mqttTokenURL, clientID: *mqttOAuthID, clientSecretFile: *mqttSecret}
+	mqttOAuth := mqttOAuthConfig{
+		tokenURL:         *mqttTokenURL,
+		clientID:         *mqttOAuthID,
+		clientSecretFile: *mqttSecret,
+	}
 	syncer, err := startKeySync(ctx, *mqttBroker, *mqttClientID, *shardID, keys.public, *publicKeyLeaseTTL, registry, mqttOAuth)
 	if err != nil {
 		return fmt.Errorf("start public key synchronization: %w", err)
 	}
-	go registry.byKID.Start()
-	defer registry.byKID.Stop()
+	registry.start()
+	defer registry.stop()
 	defer syncer.Close()
 
-	server, err := NewExchangeServer(ctx, keys, registry, *socketPath, parsedJWKSURL.String())
+	server, err := NewExchangeServer(ctx, keys, registry, *socketPath, *jwksURL)
 	if err != nil {
 		return fmt.Errorf("create exchange server: %w", err)
 	}
 	defer func() {
-		if err := server.jwtSource.Close(); err != nil {
+		if err := server.Close(); err != nil {
 			runErr = errors.Join(runErr, fmt.Errorf("close JWT source: %w", err))
 		}
 	}()

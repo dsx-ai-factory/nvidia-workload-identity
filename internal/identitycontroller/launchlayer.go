@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	spirev1alpha1 "github.com/spiffe/spire-controller-manager/api/v1alpha1"
@@ -18,8 +19,8 @@ import (
 	"dsx-identity/internal/identity"
 )
 
-// LaunchLayerSourceGVK identifies the current E2E source contract.
-// TODO: Replace this stand-in when LaunchLayer publishes its source CR.
+// LaunchLayerSourceGVK identifies the temporary source contract used until
+// LaunchLayer publishes its final API.
 var LaunchLayerSourceGVK = schema.GroupVersionKind{
 	Group:   "e2e.dsx-identity.nvidia.com",
 	Version: "v1alpha1",
@@ -28,9 +29,9 @@ var LaunchLayerSourceGVK = schema.GroupVersionKind{
 
 // LaunchLayerReconciler maps each read-only source to one entry. A host source
 // produces a host SPIRE ID with parent /spire/agent/dsx_dpu/<parentID>, hint
-// dsx-imds, and source-provided holder selectors. A VM source produces a VM
+// dsx-imds, and configured DPU metadata selectors. A VM source produces a VM
 // SPIRE ID with its optional role, parent
-// /spire/agent/dsx_imds/tenant/<parentTenantID>/host/<parentID>, hint
+// /spire/agent/dsx_imds/tenant/<operator-tenant>/host/<parentID>, hint
 // dsx-imds-vm, and source-provided holder selectors.
 type LaunchLayerReconciler struct {
 	client.Client
@@ -70,37 +71,48 @@ func (r *LaunchLayerReconciler) desiredEntry(source *unstructured.Unstructured) 
 	if err != nil {
 		return nil, err
 	}
-	parentID, hint, err := spec.parentAgent(td)
+	parentID, hint, err := spec.parentAgent(td, r.Config.OperatorTenant)
 	if err != nil {
 		return nil, err
 	}
-	return newEntry(source, spiffeID, parentID, hint, r.Config.ClassName, spec.Holder)
+	var selectors []string
+	switch spec.Type {
+	case identity.ResourceHost:
+		selectors = slices.Clone(r.Config.DPUMetadataSelectors)
+	case identity.ResourceVM:
+		selectors, err = spec.Holder.selectors()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return newEntry(source, spiffeID, parentID, hint, r.Config.ClassName, selectors)
 }
 
 // launchLayerSpec contains derivation inputs only. Complete SPIFFE IDs remain
 // controller-owned outputs.
 type launchLayerSpec struct {
-	Type           identity.ResourceType `json:"type"`
-	TenantID       string                `json:"tenantID"`
-	ResourceID     string                `json:"resourceID"`
-	Role           string                `json:"role,omitempty"`
-	ParentID       string                `json:"parentID"`
-	ParentTenantID string                `json:"parentTenantID,omitempty"`
-	Holder         Holder                `json:"holder"`
+	Type       identity.ResourceType `json:"type"`
+	TenantID   string                `json:"tenantID"`
+	ResourceID string                `json:"resourceID"`
+	Role       string                `json:"role,omitempty"`
+	ParentID   string                `json:"parentID"`
+	Holder     Holder                `json:"holder,omitempty"`
 }
 
-// parentAgent reads parentTenantID only for a VM because the dsx_imds host
-// agent ID contains the host tenant. The parent records an attestation hop,
-// not a resource hierarchy.
-func (s launchLayerSpec) parentAgent(td spiffeid.TrustDomain) (spiffeid.ID, string, error) {
+// parentAgent uses the configured operator tenant for a VM's Kubernetes worker
+// agent. The source tenant belongs only to the VM identity.
+func (s launchLayerSpec) parentAgent(td spiffeid.TrustDomain, operatorTenant string) (spiffeid.ID, string, error) {
 	if !identity.ValidResourceID(s.ParentID) {
 		return spiffeid.ID{}, "", fmt.Errorf("invalid parent resource ID %q", s.ParentID)
 	}
 
 	switch s.Type {
 	case identity.ResourceHost:
-		if s.ParentTenantID != "" {
-			return spiffeid.ID{}, "", errors.New("parentTenantID is only valid for VM LaunchLayer identities")
+		if s.Role != "" {
+			return spiffeid.ID{}, "", errors.New("role is only valid for VM LaunchLayer source entries")
+		}
+		if !s.Holder.empty() {
+			return spiffeid.ID{}, "", errors.New("holder is only valid for VM LaunchLayer source entries")
 		}
 		parentID, err := spiffeid.FromSegments(td, "spire", "agent", "dsx_dpu", s.ParentID)
 		if err != nil {
@@ -109,18 +121,18 @@ func (s launchLayerSpec) parentAgent(td spiffeid.TrustDomain) (spiffeid.ID, stri
 		return parentID, "dsx-imds", nil
 
 	case identity.ResourceVM:
-		if !identity.ValidTenant(s.ParentTenantID) {
-			return spiffeid.ID{}, "", fmt.Errorf("invalid parent tenant %q", s.ParentTenantID)
+		if s.Holder.empty() {
+			return spiffeid.ID{}, "", errors.New("holder is required for VM LaunchLayer source entries")
 		}
 		parentID, err := spiffeid.FromSegments(td,
-			"spire", "agent", "dsx_imds", "tenant", s.ParentTenantID, "host", s.ParentID)
+			"spire", "agent", "dsx_imds", "tenant", operatorTenant, "host", s.ParentID)
 		if err != nil {
 			return spiffeid.ID{}, "", fmt.Errorf("host parent ID: %w", err)
 		}
 		return parentID, "dsx-imds-vm", nil
 
 	default:
-		return spiffeid.ID{}, "", fmt.Errorf("unsupported LaunchLayer identity type %q", s.Type)
+		return spiffeid.ID{}, "", fmt.Errorf("unsupported LaunchLayer source resource type %q", s.Type)
 	}
 }
 
@@ -141,11 +153,19 @@ func launchLayerSourceSpec(source *unstructured.Unstructured) (launchLayerSpec, 
 		{"tenantID", spec.TenantID},
 		{"resourceID", spec.ResourceID},
 		{"parentID", spec.ParentID},
-		{"holder.namespace", spec.Holder.Namespace},
-		{"holder.serviceAccount", spec.Holder.ServiceAccount},
 	} {
 		if field.value == "" {
 			return launchLayerSpec{}, fmt.Errorf("spec.%s is required", field.name)
+		}
+	}
+	if spec.Type == identity.ResourceVM {
+		for _, field := range []struct{ name, value string }{
+			{"holder.namespace", spec.Holder.Namespace},
+			{"holder.serviceAccount", spec.Holder.ServiceAccount},
+		} {
+			if field.value == "" {
+				return launchLayerSpec{}, fmt.Errorf("spec.%s is required", field.name)
+			}
 		}
 	}
 	return spec, nil

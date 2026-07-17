@@ -8,6 +8,8 @@ import (
 	"crypto/rand"
 	_ "crypto/sha256"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -63,7 +65,7 @@ func TestStaticSigningKeysetAndClaims(t *testing.T) {
 		"exp":    int64(1700000300),
 		"custom": "preserved",
 	}
-	subject := spiffeid.RequireFromString("spiffe://nca-0000000000000001.ds9.dsx.nvid.id/host/host-1")
+	subject := spiffeid.RequireFromString("spiffe://operator-1.ds9.dsx.nvid.id/host/host-1")
 	token, err := server.resignJWT(original, subject)
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +95,7 @@ func TestStaticSigningKeysetAndClaims(t *testing.T) {
 		t.Fatalf("claims = %#v, want %#v", claims, expected)
 	}
 
-	otherSubject := spiffeid.RequireFromString("spiffe://nca-0000000000000002.ds9.dsx.nvid.id/vm/vm-2")
+	otherSubject := spiffeid.RequireFromString("spiffe://tenant-2.ds9.dsx.nvid.id/vm/vm-2")
 	otherToken, err := server.resignJWT(original, otherSubject)
 	if err != nil {
 		t.Fatal(err)
@@ -136,7 +138,6 @@ func TestRejectInvalidSigningConfiguration(t *testing.T) {
 		{name: "symmetric key", mutate: func(k *jose.JSONWebKey) { k.Key = []byte("symmetric") }, kid: "active"},
 		{name: "public active key", mutate: func(k *jose.JSONWebKey) { *k = k.Public() }, kid: "active"},
 		{name: "unknown active kid", mutate: func(*jose.JSONWebKey) {}, kid: "missing"},
-		{name: "active kid whitespace", mutate: func(*jose.JSONWebKey) {}, kid: " active"},
 	}
 	for _, test := range tests {
 		test := test
@@ -212,7 +213,7 @@ func TestRegistryValidatesPublications(t *testing.T) {
 	}
 }
 
-func TestAggregatesVerifyFlatKidsAndRotation(t *testing.T) {
+func TestAggregatesVerifyFlatKidsAndRotationOverlap(t *testing.T) {
 	t.Parallel()
 	now := time.Now()
 
@@ -276,21 +277,6 @@ func TestAggregatesVerifyFlatKidsAndRotation(t *testing.T) {
 		}
 	}
 
-	for i, registry := range registries {
-		registry.byKID.Delete(rotated.key.KeyID)
-		if len(registry.keyset().Keys) != len(shards) || !verifyTestToken(registry.keyset(), newToken) {
-			t.Fatalf("aggregate %d did not retain only the new key after retirement", i)
-		}
-		for _, shard := range shards {
-			valid := verifyTestToken(registry.keyset(), shard.token)
-			if shard.id == rotated.id && valid {
-				t.Fatalf("aggregate %d retained %s retired key", i, shard.id)
-			}
-			if shard.id != rotated.id && !valid {
-				t.Fatalf("aggregate %d lost %s during retirement", i, shard.id)
-			}
-		}
-	}
 }
 
 func verifyJWKPresent(keys []jose.JSONWebKey, want jose.JSONWebKey) bool {
@@ -347,6 +333,14 @@ func TestJWKSAndDiscoveryAreConfiguredNotHostScoped(t *testing.T) {
 		!reflect.DeepEqual(cfg.Algorithms, []string{"ES256", "ES384"}) {
 		t.Fatalf("unexpected discovery: %#v", cfg)
 	}
+	if got := rec.Header().Get("Cache-Control"); got != discoveryCacheControl {
+		t.Fatalf("discovery Cache-Control = %q", got)
+	}
+	jwksResponse := httptest.NewRecorder()
+	server.handleJWKS(jwksResponse, httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil))
+	if got := jwksResponse.Header().Get("Cache-Control"); got != discoveryCacheControl {
+		t.Fatalf("JWKS Cache-Control = %q", got)
+	}
 }
 
 func TestTokenExchangeRequestContract(t *testing.T) {
@@ -367,7 +361,9 @@ func TestTokenExchangeRequestContract(t *testing.T) {
 		{"missing grant", ContentTypeFormURLEncoded, "subject_token=x&subject_token_type=" + TokenTypeJWT, http.StatusBadRequest, "unsupported_grant_type"},
 		{"missing subject", ContentTypeFormURLEncoded, "grant_type=" + GrantTypeTokenExchange + "&subject_token_type=" + TokenTypeJWT, http.StatusBadRequest, "invalid_request"},
 		{"wrong token type", ContentTypeFormURLEncoded, "grant_type=" + GrantTypeTokenExchange + "&subject_token=x&subject_token_type=access_token", http.StatusBadRequest, "invalid_request"},
-		{"malformed subject token", ContentTypeFormURLEncoded, "grant_type=" + GrantTypeTokenExchange + "&subject_token=not-a-jwt&subject_token_type=" + TokenTypeJWT, http.StatusBadRequest, "invalid_request"},
+		{"wrong requested token type", ContentTypeFormURLEncoded, "grant_type=" + GrantTypeTokenExchange + "&subject_token=x&subject_token_type=" + TokenTypeJWT + "&requested_token_type=access_token", http.StatusBadRequest, "invalid_request"},
+		{"malformed subject token", ContentTypeFormURLEncoded, "grant_type=" + GrantTypeTokenExchange + "&subject_token=not-a-jwt&subject_token_type=" + TokenTypeJWT, http.StatusUnauthorized, "invalid_grant"},
+		{"oversized request", ContentTypeFormURLEncoded, "grant_type=" + GrantTypeTokenExchange + "&subject_token=" + strings.Repeat("x", maxExchangeRequestBytes) + "&subject_token_type=" + TokenTypeJWT, http.StatusBadRequest, "invalid_request"},
 	}
 	for _, test := range tests {
 		test := test
@@ -412,6 +408,103 @@ func TestLiveAggregateVerifiesTokens(t *testing.T) {
 		if !verifyTestToken(keys, token) {
 			t.Fatalf("live aggregate did not verify token %d", i)
 		}
+	}
+}
+
+func TestLiveRelyingPartyRejectsInvalidTokens(t *testing.T) {
+	relyingPartyURL := os.Getenv("DSX_E2E_RELYING_PARTY_URL")
+	if relyingPartyURL == "" {
+		t.Skip("DSX_E2E_RELYING_PARTY_URL is not set")
+	}
+	var keyset jose.JSONWebKeySet
+	if err := json.Unmarshal([]byte(os.Getenv("DSX_E2E_SIGNING_JWKS")), &keyset); err != nil {
+		t.Fatalf("parse signing JWKS: %v", err)
+	}
+	activeKID := os.Getenv("DSX_E2E_ACTIVE_KID")
+	keys := keyset.Key(activeKID)
+	if len(keys) != 1 || keys[0].IsPublic() {
+		t.Fatalf("active private key %q was not found exactly once", activeKID)
+	}
+	validToken := os.Getenv("DSX_E2E_VALID_TOKEN")
+	parsed, err := jwt.ParseSigned(validToken, []jose.SignatureAlgorithm{jose.ES256})
+	if err != nil {
+		t.Fatalf("parse valid token claims: %v", err)
+	}
+	var base map[string]any
+	if err := parsed.UnsafeClaimsWithoutVerification(&base); err != nil {
+		t.Fatalf("read valid token claims: %v", err)
+	}
+
+	now := time.Now().Unix()
+	tests := []struct {
+		name   string
+		key    jose.JSONWebKey
+		change func(map[string]any)
+	}{
+		{name: "wrong issuer", key: keys[0], change: func(claims map[string]any) { claims["iss"] = "spiffe://wrong.example" }},
+		{name: "malformed subject", key: keys[0], change: func(claims map[string]any) { claims["sub"] = "not-a-dsx-subject" }},
+		{name: "expired", key: keys[0], change: func(claims map[string]any) {
+			claims["iat"] = now - 600
+			claims["exp"] = now - 300
+		}},
+		{name: "not yet valid", key: keys[0], change: func(claims map[string]any) {
+			claims["iat"] = now
+			claims["nbf"] = now + 300
+			claims["exp"] = now + 600
+		}},
+		{name: "unknown kid", key: testJWK(t, fmt.Sprintf("e2e-unknown-%d", now), false), change: func(map[string]any) {}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			claims := make(map[string]any, len(base))
+			for name, value := range base {
+				claims[name] = value
+			}
+			test.change(claims)
+			token := signLiveClaims(t, test.key, claims)
+			assertLiveLoginRejected(t, relyingPartyURL, token)
+		})
+	}
+}
+
+func signLiveClaims(t *testing.T, key jose.JSONWebKey, claims map[string]any) string {
+	t.Helper()
+	signer, err := jose.NewSigner(
+		jose.SigningKey{Algorithm: jose.SignatureAlgorithm(key.Algorithm), Key: key.Key},
+		(&jose.SignerOptions{}).WithHeader(jose.HeaderKey("kid"), key.KeyID),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := jwt.Signed(signer).Claims(claims).Serialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
+}
+
+func assertLiveLoginRejected(t *testing.T, relyingPartyURL, token string) {
+	t.Helper()
+	body, err := json.Marshal(map[string]string{"role": "basic-spiffe", "jwt": token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, relyingPartyURL, strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := (&http.Client{Timeout: 10 * time.Second}).Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	responseBody, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("login status = %d, want 400: %s", response.StatusCode, responseBody)
 	}
 }
 
@@ -523,7 +616,7 @@ func signTestToken(t *testing.T, key jose.JSONWebKey) string {
 	}
 	token, err := jwt.Signed(signer).Claims(jwt.Claims{
 		Issuer:   identity.Issuer,
-		Subject:  "spiffe://nca-0000000000000001.ds9.dsx.nvid.id/host/host-1",
+		Subject:  "spiffe://operator-1.ds9.dsx.nvid.id/host/host-1",
 		Audience: jwt.Audience{"spiffe://ds9.dsx.nvid.id/openbao"},
 		Expiry:   jwt.NewNumericDate(time.Now().Add(time.Minute)),
 	}).Serialize()

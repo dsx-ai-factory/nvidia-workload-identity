@@ -1,22 +1,27 @@
 # DSX identity chart. Override the trust domain and cluster name per shard.
 global:
   imageTag: ""
-  installAndUpgradeHooks:
-    enabled: false
+  # Tenant for operator DPUs, Kubernetes Pods, and bare-metal worker hosts.
+  operatorTenant: ""
   spire:
     trustDomain: ""
     clusterName: ""
     jwtIssuer: ""
-    caSubject:
-      country: US
-      organization: NVIDIA
-      commonName: SPIRE Server CA
 
 spire:
   enabled: true
   spire-server:
-    defaultX509SvidTTL: 1h
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
     defaultJwtSvidTTL: 5m
+    # Configure the dsx_imds server plugin with the official SPIRE chart's
+    # initContainers, volumes, and customPlugins values. See the values example
+    # in the README for the complete external-plugin contract.
     # External plugin subprocesses inherit the documented DSX OTel injection
     # from the SPIRE server container.
     podAnnotations:
@@ -24,7 +29,22 @@ spire:
       instrumentation.opentelemetry.io/container-names: spire-server
       sidecar.opentelemetry.io/inject: dsx-obs/default-sidecar
     controllerManager:
+      expandEnv: true
+      # The official SPIRE chart owns this Pod field. Set it to the same value
+      # as global.operatorTenant. DSX templates reject a mismatch.
+      extraEnv:
+        - name: OPERATOR_TENANT
+          value: ""
+      parentIDTemplate: 'spiffe://{{ .TrustDomain }}/spire/agent/dsx_imds/tenant/$OPERATOR_TENANT/host/{{ .NodeMeta.Name }}'
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
       reconcile:
+        # DSX shards exchange tokens and public keys. SPIRE is not federated.
         clusterFederatedTrustDomains: false
       identities:
         clusterSPIFFEIDs:
@@ -41,25 +61,29 @@ spire:
             enabled: false
           spike-pilot:
             enabled: false
-          dsx-pod:
-            type: raw
-            podSelector:
-              matchExpressions:
-                - key: spiffe.nvidia.com/tenant
-                  operator: Exists
-                - key: spiffe.nvidia.com/service
-                  operator: In
-                  values: [dsx]
-                - key: spiffe.nvidia.com/resource-type
-                  operator: In
-                  values: [dpu, host, vm]
-                - key: spiffe.nvidia.com/resource-id
-                  operator: Exists
-            spiffeIDTemplate: 'spiffe://{{ .TrustDomain }}/tenant/{{ index .PodMeta.Labels "spiffe.nvidia.com/tenant" }}/service/dsx/{{ index .PodMeta.Labels "spiffe.nvidia.com/resource-type" }}/{{ index .PodMeta.Labels "spiffe.nvidia.com/resource-id" }}/pod/{{ .PodMeta.UID }}'
+  # Every worker uses its externally provisioned dsx_imds host agent.
+  spire-agent:
+    enabled: false
   spiffe-oidc-discovery-provider:
     enabled: false
   spiffe-csi-driver:
-    enabled: true
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+admission:
+  enabled: true
+  # Subjects that deploy chart-owned SPIRE registration resources.
+  deploymentSubjects: []
+  # - kind: Group
+  #   name: identity-deployers
+  # - kind: ServiceAccount
+  #   name: identity-deployer
+  #   namespace: identity-system
 
 observability:
   # One level configures every chart-owned first-party Go process.
@@ -88,10 +112,13 @@ exchange:
     tag: ""
     pullPolicy: IfNotPresent
   imagePullSecrets: []
+  nodeSelector: {}
+  tolerations: []
   replicas: 2
   service:
     type: ClusterIP
     port: 8080
+    nodePort: null
   jwksURL: ""
   # Must match the Event Bus retained-message maxAge and cover DSX JWT validity.
   publicKeyLeaseTTL: 10m
@@ -120,7 +147,8 @@ podTokenFetcher:
     tag: ""
     pullPolicy: IfNotPresent
   audience: spiffe://ds9.dsx.nvid.id/openbao
-  outputPath: /var/run/secrets/nvidia.com/dsx/token
+  exchangeServiceURL: ""
+  outputPath: /run/secrets/nvidia.com/dsx/token
   startupProbe:
     httpGet:
       path: /healthz
@@ -142,6 +170,9 @@ podTokenFetcher:
 vmSupport:
   enabled: false
   proxyNamespace: exchange-proxy-system
+  tolerations: []
+  exchangeProxy:
+    target: ""
   socat:
     image:
       repository: alpine/socat
@@ -194,23 +225,21 @@ vmSupport:
     serviceAccount:
       name: kubevirt-controller
       namespace: kubevirt
-    svidHint: dsx-imds-vm
-
 identityController:
   enabled: false
   image:
     repository: nvcr.io/0837451325059433/components-dev/dsx-identity-controller
     tag: ""
     pullPolicy: IfNotPresent
-  operatorTenant: ""
-  dpuHolder:
-    namespace: ""
-    serviceAccount: dpu-token-fetcher
-  replicaCount: 1
+  # These selectors identify the token fetcher that calls each DPU Workload API.
+  dpuTokenFetcherSelectors: []
+  # These selectors identify DPU-side metadata-service for host identities.
+  dpuMetadataSelectors: []
+  replicaCount: 2
   resources:
     requests:
-      cpu: 25m
-      memory: 64Mi
-    limits:
-      cpu: 200m
+      cpu: 50m
       memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi

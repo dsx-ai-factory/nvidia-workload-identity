@@ -61,7 +61,7 @@ func TestAttest(t *testing.T) {
 		t.Fatal("plugin sent no response")
 	}
 	attributes := stream.sent.GetAgentAttributes()
-	if attributes == nil || attributes.SpiffeId != "spiffe://k2.internal/spire/agent/dsx_imds/tenant/nca-0000000000000001/host/host-7" || !attributes.CanReattest {
+	if attributes == nil || attributes.SpiffeId != "spiffe://k2.internal/spire/agent/dsx_imds/tenant/operator-1/host/host-7" || !attributes.CanReattest {
 		t.Fatalf("agent attributes = %#v", attributes)
 	}
 }
@@ -84,7 +84,7 @@ func signAttestationToken(t *testing.T, key *ecdsa.PrivateKey) string {
 	}
 	token, err := jwt.Signed(signer).Claims(jwt.Claims{
 		Issuer:   identity.Issuer,
-		Subject:  "spiffe://nca-0000000000000001.ds9.dsx.nvid.id/host/host-7",
+		Subject:  "spiffe://operator-1.ds9.dsx.nvid.id/host/host-7",
 		Audience: jwt.Audience{"spire-server"},
 		Expiry:   jwt.NewNumericDate(time.Now().Add(time.Minute)),
 	}).Serialize()

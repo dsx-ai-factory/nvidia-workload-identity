@@ -59,6 +59,11 @@ metadata:
     {{- include "dsx-identity.identityControllerLabels" . | nindent 4 }}
 spec:
   replicas: {{ $values.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "dsx-identity.identityControllerName" . }}
@@ -67,12 +72,21 @@ spec:
     metadata:
       labels:
         {{- include "dsx-identity.identityControllerLabels" . | nindent 8 }}
+        {{- include "dsx-identity.dsxWorkloadLabel" . | nindent 8 }}
       {{- with (include "dsx-identity.observabilityPodAnnotations" (dict "root" . "containerNames" "controller")) }}
       annotations:
         {{- . | nindent 8 }}
       {{- end }}
     spec:
       serviceAccountName: {{ $name }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "dsx-identity.identityControllerName" . }}
+              app.kubernetes.io/instance: {{ .Release.Name }}
       securityContext:
         runAsNonRoot: true
         seccompProfile:
@@ -85,11 +99,15 @@ spec:
             - /usr/local/bin/dsx-identity-controller
           args:
             - --trust-domain={{ required "global.spire.trustDomain is required" $.Values.global.spire.trustDomain }}
-            - --operator-tenant={{ required "identityController.operatorTenant is required" $values.operatorTenant }}
+            - --operator-tenant={{ include "dsx-identity.operatorTenant" $ }}
             # SPIRE controller-manager derives its class from this release identity.
             - --class-name={{ $.Release.Namespace }}-{{ $.Release.Name }}
-            - --dpu-holder-namespace={{ required "identityController.dpuHolder.namespace is required" $values.dpuHolder.namespace }}
-            - --dpu-holder-service-account={{ required "identityController.dpuHolder.serviceAccount is required" $values.dpuHolder.serviceAccount }}
+            {{- range $selector := required "identityController.dpuTokenFetcherSelectors is required" $values.dpuTokenFetcherSelectors }}
+            - {{ printf "--dpu-token-fetcher-selector=%s" $selector | quote }}
+            {{- end }}
+            {{- range $selector := required "identityController.dpuMetadataSelectors is required" $values.dpuMetadataSelectors }}
+            - {{ printf "--dpu-metadata-selector=%s" $selector | quote }}
+            {{- end }}
             - --log-level={{ .Values.observability.logLevel }}
             {{- if .Values.observability.metrics.enabled }}
             - --metrics-bind-address=:{{ .Values.observability.metrics.port }}
@@ -124,4 +142,19 @@ spec:
             capabilities:
               drop: ["ALL"]
             readOnlyRootFilesystem: true
+{{- if gt (int $values.replicaCount) 1 }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "dsx-identity.identityControllerLabels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "dsx-identity.identityControllerName" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
 {{- end }}

@@ -1,0 +1,13 @@
+# This local entry terminates the external DPU agent boundary. The controller-
+# managed entry remains parented to dsx_dpu and is checked separately.
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: e2e-dpu-token-fetcher-boundary
+spec:
+  className: dsx-identity-dsx-identity
+  hint: dsx-dpu
+  spiffeIDTemplate: spiffe://{{ .TrustDomain }}/tenant/operator-1/service/dsx/dpu/e2e-dpu-token-fetcher
+  podSelector:
+    matchLabels:
+      identity.dsx.nvidia.com/dpu-token-fetcher: e2e

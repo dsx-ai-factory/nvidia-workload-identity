@@ -67,16 +67,12 @@ func TestConfigureUsesDefaultForOmittedEndpoint(t *testing.T) {
 	}
 }
 
-func TestConfigureRejectsInvalidEndpoint(t *testing.T) {
+func TestConfigureRejectsEmptyEndpoint(t *testing.T) {
 	t.Parallel()
-	for _, configuration := range []string{
-		"endpoint = \"\"\naudience = \"spire-server\"",
-		"endpoint = \"http://169.254.169.254/\"\naudience = \"spire-server\"",
-	} {
-		plugin := &Plugin{client: http.DefaultClient}
-		if _, err := plugin.Configure(context.Background(), &configv1.ConfigureRequest{HclConfiguration: configuration}); status.Code(err) != codes.InvalidArgument {
-			t.Fatalf("configuration %q error = %v, want InvalidArgument", configuration, err)
-		}
+	plugin := &Plugin{client: http.DefaultClient}
+	configuration := "endpoint = \"\"\naudience = \"spire-server\""
+	if _, err := plugin.Configure(context.Background(), &configv1.ConfigureRequest{HclConfiguration: configuration}); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("error = %v, want InvalidArgument", err)
 	}
 }
 

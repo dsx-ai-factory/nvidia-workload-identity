@@ -18,4 +18,54 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
-          x-kubernetes-preserve-unknown-fields: true
+          required:
+            - spec
+          properties:
+            spec:
+              type: object
+              required:
+                - type
+                - tenantID
+                - resourceID
+                - parentID
+              properties:
+                type:
+                  type: string
+                  enum:
+                    - host
+                    - vm
+                tenantID:
+                  type: string
+                  maxLength: 63
+                  pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+                resourceID:
+                  type: string
+                  pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$'
+                parentID:
+                  type: string
+                  pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$'
+                role:
+                  type: string
+                  pattern: '^[a-z0-9][a-z0-9_-]{0,62}$'
+                holder:
+                  type: object
+                  required:
+                    - namespace
+                    - serviceAccount
+                  properties:
+                    namespace:
+                      type: string
+                      maxLength: 63
+                      pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+                    serviceAccount:
+                      type: string
+                      maxLength: 253
+                      pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$'
+                    podUID:
+                      type: string
+                      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+              x-kubernetes-validations:
+                - rule: "self.type == 'vm' || !has(self.role)"
+                  message: spec.role is valid only when spec.type is vm
+                - rule: "self.type == 'vm' ? has(self.holder) : !has(self.holder)"
+                  message: spec.holder is required only when spec.type is vm

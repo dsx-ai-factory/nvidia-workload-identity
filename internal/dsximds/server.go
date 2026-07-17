@@ -11,7 +11,6 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"dsx-identity/internal/identity"
-	"dsx-identity/internal/stricturl"
 )
 
 const defaultJWKSRequestTimeout = 10 * time.Second
@@ -45,24 +44,12 @@ func NewRemoteVerifier(ctx context.Context, jwksURL, audience string, trustDomai
 
 func newRemoteHTTPClient(timeout time.Duration) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
-	// Fetch JWKS directly from the configured endpoint. Ignore ambient proxies.
-	transport.Proxy = nil
 	return &http.Client{Transport: otelhttp.NewTransport(transport), Timeout: timeout}
 }
 
 func newRemoteVerifier(ctx context.Context, jwksURL, audience string, trustDomain spiffeid.TrustDomain, timeout time.Duration) (*Verifier, error) {
-	u, err := stricturl.ParseHTTP(jwksURL)
-	if err != nil {
-		return nil, fmt.Errorf("JWKS URL %w", err)
-	}
-	if u.User != nil || u.Fragment != "" {
-		return nil, fmt.Errorf("JWKS URL must not contain user information or a fragment")
-	}
-	if timeout <= 0 {
-		return nil, fmt.Errorf("JWKS request timeout must be positive")
-	}
-	keyContext := oidc.ClientContext(ctx, newRemoteHTTPClient(timeout))
-	return NewVerifier(oidc.NewRemoteKeySet(keyContext, jwksURL), audience, trustDomain)
+	ctx = oidc.ClientContext(ctx, newRemoteHTTPClient(timeout))
+	return NewVerifier(oidc.NewRemoteKeySet(ctx, jwksURL), audience, trustDomain)
 }
 
 func (v *Verifier) Verify(ctx context.Context, rawToken string) (spiffeid.ID, error) {

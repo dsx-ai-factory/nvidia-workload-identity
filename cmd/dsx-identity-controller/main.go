@@ -29,10 +29,16 @@ func run() (runErr error) {
 	var logLevel slog.Level
 
 	flag.StringVar(&config.TrustDomain, "trust-domain", "", "local SPIRE trust domain")
-	flag.StringVar(&config.OperatorTenant, "operator-tenant", "", "tenant used for DPU identities")
+	flag.StringVar(&config.OperatorTenant, "operator-tenant", "", "configured tenant for operator identities")
 	flag.StringVar(&config.ClassName, "class-name", "", "SPIRE controller manager class name")
-	flag.StringVar(&config.DPUHolderNamespace, "dpu-holder-namespace", "", "DPU token holder namespace")
-	flag.StringVar(&config.DPUHolderServiceAcct, "dpu-holder-service-account", "", "DPU token holder service account")
+	flag.Func("dpu-token-fetcher-selector", "SPIRE selector for the DPU token fetcher, repeatable", func(value string) error {
+		config.DPUTokenFetcherSelectors = append(config.DPUTokenFetcherSelectors, value)
+		return nil
+	})
+	flag.Func("dpu-metadata-selector", "SPIRE selector for DPU-side metadata-service, repeatable", func(value string) error {
+		config.DPUMetadataSelectors = append(config.DPUMetadataSelectors, value)
+		return nil
+	})
 	flag.StringVar(&metricsAddress, "metrics-bind-address", ":8080", "metrics listen address")
 	flag.StringVar(&probeAddress, "health-probe-bind-address", ":8081", "health probe listen address")
 	flag.BoolVar(&leaderElection, "leader-elect", true, "enable leader election")

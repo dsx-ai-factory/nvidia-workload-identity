@@ -3,6 +3,7 @@ kind: Kustomization
 namespace: dsx-identity
 resources:
   - keycloak.yaml
+  - oauth-route.yaml
 # The generated name rolls Keycloak only when its realm input changes.
 configMapGenerator:
   - name: keycloak-realm-import

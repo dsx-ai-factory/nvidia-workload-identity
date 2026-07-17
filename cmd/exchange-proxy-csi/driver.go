@@ -13,7 +13,8 @@ import (
 )
 
 const (
-	Version = "0.1.0"
+	Version    = "0.1.0"
+	PluginName = "csi.exchange.nvidia.com"
 )
 
 // Driver provides the ephemeral inline CSI service.
@@ -21,24 +22,47 @@ type Driver struct {
 	csi.UnimplementedIdentityServer
 	csi.UnimplementedNodeServer
 
-	nodeID     string
-	pluginName string
-	socketDir  string
-	mounts     struct {
-		// Kubelet may issue duplicate publish and unpublish RPCs concurrently.
-		// Serialize each external mount-state transition so retries are idempotent.
-		sync.Mutex
-		mount    func(string, string) error
-		unmount  func(string) error
-		sameFile func(string, string) (bool, error)
+	nodeID    string
+	socketDir string
+	mountOps  mountOps
+	// Kubelet may issue duplicate publish and unpublish RPCs concurrently.
+	// Serialize each external mount-state transition so retries are idempotent.
+	mountTransitions sync.Mutex
+}
+
+type mountOps interface {
+	Mount(string, string) error
+	Unmount(string) error
+	SameFile(string, string) (bool, error)
+}
+
+type systemMounts struct{}
+
+func (systemMounts) Mount(source, target string) error {
+	return bindMount(source, target)
+}
+
+func (systemMounts) Unmount(target string) error {
+	return unmount(target)
+}
+
+func (systemMounts) SameFile(source, target string) (bool, error) {
+	sourceInfo, err := os.Stat(source)
+	if err != nil {
+		return false, err
 	}
+	targetInfo, err := os.Stat(target)
+	if err != nil {
+		return false, err
+	}
+	return os.SameFile(sourceInfo, targetInfo), nil
 }
 
 // Identity Server
 
 func (d *Driver) GetPluginInfo(context.Context, *csi.GetPluginInfoRequest) (*csi.GetPluginInfoResponse, error) {
 	return &csi.GetPluginInfoResponse{
-		Name:          d.pluginName,
+		Name:          PluginName,
 		VendorVersion: Version,
 	}, nil
 }
@@ -74,13 +98,13 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 	case ephemeralMode != "true":
 		return nil, status.Error(codes.InvalidArgument, "only ephemeral volumes supported")
 	}
-	d.mounts.Lock()
-	defer d.mounts.Unlock()
+	d.mountTransitions.Lock()
+	defer d.mountTransitions.Unlock()
 
 	if err := os.MkdirAll(req.TargetPath, 0755); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create target path: %v", err)
 	}
-	same, err := d.sameMount(req.TargetPath)
+	same, err := d.mountOps.SameFile(d.socketDir, req.TargetPath)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to inspect target path: %v", err)
 	}
@@ -88,7 +112,7 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 		return &csi.NodePublishVolumeResponse{}, nil
 	}
 
-	if err := d.bindMount(d.socketDir, req.TargetPath); err != nil {
+	if err := d.mountOps.Mount(d.socketDir, req.TargetPath); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to bind mount: %v", err)
 	}
 
@@ -107,10 +131,10 @@ func (d *Driver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublish
 	case req.TargetPath == "":
 		return nil, status.Error(codes.InvalidArgument, "target path required")
 	}
-	d.mounts.Lock()
-	defer d.mounts.Unlock()
+	d.mountTransitions.Lock()
+	defer d.mountTransitions.Unlock()
 
-	if err := d.unmountPath(req.TargetPath); err != nil && !os.IsNotExist(err) {
+	if err := d.mountOps.Unmount(req.TargetPath); err != nil && !os.IsNotExist(err) {
 		return nil, status.Errorf(codes.Internal, "failed to unmount: %v", err)
 	}
 
@@ -120,37 +144,6 @@ func (d *Driver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublish
 
 	slog.InfoContext(ctx, "Volume unpublished", "volume_id", req.VolumeId)
 	return &csi.NodeUnpublishVolumeResponse{}, nil
-}
-
-func (d *Driver) bindMount(source, target string) error {
-	if d.mounts.mount != nil {
-		return d.mounts.mount(source, target)
-	}
-	return bindMount(source, target)
-}
-
-func (d *Driver) unmountPath(target string) error {
-	if d.mounts.unmount != nil {
-		return d.mounts.unmount(target)
-	}
-	return unmount(target)
-}
-
-func (d *Driver) sameMount(target string) (bool, error) {
-	if d.mounts.sameFile != nil {
-		return d.mounts.sameFile(d.socketDir, target)
-	}
-	sourceInfo, err := os.Stat(d.socketDir)
-	if err != nil {
-		return false, err
-	}
-	targetInfo, err := os.Stat(target)
-	if err != nil {
-		return false, err
-	}
-	// A bind mount refers to the same inode as its source. Comparing identity is
-	// more reliable than inferring mount state from path text.
-	return os.SameFile(sourceInfo, targetInfo), nil
 }
 
 func (d *Driver) NodeGetCapabilities(context.Context, *csi.NodeGetCapabilitiesRequest) (*csi.NodeGetCapabilitiesResponse, error) {

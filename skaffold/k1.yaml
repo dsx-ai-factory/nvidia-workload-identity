@@ -15,6 +15,15 @@ deploy:
       after:
         - host:
             command:
+              - kubectl
+              - wait
+              - '--for=jsonpath={.subsets[0].addresses[0].ip}'
+              - --context=kind-k1
+              - --namespace=metallb-system
+              - --timeout=120s
+              - endpoints/metallb-webhook-service
+        - host:
+            command:
               - scripts/k1/metallb/configure-address-pool.sh
 ---
 apiVersion: skaffold/v4beta14
@@ -62,14 +71,6 @@ metadata:
 requires:
   - configs:
       - envoy-gateway-crds-k1
-manifests:
-  helm:
-    releases: &envoyGatewayK1Releases
-      - name: eg
-        remoteChart: oci://docker.io/envoyproxy/gateway-helm
-        version: v1.5.4
-        namespace: envoy-gateway-system
-        createNamespace: true
 deploy:
   kubeContext: kind-k1
   statusCheckDeadlineSeconds: 180
@@ -80,7 +81,12 @@ deploy:
         - --skip-crds
       upgrade:
         - --skip-crds
-    releases: *envoyGatewayK1Releases
+    releases:
+      - name: eg
+        remoteChart: oci://docker.io/envoyproxy/gateway-helm
+        version: v1.5.4
+        namespace: envoy-gateway-system
+        createNamespace: true
 ---
 apiVersion: skaffold/v4beta14
 kind: Config
@@ -109,15 +115,6 @@ apiVersion: skaffold/v4beta14
 kind: Config
 metadata:
   name: spire-crds-k1
-manifests:
-  helm:
-    releases: &spireCrdsK1Releases
-      - name: spire-crds
-        remoteChart: spire-crds
-        repo: https://spiffe.github.io/helm-charts-hardened/
-        version: 0.5.0
-        namespace: spire-system
-        createNamespace: true
 deploy:
   kubeContext: kind-k1
   statusCheckDeadlineSeconds: 60
@@ -133,7 +130,54 @@ deploy:
               - --context=kind-k1
               - --timeout=120s
               - crd/clusterspiffeids.spire.spiffe.io
-    releases: *spireCrdsK1Releases
+    releases:
+      - name: spire-crds
+        remoteChart: spire-crds
+        repo: https://spiffe.github.io/helm-charts-hardened/
+        version: 0.5.0
+        namespace: spire-system
+        createNamespace: true
+---
+apiVersion: skaffold/v4beta14
+kind: Config
+metadata:
+  name: kyverno-k1
+deploy:
+  kubeContext: kind-k1
+  statusCheckDeadlineSeconds: 180
+  tolerateFailuresUntilDeadline: true
+  helm:
+    hooks:
+      after:
+        - host:
+            command:
+              - kubectl
+              - wait
+              - --for=condition=Established
+              - --context=kind-k1
+              - --timeout=120s
+              - crd/clusterpolicies.kyverno.io
+        - host:
+            command:
+              - kubectl
+              - wait
+              - --for=jsonpath={.subsets[0].addresses[0].ip}
+              - --context=kind-k1
+              - --namespace=kyverno
+              - --timeout=120s
+              - endpoints/kyverno-svc
+    releases:
+      - name: kyverno
+        remoteChart: kyverno
+        repo: https://kyverno.github.io/kyverno/
+        version: 3.6.1
+        namespace: kyverno
+        createNamespace: true
+        setValues:
+          admissionController.replicas: 1
+          backgroundController.enabled: false
+          cleanupController.enabled: false
+          reportsController.enabled: false
 ---
 apiVersion: skaffold/v4beta14
 kind: Config
@@ -143,6 +187,8 @@ requires:
   - path: secrets.yaml
     configs:
       - event-bus-secrets-k1
+  - configs:
+      - k1-gateway-resources
 manifests:
   kustomize:
     paths:
@@ -163,13 +209,15 @@ requires:
       - chart-dependencies
   - path: images.yaml
     configs:
-      - core-images
+      - images
   - configs:
-      - k1-gateway-resources
       - keycloak-k1
-manifests:
+deploy:
+  kubeContext: kind-k1
+  statusCheckDeadlineSeconds: 300
+  tolerateFailuresUntilDeadline: true
   helm:
-    releases: &eventBusReleases
+    releases:
       - name: event-bus
         chartPath: ../third-party/dsx-exchange/deploy/nats-event-bus
         namespace: dsx-identity
@@ -180,29 +228,6 @@ manifests:
         setValueTemplates:
           auth-callout.image.repository: "{{.IMAGE_REPO_dsx_identity_auth_callout}}"
           auth-callout.image.tag: "{{.IMAGE_TAG_dsx_identity_auth_callout}}"
-deploy:
-  kubeContext: kind-k1
-  statusCheckDeadlineSeconds: 300
-  tolerateFailuresUntilDeadline: true
-  helm:
-    releases: *eventBusReleases
----
-apiVersion: skaffold/v4beta14
-kind: Config
-metadata:
-  name: event-bus-route-k1
-requires:
-  - configs:
-      - k1-gateway-resources
-      - keycloak-k1
-manifests:
-  rawYaml:
-    - ../scripts/k1/event-bus/oauth-route.yaml
-deploy:
-  kubeContext: kind-k1
-  statusCheckDeadlineSeconds: 120
-  tolerateFailuresUntilDeadline: true
-  kubectl: {}
 ---
 apiVersion: skaffold/v4beta14
 kind: Config
@@ -211,35 +236,100 @@ metadata:
 requires:
   - path: images.yaml
     configs:
-      - core-images
+      - images
   - path: secrets.yaml
     configs:
       - identity-secrets-k1
   - configs:
       - event-bus-k1
-      - keycloak-k1
+      - kyverno-k1
       - spire-crds-k1
-manifests:
+deploy:
+  kubeContext: kind-k1
+  statusCheckDeadlineSeconds: 300
+  tolerateFailuresUntilDeadline: true
   helm:
-    releases: &k1IdentityReleases
+    hooks:
+      after:
+        - host:
+            command:
+              - kubectl
+              - wait
+              - '--for=jsonpath={.subsets[0].addresses[0].ip}'
+              - --context=kind-k1
+              - --namespace=dsx-identity
+              - --timeout=120s
+              - endpoints/dsx-identity-controller-manager-webhook
+        - host:
+            command:
+              - kubectl
+              - wait
+              - --for=condition=Ready
+              - --context=kind-k1
+              - --timeout=120s
+              - clusterpolicy/protect-dsx-spire-registrations
+    releases:
       - name: dsx-identity
         chartPath: ../charts/dsx-identity
         namespace: dsx-identity
         createNamespace: true
         skipBuildDependencies: true
         valuesFiles:
+          - ../scripts/identity-e2e-values.yaml
           - ../scripts/k1-values.yaml
         setValueTemplates:
           exchange.image.repository: "{{.IMAGE_REPO_dsx_identity_spiffe_exchange_service}}"
           exchange.image.tag: "{{.IMAGE_TAG_dsx_identity_spiffe_exchange_service}}"
           podTokenFetcher.image.repository: "{{.IMAGE_REPO_dsx_identity_dsx_token_fetcher}}"
           podTokenFetcher.image.tag: "{{.IMAGE_TAG_dsx_identity_dsx_token_fetcher}}"
+          "spire.spire-server.initContainers[0].image": "{{.IMAGE_FULLY_QUALIFIED_dsx_identity_dsx_imds_node_attestor_server}}"
+---
+apiVersion: skaffold/v4beta14
+kind: Config
+metadata:
+  name: worker-host-boundary-k1
+requires:
+  - path: images.yaml
+    configs:
+      - images
+  - configs:
+      - identity-k1
+manifests:
+  rawYaml:
+    - ../scripts/k1/source-fixtures/operator-host-bootstrap.yaml
+    - ../scripts/k1/dpu/e2e-nico-mds.yaml
 deploy:
   kubeContext: kind-k1
-  statusCheckDeadlineSeconds: 300
+  statusCheckDeadlineSeconds: 180
+  tolerateFailuresUntilDeadline: true
+  kubectl: {}
+---
+apiVersion: skaffold/v4beta14
+kind: Config
+metadata:
+  name: worker-host-k1
+requires:
+  - path: images.yaml
+    configs:
+      - images
+  - configs:
+      - worker-host-boundary-k1
+deploy:
+  kubeContext: kind-k1
+  statusCheckDeadlineSeconds: 180
   tolerateFailuresUntilDeadline: true
   helm:
-    releases: *k1IdentityReleases
+    releases:
+      - name: dsx-imds-host-agent
+        remoteChart: spire
+        repo: https://spiffe.github.io/helm-charts-hardened/
+        version: 0.27.1
+        namespace: dsx-identity
+        valuesFiles:
+          - ../scripts/dsx-imds-host-agent-values.yaml
+          - ../scripts/k1/dsx-imds-host-agent-values.yaml
+        setValueTemplates:
+          "spire-agent.initContainers[0].image": "{{.IMAGE_FULLY_QUALIFIED_dsx_identity_dsx_imds_node_attestor_agent}}"
 ---
 apiVersion: skaffold/v4beta14
 kind: Config
@@ -248,17 +338,24 @@ metadata:
 requires:
   - path: images.yaml
     configs:
-      - e2e-images
+      - images
   - configs:
-      - identity-k1
+      - worker-host-k1
 manifests:
   rawYaml:
+    - ../scripts/admission/registration-writer-rbac.yaml
     - ../scripts/k1/nginx/e2e-nginx.yaml
 deploy:
   kubeContext: kind-k1
   statusCheckDeadlineSeconds: 180
   tolerateFailuresUntilDeadline: true
-  kubectl: {}
+  kubectl:
+    hooks:
+      after:
+        - host:
+            command:
+              - scripts/verify-registration-admission.sh
+              - kind-k1
 ---
 apiVersion: skaffold/v4beta14
 kind: Config
@@ -292,4 +389,5 @@ deploy:
           'extraObjects[1].data.resource-type-vm-policy\.hcl': ../scripts/k1/openbao/policies/resource-type-vm-policy.hcl
           'extraObjects[1].data.service-dsx-policy\.hcl': ../scripts/k1/openbao/policies/service-dsx-policy.hcl
           'extraObjects[1].data.spiffe-authenticated-policy\.hcl': ../scripts/k1/openbao/policies/spiffe-authenticated-policy.hcl
-          'extraObjects[1].data.tenant-nca-0000000000000001-policy\.hcl': ../scripts/k1/openbao/policies/tenant-nca-0000000000000001-policy.hcl
+          'extraObjects[1].data.tenant-operator-1-policy\.hcl': ../scripts/k1/openbao/policies/tenant-operator-1-policy.hcl
+          'extraObjects[1].data.tenant-tenant-2-policy\.hcl': ../scripts/k1/openbao/policies/tenant-tenant-2-policy.hcl

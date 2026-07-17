@@ -1,0 +1,90 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: e2e-nico-mds
+  namespace: dsx-identity
+automountServiceAccountToken: false
+---
+# Local E2E exposes the real DSX IMDS at the external interception boundary.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: e2e-nico-mds
+  namespace: dsx-identity
+  labels:
+    identity.dsx.nvidia.com/operator-host-imds: e2e
+spec:
+  # The headless Service exposes this endpoint across the Kind node L2 bridge
+  # so the metadata response reaches the worker with TTL 1 intact.
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
+  nodeSelector:
+    kubernetes.io/hostname: k1-control-plane
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
+  serviceAccountName: e2e-nico-mds
+  containers:
+    - name: metadata-service
+      image: dsx-identity/metadata-service:0.1.0
+      imagePullPolicy: IfNotPresent
+      command:
+        - /usr/local/bin/metadata-service
+      args:
+        - --listen=0.0.0.0:18080
+        - --svid-hint=dsx-imds
+        - --exchange-service-url=http://spiffe-exchange.dsx-identity.svc.cluster.local:8080/v1/exchange
+      env:
+        - name: OTEL_SDK_DISABLED
+          value: "true"
+      startupProbe:
+        httpGet:
+          path: /latest/meta-data/identity?aud=spiffe%3A%2F%2Fsjc-1.nvidia.com%2Fspire%2Fserver
+          port: 18080
+          httpHeaders:
+            - name: Metadata
+              value: "true"
+            - name: Accept
+              value: text/plain
+        periodSeconds: 1
+        timeoutSeconds: 5
+        failureThreshold: 180
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 100m
+          memory: 128Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        readOnlyRootFilesystem: true
+      volumeMounts:
+        - name: bootstrap-spiffe-csi
+          mountPath: /var/run/secrets/spire.io
+          readOnly: true
+  volumes:
+    - name: bootstrap-spiffe-csi
+      csi:
+        driver: csi.spiffe.io
+        readOnly: true
+  securityContext:
+    seccompProfile:
+      type: RuntimeDefault
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: e2e-operator-host-imds
+  namespace: dsx-identity
+spec:
+  clusterIP: None
+  selector:
+    identity.dsx.nvidia.com/operator-host-imds: e2e
+  ports:
+    - name: http
+      port: 18080
+      targetPort: 18080

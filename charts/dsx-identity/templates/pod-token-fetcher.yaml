@@ -1,10 +1,17 @@
+{{- if and .Values.podTokenFetcher.enabled (not .Values.spire.enabled) }}
+{{- fail "podTokenFetcher.enabled requires spire.enabled so selected Pods have a dsx-pod registration" }}
+{{- end }}
 {{- if .Values.podTokenFetcher.enabled }}
 {{- $imageTag := .Values.podTokenFetcher.image.tag | default .Values.global.imageTag | default .Chart.Version -}}
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
   name: inject-dsx-token-fetcher
+  labels:
+    {{- include "dsx-identity.labels" (dict "name" "pod-token-fetcher-policy" "root" .) | nindent 4 }}
   annotations:
+    meta.helm.sh/release-name: {{ .Release.Name | quote }}
+    meta.helm.sh/release-namespace: {{ .Release.Namespace | quote }}
     policies.kyverno.io/title: Inject DSX Token Fetcher
     policies.kyverno.io/category: SPIFFE
 spec:
@@ -16,13 +23,21 @@ spec:
           - resources:
               kinds:
                 - Pod
-              annotations:
-                spiffe.nvidia.com/inject-dsx-token-fetcher: "true"
+              selector:
+                matchLabels:
+                  spiffe.nvidia.com/service: dsx
               namespaceSelector:
                 {{- toYaml .Values.podTokenFetcher.policy.namespaceLabelSelector | nindent 16 }}
       mutate:
         patchStrategicMerge:
           spec:
+            # Only the exchanged token is shared with application containers.
+            containers:
+              - (name): "*"
+                volumeMounts:
+                  - name: dsx-token
+                    mountPath: /run/secrets/nvidia.com/dsx
+                    readOnly: true
             # Native sidecar: start before app containers and keep refreshing the token.
             initContainers:
               - name: dsx-token-fetcher
@@ -36,7 +51,7 @@ spec:
                   - --audience={{ .Values.podTokenFetcher.audience }}
                   - --svid-hint=dsx-pod
                   - --output={{ .Values.podTokenFetcher.outputPath }}
-                  - --exchange-service-url=http://spiffe-exchange.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.exchange.service.port }}
+                  - --exchange-service-url={{ required "podTokenFetcher.exchangeServiceURL is required" .Values.podTokenFetcher.exchangeServiceURL }}
                   - --log-level={{ .Values.observability.logLevel }}
                 # The consumer owns Pod annotations and the shared network namespace.
                 env:
@@ -63,7 +78,7 @@ spec:
                     mountPath: /var/run/secrets/spire.io
                     readOnly: true
                   - name: dsx-token
-                    mountPath: /var/run/secrets/nvidia.com/dsx
+                    mountPath: /run/secrets/nvidia.com/dsx
             volumes:
               - name: spiffe-csi
                 csi:
@@ -71,4 +86,23 @@ spec:
                   readOnly: true
               - name: dsx-token
                 emptyDir: {}
+    - name: validate-operator-pod-role
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              selector:
+                matchLabels:
+                  spiffe.nvidia.com/service: dsx
+              namespaceSelector:
+                {{- toYaml .Values.podTokenFetcher.policy.namespaceLabelSelector | nindent 16 }}
+      validate:
+        failureAction: Enforce
+        cel:
+          expressions:
+            - expression: >-
+                !('spiffe.nvidia.com/role' in object.metadata.labels) ||
+                object.metadata.labels['spiffe.nvidia.com/role'].matches('^[a-z0-9][a-z0-9_-]{0,62}$')
+              message: The optional operator Pod role must be one valid DSX role path segment.
 {{- end }}

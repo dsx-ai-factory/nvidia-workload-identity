@@ -12,12 +12,11 @@ metadata:
   name: e2e-vm-source-e2e-ubuntu-vm
 spec:
   type: vm
-  tenantID: nca-0000000000000001
+  tenantID: tenant-2
   resourceID: e2e-ubuntu-vm
   role: database
   # This parent must match the VM nodeSelector and its dsx_imds host agent.
   parentID: k2-worker
-  parentTenantID: nca-0000000000000001
   holder:
     namespace: tenant-tenant1
     serviceAccount: e2e-ubuntu-vm
@@ -38,10 +37,7 @@ spec:
         kubevirt.io/domain: e2e-ubuntu-vm
         app: e2e-vm
         tenant: tenant1
-        spiffe.nvidia.com/tenant: nca-0000000000000001
         spiffe.nvidia.com/service: dsx
-        spiffe.nvidia.com/resource-type: vm
-        spiffe.nvidia.com/resource-id: e2e-ubuntu-vm
       annotations:
         spiffe.nvidia.com/inject-dsx-imds: "true"
     spec:

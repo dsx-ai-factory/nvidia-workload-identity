@@ -20,7 +20,6 @@ import (
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/go-jose/go-jose/v4"
-	"github.com/jellydator/ttlcache/v3"
 	mqttserver "github.com/mochi-mqtt/server/v2"
 	"github.com/mochi-mqtt/server/v2/listeners"
 	"github.com/mochi-mqtt/server/v2/packets"
@@ -211,6 +210,69 @@ func TestLiveMQTTRetainedReplay(t *testing.T) {
 	}
 }
 
+func TestLiveMQTTPublicationLeaseExpiry(t *testing.T) {
+	brokerURL := os.Getenv("DSX_E2E_MQTT_BROKER")
+	if brokerURL == "" {
+		t.Skip("DSX_E2E_MQTT_BROKER is not set")
+	}
+	accessToken := os.Getenv("DSX_E2E_MQTT_TOKEN")
+	urls := strings.Split(os.Getenv("DSX_E2E_JWKS_URLS"), ",")
+	if accessToken == "" || len(urls) < 2 || slices.Contains(urls, "") {
+		t.Fatal("live MQTT token and at least two JWKS URLs are required")
+	}
+
+	key := testJWK(t, fmt.Sprintf("e2e-lease-%d", time.Now().UnixNano()), true)
+	publishedAt := time.Now()
+	payload, err := marshalPublicKey(key, publishedAt, publishedAt.Add(10*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := connectLiveMQTT(t, brokerURL, accessToken)
+	t.Cleanup(func() { client.Disconnect(0) })
+	topic := keyTopicPrefix + "e2e-lease/kid/" + key.KeyID
+	token := client.Publish(topic, 1, true, payload)
+	if !token.WaitTimeout(10*time.Second) || token.Error() != nil {
+		t.Fatalf("publish short-lived retained key: %v", token.Error())
+	}
+
+	waitForLiveKeyState(t, urls, key.KeyID, true, 5*time.Second)
+	waitForLiveKeyState(t, urls, key.KeyID, false, 15*time.Second)
+}
+
+func waitForLiveKeyState(t *testing.T, urls []string, keyID string, want bool, timeout time.Duration) {
+	t.Helper()
+	client := &http.Client{Timeout: 2 * time.Second}
+	deadline := time.NewTimer(timeout)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer deadline.Stop()
+	defer ticker.Stop()
+
+	for {
+		allMatch := true
+		for _, url := range urls {
+			response, err := client.Get(url)
+			if err != nil {
+				allMatch = false
+				continue
+			}
+			var keys jose.JSONWebKeySet
+			err = json.NewDecoder(response.Body).Decode(&keys)
+			response.Body.Close()
+			if err != nil || response.StatusCode != http.StatusOK || slices.Contains(keyIDs(keys.Keys), keyID) != want {
+				allMatch = false
+			}
+		}
+		if allMatch {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-deadline.C:
+			t.Fatalf("key %q did not reach present=%t at every aggregate JWKS", keyID, want)
+		}
+	}
+}
+
 func connectLiveMQTT(t *testing.T, brokerURL, accessToken string) mqtt.Client {
 	t.Helper()
 	client := mqtt.NewClient(mqtt.NewClientOptions().
@@ -366,6 +428,45 @@ func TestMQTTSynchronizesRetainedPublicKeys(t *testing.T) {
 	waitForDisconnected(t, newReplica.client)
 }
 
+func TestKeySyncRetriesInitialConnection(t *testing.T) {
+	t.Parallel()
+	broker := mqttserver.New(nil)
+	broker.Log = slog.New(slog.NewTextHandler(io.Discard, nil))
+	hook := new(initialConnectionRetryHook)
+	if err := broker.AddHook(hook, nil); err != nil {
+		t.Fatal(err)
+	}
+	listener := listeners.NewTCP(listeners.Config{ID: "retry", Address: "127.0.0.1:0"})
+	if err := broker.AddListener(listener); err != nil {
+		t.Fatal(err)
+	}
+	if err := broker.Serve(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = broker.Close() })
+
+	privateKey := testJWK(t, "retry-kid", false)
+	key := privateKey.Public()
+	syncer, err := startKeySync(
+		context.Background(),
+		"tcp://"+listener.Address(),
+		"retry-client",
+		"retry-shard",
+		[]jose.JSONWebKey{key},
+		time.Minute,
+		newKeyRegistry(),
+		testMQTTOAuthConfig(t),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(syncer.Close)
+	waitForReady(t, syncer)
+	if hook.attempts.Load() < 3 {
+		t.Fatalf("connection attempts = %d, want an initial failure and retry", hook.attempts.Load())
+	}
+}
+
 type oauthTestHook struct {
 	mqttserver.HookBase
 }
@@ -381,6 +482,27 @@ func (*oauthTestHook) OnConnectAuthenticate(_ *mqttserver.Client, packet packets
 }
 
 func (*oauthTestHook) OnACLCheck(_ *mqttserver.Client, topic string, _ bool) bool {
+	return strings.HasPrefix(topic, keyTopicPrefix)
+}
+
+type initialConnectionRetryHook struct {
+	mqttserver.HookBase
+	attempts atomic.Int32
+}
+
+func (*initialConnectionRetryHook) ID() string { return "initial-connection-retry-test" }
+
+func (*initialConnectionRetryHook) Provides(hook byte) bool {
+	return hook == mqttserver.OnConnectAuthenticate || hook == mqttserver.OnACLCheck
+}
+
+func (h *initialConnectionRetryHook) OnConnectAuthenticate(_ *mqttserver.Client, packet packets.Packet) bool {
+	return h.attempts.Add(1) > 2 &&
+		string(packet.Connect.Username) == "oauthtoken" &&
+		string(packet.Connect.Password) == "test-token"
+}
+
+func (*initialConnectionRetryHook) OnACLCheck(_ *mqttserver.Client, topic string, _ bool) bool {
 	return strings.HasPrefix(topic, keyTopicPrefix)
 }
 
@@ -635,22 +757,14 @@ func TestKeyRegistryBackgroundLeaseExpiry(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		registry := newKeyRegistry()
-		evicted := make(chan struct{}, 1)
-		unsubscribe := registry.byKID.OnEviction(func(context.Context, ttlcache.EvictionReason, *ttlcache.Item[string, publishedKey]) {
-			evicted <- struct{}{}
-		})
-		defer unsubscribe()
 		key := testJWK(t, "expiring", true)
 		if err := registry.replace(key.KeyID, publishedKey{key: key, leaseExpiresAt: time.Now().Add(time.Second)}); err != nil {
 			t.Fatal(err)
 		}
-		go registry.byKID.Start()
-		<-evicted
-		registry.byKID.Stop()
+		registry.start()
+		waitForKeyCount(t, registry, 0)
+		registry.stop()
 		synctest.Wait()
-		if registry.byKID.Len() != 0 {
-			t.Fatal("expired publication lease retained the key")
-		}
 	})
 }
 
@@ -733,7 +847,7 @@ func waitForCondition(t *testing.T, description string, ready func() bool) {
 
 func TestValidateShardID(t *testing.T) {
 	t.Parallel()
-	for _, shard := range []string{"", " shard", "shard/one", "shard+", "shard#"} {
+	for _, shard := range []string{"", "shard/one", "shard+", "shard#"} {
 		shard := shard
 		t.Run(fmt.Sprintf("%q", shard), func(t *testing.T) {
 			t.Parallel()
@@ -741,6 +855,11 @@ func TestValidateShardID(t *testing.T) {
 				t.Fatal("expected invalid shard ID")
 			}
 		})
+	}
+	for _, shard := range []string{"shard", " shard", "shard id"} {
+		if err := validateShardID(shard); err != nil {
+			t.Fatalf("valid shard ID %q was rejected: %v", shard, err)
+		}
 	}
 }
 
@@ -751,7 +870,7 @@ func TestKeyTopicRoundTrip(t *testing.T) {
 	if !ok || keyID != "thumbprint_123" {
 		t.Fatalf("parseKeyTopic(%q) = %q, %t", topic, keyID, ok)
 	}
-	for _, keyID := range []string{"", " key", "key/id", "key+id", "key#id"} {
+	for _, keyID := range []string{"", "key/id", "key+id", "key#id"} {
 		if _, ok := parseKeyTopic(keyTopic("shard-a", keyID)); ok {
 			t.Fatalf("invalid key ID %q was accepted", keyID)
 		}

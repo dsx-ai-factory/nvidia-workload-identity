@@ -61,14 +61,26 @@ initialize "policies" {
     }
   }
 
-  request "tenant-nca-0000000000000001" {
+  request "tenant-operator-1" {
     operation = "update"
-    path      = "sys/policies/acl/tenant-nca-0000000000000001"
+    path      = "sys/policies/acl/tenant-operator-1"
     data = {
       policy = {
         eval_type   = "string"
         eval_source = "file"
-        path        = "/openbao/policies/tenant-nca-0000000000000001-policy.hcl"
+        path        = "/openbao/policies/tenant-operator-1-policy.hcl"
+      }
+    }
+  }
+
+  request "tenant-tenant-2" {
+    operation = "update"
+    path      = "sys/policies/acl/tenant-tenant-2"
+    data = {
+      policy = {
+        eval_type   = "string"
+        eval_source = "file"
+        path        = "/openbao/policies/tenant-tenant-2-policy.hcl"
       }
     }
   }
@@ -143,7 +155,7 @@ initialize "jwt" {
         variables = [
           {
             name       = "is_spiffe"
-            expression = "claims.sub.matches(r'^spiffe://nca-[0-9]{16}\\.ds9\\.dsx\\.nvid\\.id/(dpu|host|vm)/[A-Za-z0-9][A-Za-z0-9._:-]*(/(process/[A-Za-z0-9][A-Za-z0-9._:-]*|pod/[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}))?(/role/[a-z0-9][a-z0-9_-]{0,62})?$')"
+            expression = "claims.sub.matches(r'^spiffe://[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?\\.ds9\\.dsx\\.nvid\\.id/((dpu|vm)/[A-Za-z0-9][A-Za-z0-9._:-]*/process/[A-Za-z0-9][A-Za-z0-9._:-]*|(dpu|vm)/[A-Za-z0-9][A-Za-z0-9._:-]*|host/[A-Za-z0-9][A-Za-z0-9._:-]*/(process/[A-Za-z0-9][A-Za-z0-9._:-]*|pod/[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})|host/[A-Za-z0-9][A-Za-z0-9._:-]*)(/role/[a-z0-9][a-z0-9_-]{0,62})?$')"
           },
           {
             name       = "uri_parts"
@@ -213,11 +225,19 @@ initialize "fixtures" {
     }
   }
 
-  request "tenant-nca-0000000000000001" {
+  request "tenant-operator-1" {
     operation = "update"
-    path      = "secret/data/tenant/nca-0000000000000001/e2e"
+    path      = "secret/data/tenant/operator-1/e2e"
     data = {
       data = { value = "tenant-1" }
+    }
+  }
+
+  request "tenant-tenant-2" {
+    operation = "update"
+    path      = "secret/data/tenant/tenant-2/e2e"
+    data = {
+      data = { value = "tenant-2" }
     }
   }
 

@@ -24,20 +24,12 @@ const (
 	keyTopicWildcard     = keyTopicPrefix + "+/kid/+"
 	mqttQoS              = byte(1)
 	mqttOperationTimeout = 10 * time.Second
+	mqttConnectRetry     = time.Second
 	syncBackoffMin       = 100 * time.Millisecond
 	syncBackoffMax       = 2 * time.Second
 )
 
-// keySync owns the MQTT lifecycle for one Exchange replica. startKeySync builds
-// a Paho client whose credential provider reads the current OAuth2 secret for
-// every connection attempt. OnConnect runs one gated retry owner for the flat
-// public-key subscription. Paho's ordered handler validates retained and live
-// publications, updates the kid-indexed registry, and completes startup priming
-// after observing a current publication for every local kid. One worker
-// serializes the initial local publication and subsequent lease refreshes.
-// Readiness requires an open connection, an active subscription, completed
-// priming, and active local leases. Close cancels the worker and stops Paho's
-// automatic reconnect loop.
+// keySync owns one replica's MQTT client and publication worker. Close stops both.
 type keySync struct {
 	client      mqtt.Client
 	stop        context.CancelFunc
@@ -146,6 +138,8 @@ func startKeySync(ctx context.Context, brokerURL, clientID, shardID string, keys
 		AddBroker(brokerURL).
 		SetClientID(clientID).
 		SetConnectTimeout(mqttOperationTimeout).
+		SetConnectRetry(true).
+		SetConnectRetryInterval(mqttConnectRetry).
 		SetMaxReconnectInterval(5 * time.Second).
 		SetOrderMatters(true)
 	provider, err := oauth.credentialsProvider(syncContext)
@@ -163,17 +157,15 @@ func startKeySync(ctx context.Context, brokerURL, clientID, shardID string, keys
 	}
 	syncer.client = mqtt.NewClient(opts)
 	go syncer.run(syncContext)
-	if err := waitMQTTToken(syncContext, syncer.client.Connect()); err != nil {
-		syncer.Close()
-		return nil, fmt.Errorf("connect to MQTT broker: %w", err)
-	}
+	syncer.client.Connect()
 
 	return syncer, nil
 }
 
 func (s *keySync) Close() {
 	// Context cancellation stops the worker. Disconnect stops Paho's independent
-	// reconnect loop. Close may be called again while unwinding startup errors.
+	// connection and reconnect loops. Close may be called again while unwinding
+	// startup errors.
 	s.closeOnce.Do(func() {
 		s.stop()
 		if s.client != nil {
@@ -244,7 +236,7 @@ func waitMQTTToken(ctx context.Context, token mqtt.Token) error {
 func (s *keySync) run(ctx context.Context) {
 	// This worker serializes immediate and periodic publication.
 	// Three refresh attempts occur before the previous publication lease expires.
-	refresh := time.NewTicker(s.replication.leaseTTL / 4)
+	refresh := time.NewTicker(max(s.replication.leaseTTL/4, time.Nanosecond))
 	defer refresh.Stop()
 	for {
 		select {
@@ -306,7 +298,7 @@ func (s *keySync) isCacheReady() bool {
 
 func (s *keySync) hasActiveLocalLeases() bool {
 	for _, key := range s.replication.local {
-		if s.replication.registry.byKID.Get(key.KeyID) == nil {
+		if !s.replication.registry.contains(key.KeyID) {
 			return false
 		}
 	}
@@ -374,13 +366,12 @@ func parseKeyTopic(topic string) (string, bool) {
 }
 
 func validateShardID(shardID string) error {
-	if shardID == "" {
+	if !validTopicSegment(shardID) {
 		return fmt.Errorf("invalid shard ID %q", shardID)
 	}
-	for _, char := range shardID {
-		if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') && (char < '0' || char > '9') && !strings.ContainsRune("._:-", char) {
-			return fmt.Errorf("invalid shard ID %q", shardID)
-		}
-	}
 	return nil
+}
+
+func validTopicSegment(value string) bool {
+	return value != "" && !strings.ContainsAny(value, "/+#")
 }

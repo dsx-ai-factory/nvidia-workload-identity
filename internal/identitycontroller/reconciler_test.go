@@ -19,11 +19,70 @@ import (
 )
 
 var testConfig = Config{
-	TrustDomain:          "k2.sjc-1.nvidia.com",
-	OperatorTenant:       "nca-0000000000000001",
-	ClassName:            "dsx-identity-dsx-identity",
-	DPUHolderNamespace:   "dsx-identity",
-	DPUHolderServiceAcct: "dpu-token-fetcher",
+	TrustDomain:              "k2.sjc-1.nvidia.com",
+	OperatorTenant:           "operator-1",
+	ClassName:                "dsx-identity-dsx-identity",
+	DPUTokenFetcherSelectors: []string{"unix:uid:1000", "unix:path:/usr/local/bin/dsx-token-fetcher"},
+	DPUMetadataSelectors:     []string{"k8s:ns:dsx-imds", "k8s:sa:metadata-service"},
+}
+
+func TestConfigRejectsInvalidDPUTokenFetcherSelectors(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name      string
+		selectors []string
+		want      string
+	}{
+		{name: "missing", want: "at least one DPU token fetcher selector is required"},
+		{name: "empty", selectors: []string{""}, want: "DPU token fetcher selector must not be empty"},
+		{name: "Kubernetes", selectors: []string{"k8s:sa:metadata-service"}, want: "must use the Unix WorkloadAttestor"},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			config := testConfig
+			config.DPUTokenFetcherSelectors = test.selectors
+			if err := config.Validate(); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Validate() error = %v, want containing %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestConfigRejectsInvalidDPUHostConfiguration(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name      string
+		configure func(*Config)
+		want      string
+	}{
+		{
+			name: "missing metadata selector",
+			configure: func(config *Config) {
+				config.DPUMetadataSelectors = nil
+			},
+			want: "at least one DPU metadata selector is required",
+		},
+		{
+			name: "empty metadata selector",
+			configure: func(config *Config) {
+				config.DPUMetadataSelectors = []string{""}
+			},
+			want: "DPU metadata selector must not be empty",
+		},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			config := testConfig
+			test.configure(&config)
+			if err := config.Validate(); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Validate() error = %v, want containing %q", err, test.want)
+			}
+		})
+	}
 }
 
 func TestDPUReconcileCreatesBaseIdentityAndCleansUp(t *testing.T) {
@@ -54,10 +113,10 @@ func TestDPUReconcileCreatesBaseIdentityAndCleansUp(t *testing.T) {
 	}
 	entry := getEntry(t, c, childName(dpu))
 	assertEntry(t, entry,
-		"spiffe://k2.sjc-1.nvidia.com/tenant/nca-0000000000000001/service/dsx/dpu/dpu-1",
+		"spiffe://k2.sjc-1.nvidia.com/tenant/operator-1/service/dsx/dpu/dpu-1",
 		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dsx_dpu/dpu-1",
 		"dsx-dpu",
-		[]string{"k8s:ns:dsx-identity", "k8s:sa:dpu-token-fetcher"},
+		[]string{"unix:uid:1000", "unix:path:/usr/local/bin/dsx-token-fetcher"},
 	)
 	if len(entry.OwnerReferences) != 0 {
 		t.Fatal("cluster-scoped entry must not have an owner reference")
@@ -80,10 +139,10 @@ func TestDPUReconcileCreatesBaseIdentityAndCleansUp(t *testing.T) {
 	}
 	entry = getEntry(t, c, childName(dpu))
 	assertEntry(t, entry,
-		"spiffe://k2.sjc-1.nvidia.com/tenant/nca-0000000000000001/service/dsx/dpu/dpu-1",
+		"spiffe://k2.sjc-1.nvidia.com/tenant/operator-1/service/dsx/dpu/dpu-1",
 		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dsx_dpu/dpu-1",
 		"dsx-dpu",
-		[]string{"k8s:ns:dsx-identity", "k8s:sa:dpu-token-fetcher"},
+		[]string{"unix:uid:1000", "unix:path:/usr/local/bin/dsx-token-fetcher"},
 	)
 	assertApplyCalls(t, c, 2)
 
@@ -113,11 +172,10 @@ func TestLaunchLayerSourceReconcileLifecycle(t *testing.T) {
 
 	ctx := context.Background()
 	host := newLaunchLayerSource("host-source", "tenant-system", "7ae7fe75-e671-4b0e-a76d-ef02bb5b040b", map[string]any{
-		"type": "host", "tenantID": "nca-0000000000000001", "resourceID": "host-1", "parentID": "dpu-1",
-		"holder": map[string]any{"namespace": "dsx-imds", "serviceAccount": "metadata-service", "podUID": "fdc40cdd-190b-4b26-870f-a95d36604381"},
+		"type": "host", "tenantID": "tenant-2", "resourceID": "host-1", "parentID": "dpu-1",
 	})
 	vm := newLaunchLayerSource("vm-source", "tenant-system", "e35e41ae-a112-4f64-8841-298c2a6662b0", map[string]any{
-		"type": "vm", "tenantID": "nca-0000000000000002", "resourceID": "vm-1", "role": "database", "parentID": "host-1", "parentTenantID": "nca-0000000000000001",
+		"type": "vm", "tenantID": "tenant-2", "resourceID": "vm-1", "role": "database", "parentID": "host-1",
 		"holder": map[string]any{"namespace": "tenant-vms", "serviceAccount": "vm-metadata"},
 	})
 	recorder := record.NewFakeRecorder(8)
@@ -144,15 +202,15 @@ func TestLaunchLayerSourceReconcileLifecycle(t *testing.T) {
 
 	hostEntry := getEntry(t, c, childName(host))
 	assertEntry(t, hostEntry,
-		"spiffe://k2.sjc-1.nvidia.com/tenant/nca-0000000000000001/service/dsx/host/host-1",
+		"spiffe://k2.sjc-1.nvidia.com/tenant/tenant-2/service/dsx/host/host-1",
 		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dsx_dpu/dpu-1",
 		"dsx-imds",
-		[]string{"k8s:ns:dsx-imds", "k8s:sa:metadata-service", "k8s:pod-uid:fdc40cdd-190b-4b26-870f-a95d36604381"},
+		[]string{"k8s:ns:dsx-imds", "k8s:sa:metadata-service"},
 	)
 	vmEntry := getEntry(t, c, childName(vm))
 	assertEntry(t, vmEntry,
-		"spiffe://k2.sjc-1.nvidia.com/tenant/nca-0000000000000002/service/dsx/vm/vm-1/role/database",
-		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dsx_imds/tenant/nca-0000000000000001/host/host-1",
+		"spiffe://k2.sjc-1.nvidia.com/tenant/tenant-2/service/dsx/vm/vm-1/role/database",
+		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dsx_imds/tenant/operator-1/host/host-1",
 		"dsx-imds-vm",
 		[]string{"k8s:ns:tenant-vms", "k8s:sa:vm-metadata"},
 	)
@@ -163,6 +221,11 @@ func TestLaunchLayerSourceReconcileLifecycle(t *testing.T) {
 	setSourceSpecField(t, invalidRole, "role", "BadRole")
 	if _, err := r.desiredEntry(invalidRole); err == nil {
 		t.Fatal("expected invalid role to be rejected")
+	}
+	invalidHostRole := host.DeepCopy()
+	setSourceSpecField(t, invalidHostRole, "role", "database")
+	if _, err := r.desiredEntry(invalidHostRole); err == nil || !strings.Contains(err.Error(), "role is only valid for VM") {
+		t.Fatalf("host role error = %v, want VM-only role error", err)
 	}
 
 	hostEntry.Spec.ParentID = "spiffe://drift.invalid/spire/agent/wrong"
@@ -178,10 +241,10 @@ func TestLaunchLayerSourceReconcileLifecycle(t *testing.T) {
 	}
 	hostEntry = getEntry(t, c, hostEntry.Name)
 	assertEntry(t, hostEntry,
-		"spiffe://k2.sjc-1.nvidia.com/tenant/nca-0000000000000001/service/dsx/host/host-1",
+		"spiffe://k2.sjc-1.nvidia.com/tenant/tenant-2/service/dsx/host/host-1",
 		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dsx_dpu/dpu-1",
 		"dsx-imds",
-		[]string{"k8s:ns:dsx-imds", "k8s:sa:metadata-service", "k8s:pod-uid:fdc40cdd-190b-4b26-870f-a95d36604381"},
+		[]string{"k8s:ns:dsx-imds", "k8s:sa:metadata-service"},
 	)
 	assertApplyCalls(t, c, 3)
 
@@ -190,7 +253,7 @@ func TestLaunchLayerSourceReconcileLifecycle(t *testing.T) {
 	if err := c.Get(ctx, hostRequest.NamespacedName, updated); err != nil {
 		t.Fatal(err)
 	}
-	setSourceSpecField(t, updated, "tenantID", "nca-0000000000000003")
+	setSourceSpecField(t, updated, "tenantID", "tenant-3")
 	setSourceSpecField(t, updated, "resourceID", "host-2")
 	setSourceSpecField(t, updated, "parentID", "dpu-2")
 	if err := c.Update(ctx, updated); err != nil {
@@ -200,17 +263,17 @@ func TestLaunchLayerSourceReconcileLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertEntry(t, getEntry(t, c, hostEntry.Name),
-		"spiffe://k2.sjc-1.nvidia.com/tenant/nca-0000000000000003/service/dsx/host/host-2",
+		"spiffe://k2.sjc-1.nvidia.com/tenant/tenant-3/service/dsx/host/host-2",
 		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dsx_dpu/dpu-2",
 		"dsx-imds",
-		[]string{"k8s:ns:dsx-imds", "k8s:sa:metadata-service", "k8s:pod-uid:fdc40cdd-190b-4b26-870f-a95d36604381"},
+		[]string{"k8s:ns:dsx-imds", "k8s:sa:metadata-service"},
 	)
 	assertApplyCalls(t, c, 4)
 
 	if err := c.Get(ctx, hostRequest.NamespacedName, updated); err != nil {
 		t.Fatal(err)
 	}
-	setSourceSpecField(t, updated, "holder", map[string]any{"namespace": "dsx-imds", "serviceAccount": "metadata-service", "podUID": "not-a-uuid"})
+	setSourceSpecField(t, updated, "holder", map[string]any{"namespace": "dsx-imds", "serviceAccount": "metadata-service"})
 	if err := c.Update(ctx, updated); err != nil {
 		t.Fatal(err)
 	}
@@ -252,6 +315,60 @@ func TestLaunchLayerSourceReconcileLifecycle(t *testing.T) {
 	}
 }
 
+func TestLaunchLayerConflictsRecoverAfterSourceCorrection(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	vmA := newLaunchLayerSource("vm-a", "tenant-system", "3f94f124-72cd-467b-9b83-b5f536a8620d", map[string]any{
+		"type": "vm", "tenantID": "tenant-2", "resourceID": "vm-a", "parentID": "worker-1",
+		"holder": map[string]any{"namespace": "tenant-vms", "serviceAccount": "vm-metadata"},
+	})
+	vmB := newLaunchLayerSource("vm-b", "tenant-system", "db1f2eb8-7ec4-4a72-af0e-089f8d6dc427", map[string]any{
+		"type": "vm", "tenantID": "tenant-2", "resourceID": "vm-b", "parentID": "worker-1",
+		"holder": map[string]any{"namespace": "tenant-vms", "serviceAccount": "vm-metadata", "podUID": "1e605955-c4b7-4090-b12a-8fcf3b9f334d"},
+	})
+	vmC := newLaunchLayerSource("vm-c", "tenant-system", "93fc5f2d-5ba2-4f77-a67c-c8ac260cd70a", map[string]any{
+		"type": "vm", "tenantID": "tenant-2", "resourceID": "vm-b", "parentID": "worker-1",
+		"holder": map[string]any{"namespace": "tenant-vms", "serviceAccount": "vm-metadata-c"},
+	})
+	c := &applyClient{Client: fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(vmA, vmB, vmC).Build()}
+	r := &LaunchLayerReconciler{Client: c, Config: testConfig, Recorder: record.NewFakeRecorder(8)}
+	requestA := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(vmA)}
+	requestB := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(vmB)}
+	requestC := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(vmC)}
+
+	if _, err := r.Reconcile(ctx, requestA); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Reconcile(ctx, requestB); err == nil || !strings.Contains(err.Error(), "holder selectors overlap") {
+		t.Fatalf("overlapping holder error = %v", err)
+	}
+	if err := c.Get(ctx, client.ObjectKey{Name: childName(vmB)}, &spirev1alpha1.ClusterStaticEntry{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("conflicting holder entry exists: %v", err)
+	}
+
+	updateSourceField(t, ctx, c, requestB.NamespacedName, "holder", map[string]any{
+		"namespace": "tenant-vms", "serviceAccount": "vm-metadata-b",
+	})
+	if _, err := r.Reconcile(ctx, requestB); err != nil {
+		t.Fatalf("holder conflict did not recover: %v", err)
+	}
+	getEntry(t, c, childName(vmB))
+
+	if _, err := r.Reconcile(ctx, requestC); err == nil || !strings.Contains(err.Error(), "SPIFFE ID") {
+		t.Fatalf("duplicate SPIFFE ID error = %v", err)
+	}
+	if err := c.Get(ctx, client.ObjectKey{Name: childName(vmC)}, &spirev1alpha1.ClusterStaticEntry{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("duplicate SPIFFE ID entry exists: %v", err)
+	}
+
+	updateSourceField(t, ctx, c, requestC.NamespacedName, "resourceID", "vm-c")
+	if _, err := r.Reconcile(ctx, requestC); err != nil {
+		t.Fatalf("SPIFFE ID conflict did not recover: %v", err)
+	}
+	getEntry(t, c, childName(vmC))
+}
+
 func testScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	scheme := runtime.NewScheme()
@@ -273,6 +390,19 @@ func newLaunchLayerSource(name, namespace, uid string, spec map[string]any) *uns
 func setSourceSpecField(t *testing.T, source *unstructured.Unstructured, name string, value any) {
 	t.Helper()
 	if err := unstructured.SetNestedField(source.Object, value, "spec", name); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func updateSourceField(t *testing.T, ctx context.Context, c client.Client, key client.ObjectKey, name string, value any) {
+	t.Helper()
+	source := &unstructured.Unstructured{}
+	source.SetGroupVersionKind(LaunchLayerSourceGVK)
+	if err := c.Get(ctx, key, source); err != nil {
+		t.Fatal(err)
+	}
+	setSourceSpecField(t, source, name, value)
+	if err := c.Update(ctx, source); err != nil {
 		t.Fatal(err)
 	}
 }

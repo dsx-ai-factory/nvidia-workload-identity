@@ -1,0 +1,12 @@
+# E2E uses k8s_psat at the external dsx_dpu boundary.
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: e2e-operator-host-bootstrap
+spec:
+  className: dsx-identity-dsx-identity
+  hint: dsx-imds
+  spiffeIDTemplate: spiffe://{{ .TrustDomain }}/tenant/operator-1/service/dsx/host/k2-worker
+  podSelector:
+    matchLabels:
+      identity.dsx.nvidia.com/operator-host-imds: e2e
