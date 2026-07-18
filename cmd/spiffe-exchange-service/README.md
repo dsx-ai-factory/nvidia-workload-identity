@@ -13,7 +13,31 @@ Each Exchange publishes only its local public keys to the shared Event Bus and
 subscribes to all shard key publications. It retains one aggregate keyed by
 globally unique `kid`, and its JWKS endpoint serves every valid local and remote
 public key. Initial and later Event Bus connection failures leave Exchange live
-but not ready while it reconnects.
+but not ready while it reconnects. Exchanges in the same Event Bus topic space
+converge on the same aggregate, so relying parties can use the JWKS from any
+reachable Exchange.
+
+## Flat key distribution
+
+Every Exchange publishes only its local public keys and consumes every valid
+publication in the Event Bus topic space. Signing keys remain local to their
+shard, while every Exchange serves the same aggregate JWKS.
+
+```mermaid
+flowchart TB
+  RP["External relying party"]
+  E1["Exchange Deployment<br/>shard-a"]
+  E2["Exchange Deployment<br/>shard-b"]
+  E3["Exchange Deployment<br/>shard-c"]
+  BUS["External DSX Event Bus<br/>one retained key topic space"]
+
+  RP -->|"one aggregate JWKS"| E2
+  E1 <-->|"local keys out, all public keys in"| BUS
+  E2 <-->|"local keys out, all public keys in"| BUS
+  E3 <-->|"local keys out, all public keys in"| BUS
+```
+
+The local E2E fixture uses two Exchanges in the same topic space:
 
 ```mermaid
 flowchart LR
@@ -31,16 +55,23 @@ lease expiry and are refreshed every quarter of the configured lease lifetime,
 leaving three further publish opportunities before lease expiry. Each valid
 publication replaces the globally unique `kid` it addresses. The process
 obtains MQTT credentials from the configured OAuth2 client-credentials
-endpoint.
+endpoint. Those credentials are restricted to `spiffe-exchange.>` publish and
+subscribe access.
 
 The retained JSON payload contains `published_at`, `lease_expires_at`, and one
 public `jwk`. The topic supplies the shard ID and `kid`, and the payload JWK
 must carry that same `kid`. Private, malformed, unsupported, and expired keys
 do not replace a valid aggregate entry.
 
-The identity chart deploys two replicas per shard through
+The identity chart deploys two active replicas per shard through
 `charts/dsx-identity/templates/exchange-deployment.yaml`, with a unique MQTT
-client ID for each Pod.
+client ID for each Pod. Both replicas load the same shard-local static private
+keyset. Only public keys are published, so private signing keys never leave the
+shard.
+
+Rotation introduces a new globally unique `kid`. New replicas publish that key,
+while replaced replicas stop refreshing the previous key. The previous public
+key remains in aggregate JWKS responses until its publication lease expires.
 
 ## HTTP API
 
@@ -51,6 +82,9 @@ client ID for each Pod.
 | `GET /.well-known/openid-configuration` | Issuer, JWKS URL, and aggregate signing algorithms |
 | `GET /live` | Process liveness |
 | `GET /ready` | MQTT connection, subscription, and public-key cache readiness |
+
+The exchange endpoint is intentionally unauthenticated because the submitted
+local SPIRE JWT-SVID is the credential being exchanged.
 
 The exchange form requires `grant_type`, `subject_token`, and
 `subject_token_type`. It accepts the optional `requested_token_type`, caps

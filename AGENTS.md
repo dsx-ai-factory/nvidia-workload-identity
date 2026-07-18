@@ -151,6 +151,7 @@ spiffe://<operator-tenant>.ds9.dsx.nvid.id/host/<id>/pod/<uuid>
 - Shared chart settings must apply to every in-scope component. Do not describe a setting as global or shared when a component hard-codes an exception.
 - Comment non-obvious Helm value precedence, conditional rendering, and cross-resource contracts next to the relevant value or template. Explain why the structure exists without narrating YAML syntax.
 - Keep README prose focused on architecture and operator intent. Put concrete configuration keys and values in concise YAML examples, not prose. Omit ports and implementation details unless they are part of an external contract.
+- Do not use meta-documentation such as "this README records" or "this section documents." State the concrete behavior, constraint, or relationship instead. Use descriptive links without narrating that the linked file contains documentation.
 - Preserve useful README diagrams and runnable examples when shortening prose. Do not replace concrete operator guidance with vague summaries.
 - Write the README for readers who understand SPIFFE and Kubernetes but have no prior DSX Identity context. Introduce DSX-specific components and trust paths before their configuration.
 - Describe the real deployed architecture first in all documentation. Keep Kind clusters, k1 and k2 fixture names, E2E-only components, and local workarounds in explicit local E2E sections after the deployed architecture and contracts.
