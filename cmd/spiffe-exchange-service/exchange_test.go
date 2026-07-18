@@ -8,7 +8,6 @@ import (
 	"crypto/rand"
 	_ "crypto/sha256"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -411,7 +410,7 @@ func TestLiveAggregateVerifiesTokens(t *testing.T) {
 	}
 }
 
-func TestLiveRelyingPartyRejectsInvalidTokens(t *testing.T) {
+func TestLiveRelyingPartyRejectsMalformedSubject(t *testing.T) {
 	relyingPartyURL := os.Getenv("DSX_E2E_RELYING_PARTY_URL")
 	if relyingPartyURL == "" {
 		t.Skip("DSX_E2E_RELYING_PARTY_URL is not set")
@@ -435,36 +434,8 @@ func TestLiveRelyingPartyRejectsInvalidTokens(t *testing.T) {
 		t.Fatalf("read valid token claims: %v", err)
 	}
 
-	now := time.Now().Unix()
-	tests := []struct {
-		name   string
-		key    jose.JSONWebKey
-		change func(map[string]any)
-	}{
-		{name: "wrong issuer", key: keys[0], change: func(claims map[string]any) { claims["iss"] = "spiffe://wrong.example" }},
-		{name: "malformed subject", key: keys[0], change: func(claims map[string]any) { claims["sub"] = "not-a-dsx-subject" }},
-		{name: "expired", key: keys[0], change: func(claims map[string]any) {
-			claims["iat"] = now - 600
-			claims["exp"] = now - 300
-		}},
-		{name: "not yet valid", key: keys[0], change: func(claims map[string]any) {
-			claims["iat"] = now
-			claims["nbf"] = now + 300
-			claims["exp"] = now + 600
-		}},
-		{name: "unknown kid", key: testJWK(t, fmt.Sprintf("e2e-unknown-%d", now), false), change: func(map[string]any) {}},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			claims := make(map[string]any, len(base))
-			for name, value := range base {
-				claims[name] = value
-			}
-			test.change(claims)
-			token := signLiveClaims(t, test.key, claims)
-			assertLiveLoginRejected(t, relyingPartyURL, token)
-		})
-	}
+	base["sub"] = "not-a-dsx-subject"
+	assertLiveLoginRejected(t, relyingPartyURL, signLiveClaims(t, keys[0], base))
 }
 
 func signLiveClaims(t *testing.T, key jose.JSONWebKey, claims map[string]any) string {

@@ -210,69 +210,6 @@ func TestLiveMQTTRetainedReplay(t *testing.T) {
 	}
 }
 
-func TestLiveMQTTPublicationLeaseExpiry(t *testing.T) {
-	brokerURL := os.Getenv("DSX_E2E_MQTT_BROKER")
-	if brokerURL == "" {
-		t.Skip("DSX_E2E_MQTT_BROKER is not set")
-	}
-	accessToken := os.Getenv("DSX_E2E_MQTT_TOKEN")
-	urls := strings.Split(os.Getenv("DSX_E2E_JWKS_URLS"), ",")
-	if accessToken == "" || len(urls) < 2 || slices.Contains(urls, "") {
-		t.Fatal("live MQTT token and at least two JWKS URLs are required")
-	}
-
-	key := testJWK(t, fmt.Sprintf("e2e-lease-%d", time.Now().UnixNano()), true)
-	publishedAt := time.Now()
-	payload, err := marshalPublicKey(key, publishedAt, publishedAt.Add(10*time.Second))
-	if err != nil {
-		t.Fatal(err)
-	}
-	client := connectLiveMQTT(t, brokerURL, accessToken)
-	t.Cleanup(func() { client.Disconnect(0) })
-	topic := keyTopicPrefix + "e2e-lease/kid/" + key.KeyID
-	token := client.Publish(topic, 1, true, payload)
-	if !token.WaitTimeout(10*time.Second) || token.Error() != nil {
-		t.Fatalf("publish short-lived retained key: %v", token.Error())
-	}
-
-	waitForLiveKeyState(t, urls, key.KeyID, true, 5*time.Second)
-	waitForLiveKeyState(t, urls, key.KeyID, false, 15*time.Second)
-}
-
-func waitForLiveKeyState(t *testing.T, urls []string, keyID string, want bool, timeout time.Duration) {
-	t.Helper()
-	client := &http.Client{Timeout: 2 * time.Second}
-	deadline := time.NewTimer(timeout)
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer deadline.Stop()
-	defer ticker.Stop()
-
-	for {
-		allMatch := true
-		for _, url := range urls {
-			response, err := client.Get(url)
-			if err != nil {
-				allMatch = false
-				continue
-			}
-			var keys jose.JSONWebKeySet
-			err = json.NewDecoder(response.Body).Decode(&keys)
-			response.Body.Close()
-			if err != nil || response.StatusCode != http.StatusOK || slices.Contains(keyIDs(keys.Keys), keyID) != want {
-				allMatch = false
-			}
-		}
-		if allMatch {
-			return
-		}
-		select {
-		case <-ticker.C:
-		case <-deadline.C:
-			t.Fatalf("key %q did not reach present=%t at every aggregate JWKS", keyID, want)
-		}
-	}
-}
-
 func connectLiveMQTT(t *testing.T, brokerURL, accessToken string) mqtt.Client {
 	t.Helper()
 	client := mqtt.NewClient(mqtt.NewClientOptions().

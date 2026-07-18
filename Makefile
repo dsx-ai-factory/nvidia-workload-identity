@@ -1,7 +1,7 @@
 # DSX identity Makefile
 
 .PHONY: preflight local-registry
-.PHONY: help install clean test status
+.PHONY: help install clean test test-k2-identity test-cross-shard status
 .PHONY: k1-cluster k2-cluster
 .PHONY: validate test-go test-shell test-helm
 
@@ -65,7 +65,12 @@ clean: ## Clean up: Remove both Kind clusters
 	@echo "Cleanup complete"
 
 test: ## Run the complete integration test sequence
+	@$(MAKE) --no-print-directory -j2 test-k2-identity test-cross-shard
+
+test-k2-identity:
 	@$(MISE_EXEC) ./scripts/k2/verify-identity.sh
+
+test-cross-shard:
 	@$(MISE_EXEC) ./scripts/verify-e2e.sh
 
 status: ## Show status of all components
