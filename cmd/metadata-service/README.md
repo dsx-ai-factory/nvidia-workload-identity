@@ -3,7 +3,8 @@
 `metadata-service` implements DSX IMDS. It serves DSX identity through the
 link-local IMDS v1 API, selects a local SPIRE JWT-SVID by hint, exchanges it,
 and returns the DSX JWT. KubeVirt uses Exchange Proxy CSI. Paired-DPU placement
-uses a direct URL to its reachable shard-local Exchange.
+uses a direct URL to its reachable shard-local Exchange. Each process configures
+exactly one `--exchange-service-url`, whose scheme selects the transport.
 
 ```mermaid
 sequenceDiagram
@@ -26,6 +27,67 @@ intercept and NICo or Carbide IMDS passthrough, and serves the `dsx-imds-vm`
 identity as a KubeVirt sidecar. The identity chart injects that sidecar through
 `charts/dsx-identity/templates/vm-support.yaml`.
 
+For KubeVirt, the guest initiates the metadata request. The operator-owned
+virt-launcher Pod and tenant-facing VM identities use the same operator worker
+host's Workload API. The Pod keeps the configured operator tenant while the VM
+identity uses the tenant supplied by its LaunchLayer source. The exact
+`dsx-imds-vm` hint selects the VM identity. It does not select a separate SPIRE
+agent path. The Kubernetes WorkloadAttestor serves the operator virt-launcher
+Pod identity, SPIFFE CSI exposes the same host agent socket to the sidecar, and
+Exchange Proxy CSI carries the exchange request to the shard-local Exchange.
+
+## VM identity trust path
+
+The VM SPIRE JWT-SVID remains inside the virt-launcher Pod. DSX IMDS exchanges
+it through the proxy and serves only the resulting DSX JWT to the VM.
+
+```mermaid
+flowchart TB
+  HostAgent["Bare-metal host SPIRE agent process"]
+  CSI["SPIFFE CSI node plugin Pod"]
+  VMMetadata["virt-launcher Pod<br/>DSX IMDS (metadata-service) sidecar"]
+  Proxy["Exchange Proxy CSI<br/>node plugin Pod"]
+  Exchange["Shard-local Exchange"]
+  VMJWT["VM SPIRE JWT-SVID"]
+  DSXJWT["VM DSX JWT"]
+  VM["KubeVirt VM"]
+
+  HostAgent -->|"Workload API socket"| CSI
+  CSI -->|"mounted socket"| VMMetadata
+  VMMetadata -->|"fetch from mounted socket"| VMJWT
+  VMJWT -->|"exchange through proxy"| Proxy
+  Proxy --> Exchange
+  Exchange --> DSXJWT
+  VM -->|"IMDS request"| VMMetadata
+  DSXJWT -->|"served through IMDS"| VM
+```
+
+## VM IMDS request path
+
+The guest supplies the metadata header. The exact `dsx-imds-vm` hint selects
+the VM SPIRE JWT-SVID before the proxy carries the exchange request.
+
+```mermaid
+flowchart TB
+  HostAgent["Bare-metal host SPIRE agent process"]
+  CSI["Host-provisioned SPIFFE CSI<br/>node plugin Pod"]
+  Metadata["virt-launcher Pod<br/>DSX IMDS (metadata-service) sidecar"]
+  Proxy["Exchange Proxy CSI<br/>node plugin Pod"]
+  Exchange["Shard-local Exchange Deployment"]
+  VMJWT["VM SPIRE JWT-SVID"]
+  DSXJWT["VM DSX JWT"]
+  VM["KubeVirt VM guest"]
+
+  HostAgent -->|"Workload API socket"| CSI
+  CSI -->|"mounted socket"| Metadata
+  VM -->|"IMDS request<br/>Metadata: true"| Metadata
+  Metadata -->|"fetch dsx-imds-vm hinted SVID"| VMJWT
+  VMJWT -->|"exchange through proxy"| Proxy
+  Proxy --> Exchange
+  Exchange --> DSXJWT
+  DSXJWT -->|"served through IMDS"| VM
+```
+
 ## HTTP API
 
 The supported identity endpoints are:
@@ -33,6 +95,12 @@ The supported identity endpoints are:
 ```text
 GET /latest/meta-data/identity?aud=<audience>
 GET /2009-04-04/meta-data/identity?aud=<audience>
+```
+
+```http
+GET /latest/meta-data/identity?aud=<audience>
+Metadata: true
+Accept: application/json
 ```
 
 Requests require `Metadata: true`, reject proxy forwarding headers, and may
