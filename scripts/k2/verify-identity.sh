@@ -291,7 +291,9 @@ verify_openbao_access() {
 
     local request response client_token path expected status
     request=$(jq -cn --arg role basic-spiffe --arg jwt "${VM_TOKEN}" '{role: $role, jwt: $jwt}')
-    response=$(openbao_curl -fsS -X POST -H 'Content-Type: application/json' \
+    response=$(openbao_curl -fsS --retry 30 --retry-all-errors --retry-connrefused \
+        --retry-delay 1 --retry-max-time 30 \
+        -X POST -H 'Content-Type: application/json' \
         -d "${request}" "${OPENBAO_URL}/v1/auth/jwt/cel/login") || return 1
     if ! jq -e '
         ((.auth.policies - ["default"]) | sort) ==

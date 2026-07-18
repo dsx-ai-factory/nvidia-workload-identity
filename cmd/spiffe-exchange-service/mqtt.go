@@ -62,6 +62,22 @@ type mqttOAuthConfig struct {
 	clientSecretFile string
 }
 
+type mqttOAuthTokenSource struct {
+	ctx              context.Context
+	config           clientcredentials.Config
+	clientSecretFile string
+}
+
+func (s mqttOAuthTokenSource) Token() (*oauth2.Token, error) {
+	secret, err := readClientSecret(s.clientSecretFile)
+	if err != nil {
+		return nil, err
+	}
+	config := s.config
+	config.ClientSecret = secret
+	return config.Token(s.ctx)
+}
+
 func newKeyCachePriming(keys []jose.JSONWebKey) keyCachePriming {
 	unobservedLocalKIDs := make(map[string]struct{}, len(keys))
 	for _, key := range keys {
@@ -191,16 +207,15 @@ func (c mqttOAuthConfig) credentialsProvider(ctx context.Context) (mqtt.Credenti
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
 		Timeout:   10 * time.Second,
 	})
+	// Reuse valid tokens, but reread the mounted secret when a refresh is required.
+	tokens := oauth2.ReuseTokenSource(nil, mqttOAuthTokenSource{
+		ctx:              tokenContext,
+		config:           config,
+		clientSecretFile: c.clientSecretFile,
+	})
 	// DSX auth-callout expects username "oauthtoken" and the access token as the MQTT password.
 	return func() (string, string) {
-		secret, err := readClientSecret(c.clientSecretFile)
-		if err != nil {
-			slog.Error("Failed to read MQTT OAuth2 client secret", "error", err)
-			return "oauthtoken", ""
-		}
-		request := config
-		request.ClientSecret = secret
-		token, err := request.Token(tokenContext)
+		token, err := tokens.Token()
 		if err != nil {
 			slog.Error("Failed to obtain MQTT OAuth2 token", "error", err)
 			// An empty password makes the broker reject this connection attempt.
