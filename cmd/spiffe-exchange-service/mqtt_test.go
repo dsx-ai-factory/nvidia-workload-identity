@@ -566,12 +566,48 @@ func TestMQTTOAuthCredentialsProvider(t *testing.T) {
 	if username != "oauthtoken" || password != "access-token-1" || <-clientSecrets != "secret" {
 		t.Fatalf("credentials = %q/%q", username, password)
 	}
-	if err := os.WriteFile(secretFile, []byte("rotated"), 0o600); err != nil {
+	if err := os.WriteFile(secretFile, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	username, password = provider()
-	if username != "oauthtoken" || password != "access-token-2" || <-clientSecrets != "rotated" || requests.Load() != 2 {
-		t.Fatalf("rotated credentials = %q/%q", username, password)
+	if username != "oauthtoken" || password != "access-token-1" || requests.Load() != 1 {
+		t.Fatalf("cached credentials = %q/%q, requests = %d", username, password, requests.Load())
+	}
+}
+
+func TestMQTTOAuthCredentialsProviderRefreshesExpiredToken(t *testing.T) {
+	t.Parallel()
+
+	var requests atomic.Int32
+	clientSecrets := make(chan string, 2)
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, clientSecret, _ := r.BasicAuth()
+		clientSecrets <- clientSecret
+		request := requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"access_token":"access-token-%d","token_type":"Bearer","expires_in":1}`, request)
+	}))
+	t.Cleanup(tokenServer.Close)
+
+	secretFile := filepath.Join(t.TempDir(), "client-secret")
+	if err := os.WriteFile(secretFile, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	provider, err := (mqttOAuthConfig{
+		tokenURL:         tokenServer.URL,
+		clientID:         "exchange",
+		clientSecretFile: secretFile,
+	}).credentialsProvider(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, first := provider()
+	if err := os.WriteFile(secretFile, []byte("rotated"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, second := provider()
+	if first != "access-token-1" || second != "access-token-2" || <-clientSecrets != "secret" || <-clientSecrets != "rotated" || requests.Load() != 2 {
+		t.Fatalf("refreshed credentials = %q/%q, requests = %d", first, second, requests.Load())
 	}
 }
 
