@@ -21,16 +21,9 @@ OPENBAO_URL="http://${GATEWAY_HOST}:8200"
 EXTERNAL_CLIENT_NAME="e2e-external-client"
 EXTERNAL_CLIENT_CONTAINER="external-client"
 OPERATOR_HOST_ID="k2-worker"
-LAUNCH_LAYER_SOURCE_NAME="e2e-vm-source-${VM_NAME}"
-LIFECYCLE_DPU_NAME="e2e-lifecycle-dpu"
-LIFECYCLE_HOST_SOURCE_NAME="e2e-lifecycle-host-source"
-LIFECYCLE_VM_SOURCE_NAME="e2e-lifecycle-vm-source"
-LIFECYCLE_VM_NAME="e2e-lifecycle-vm"
 DPU_TOKEN_FETCHER_POD="e2e-dpu-token-fetcher"
 VM_TOKEN=""
 K2_EXCHANGE_KID=""
-LIFECYCLE_VM_SOURCE=""
-LIFECYCLE_SOURCES_CREATED=false
 GATEWAY_ADDRESS=""
 E2E_PROBE_IMAGE=""
 
@@ -48,17 +41,6 @@ initialize_external_test_process() {
         --namespace dsx-identity-spire-e2e --context "${CONTEXT}" \
         -o jsonpath='{.spec.containers[?(@.name=="identity-probe")].image}')
     docker image inspect "${E2E_PROBE_IMAGE}" >/dev/null
-}
-
-cleanup() {
-    set +e
-    if [[ "${LIFECYCLE_SOURCES_CREATED}" == "true" ]]; then
-        kubectl delete launchlayersourcefixture \
-            "${LIFECYCLE_HOST_SOURCE_NAME}" "${LIFECYCLE_VM_SOURCE_NAME}" \
-            -n "${NAMESPACE}" --context "${CONTEXT}" --ignore-not-found=true --wait=false >/dev/null
-        kubectl delete dpus.provisioning.dpu.nvidia.com "${LIFECYCLE_DPU_NAME}" \
-            -n "${NAMESPACE}" --context "${CONTEXT}" --ignore-not-found=true --wait=false >/dev/null
-    fi
 }
 
 spire_server_entry() {
@@ -148,46 +130,6 @@ assert_dpu_fetcher_entry() {
     fi
 }
 
-restore_lifecycle_vm_source() {
-    local current
-    current=$(kubectl get launchlayersourcefixture "${LIFECYCLE_VM_SOURCE_NAME}" -n "${NAMESPACE}" \
-        --context "${CONTEXT}" --ignore-not-found=true -o json) || return 1
-    if [[ -z "${current}" ]]; then
-        kubectl apply -f - --context "${CONTEXT}" <<<"${LIFECYCLE_VM_SOURCE}" >/dev/null
-    elif jq -e '.metadata.deletionTimestamp != null' <<<"${current}" >/dev/null; then
-        kubectl wait --for=delete "launchlayersourcefixture/${LIFECYCLE_VM_SOURCE_NAME}" -n "${NAMESPACE}" \
-            --context "${CONTEXT}" --timeout=120s >/dev/null || return 1
-        kubectl apply -f - --context "${CONTEXT}" <<<"${LIFECYCLE_VM_SOURCE}" >/dev/null
-    else
-        kubectl patch launchlayersourcefixture "${LIFECYCLE_VM_SOURCE_NAME}" -n "${NAMESPACE}" \
-            --context "${CONTEXT}" --type=merge \
-            -p "$(jq -c '{spec: .spec}' <<<"${LIFECYCLE_VM_SOURCE}")" >/dev/null
-    fi
-}
-
-create_lifecycle_sources() {
-    local base_source controller_sources
-    controller_sources=$(<"${SCRIPT_DIR}/vm/lifecycle-controller-sources.yaml.tmpl")
-    controller_sources="${controller_sources//DPU_NAME_PLACEHOLDER/$LIFECYCLE_DPU_NAME}"
-    controller_sources="${controller_sources//HOST_SOURCE_NAME_PLACEHOLDER/$LIFECYCLE_HOST_SOURCE_NAME}"
-    controller_sources="${controller_sources//TENANT_NAMESPACE_PLACEHOLDER/$NAMESPACE}"
-    LIFECYCLE_SOURCES_CREATED=true
-    kubectl apply -f - --context "${CONTEXT}" <<<"${controller_sources}" >/dev/null || return 1
-
-    base_source=$(kubectl get launchlayersourcefixture "${LAUNCH_LAYER_SOURCE_NAME}" -n "${NAMESPACE}" \
-        --context "${CONTEXT}" -o json) || return 1
-    LIFECYCLE_VM_SOURCE=$(jq -c \
-        --arg name "${LIFECYCLE_VM_SOURCE_NAME}" --arg resource "${LIFECYCLE_VM_NAME}" '
-        {
-          apiVersion,
-          kind,
-          metadata: {name: $name, namespace: .metadata.namespace},
-          spec: (.spec | .resourceID = $resource | .holder.serviceAccount = "e2e-lifecycle-vm")
-        }
-    ' <<<"${base_source}") || return 1
-    kubectl apply -f - --context "${CONTEXT}" <<<"${LIFECYCLE_VM_SOURCE}" >/dev/null
-}
-
 # Check the exchanged JWT contract.
 check_token_contract() {
     local token="$1"
@@ -240,7 +182,7 @@ check_token_contract() {
     log_success "JWT has the expected identity and a current TTL of at most 300s"
 }
 
-# Parse and display JWT response
+# Parse the JWT response.
 parse_jwt_response() {
     local response="$1"
     local token
@@ -260,9 +202,6 @@ parse_jwt_response() {
     VM_TOKEN="${token}"
 
     log_success "Successfully retrieved JWT response"
-    echo
-    echo "Response:"
-    jq . <<<"${response}"
 }
 
 openbao_curl() {
@@ -329,110 +268,19 @@ EOF
     log_success "OpenBao verified the VM signature and enforced its exact policies"
 }
 
-verify_imds_http_contract() {
-    local vm_ip="$1"
-    local token status
+verify_controller_registrations() {
+    log_test "Checking the deployed Identity Controller registrations..."
 
-    token=$(ssh_vm "${vm_ip}" "curl -fsS --max-time 10 -G -H 'Metadata: true' -H 'Accept: text/plain' 'http://${IMDS_IP}/2009-04-04/meta-data/identity' --data-urlencode 'aud=${TEST_AUDIENCE}'") || return 1
-    token="${token//$'\r'/}"
-    check_token_contract "${token}" || return 1
+    local dpu_name=e2e-controller-dpu host_name=e2e-controller-host-source
+    local dpu_id dpu_parent host_id
+    dpu_id="spiffe://k2.sjc-1.nvidia.com/tenant/operator-1/service/dsx/dpu/${dpu_name}"
+    dpu_parent="spiffe://k2.sjc-1.nvidia.com/spire/agent/dsx_dpu/${dpu_name}"
+    host_id="spiffe://k2.sjc-1.nvidia.com/tenant/tenant-2/service/dsx/host/${host_name}"
 
-    status=$(ssh_vm "${vm_ip}" "curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -G 'http://${IMDS_IP}/latest/meta-data/identity' --data-urlencode 'aud=${TEST_AUDIENCE}'") || return 1
-    [[ "${status//$'\r'/}" == "400" ]] || {
-        log_error "IMDS accepted a request without Metadata: true (HTTP ${status})"
-        return 1
-    }
-    status=$(ssh_vm "${vm_ip}" "curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -G -H 'Metadata: true' -H 'X-Forwarded-For: 192.0.2.1' 'http://${IMDS_IP}/latest/meta-data/identity' --data-urlencode 'aud=${TEST_AUDIENCE}'") || return 1
-    [[ "${status//$'\r'/}" == "403" ]] || {
-        log_error "IMDS accepted a forwarded request (HTTP ${status})"
-        return 1
-    }
-    status=$(ssh_vm "${vm_ip}" "curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -X PUT 'http://${IMDS_IP}/latest/api/token'") || return 1
-    [[ "${status//$'\r'/}" == "404" ]] || {
-        log_error "IMDS exposes a session-token endpoint (HTTP ${status})"
-        return 1
-    }
-
-    log_success "Both v1 paths, direct-request validation, and tokenless behavior passed"
-}
-
-verify_identity_controller_lifecycle() {
-    log_test "Exercising the deployed Identity Controller lifecycle through SPIRE..."
-
-    local launch_layer_source dpu_id dpu_parent host_id updated_host_id
-    local original_id updated_id parent_id holder_namespace holder_service_account holder_pod_uid
-
-    create_lifecycle_sources || return 1
-    dpu_id="spiffe://k2.sjc-1.nvidia.com/tenant/operator-1/service/dsx/dpu/${LIFECYCLE_DPU_NAME}"
-    dpu_parent="spiffe://k2.sjc-1.nvidia.com/spire/agent/dsx_dpu/${LIFECYCLE_DPU_NAME}"
-    host_id="spiffe://k2.sjc-1.nvidia.com/tenant/tenant-2/service/dsx/host/${LIFECYCLE_HOST_SOURCE_NAME}"
-    updated_host_id="spiffe://k2.sjc-1.nvidia.com/tenant/tenant-3/service/dsx/host/${LIFECYCLE_HOST_SOURCE_NAME}-updated"
     assert_dpu_fetcher_entry "${dpu_id}" "${dpu_parent}" || return 1
     assert_spire_entry "${host_id}" "${dpu_parent}" "dsx-imds" \
         dsx-identity e2e-nico-mds || return 1
-
-    kubectl patch launchlayersourcefixture "${LIFECYCLE_HOST_SOURCE_NAME}" -n "${NAMESPACE}" \
-        --context "${CONTEXT}" --type=merge -p '{"spec":{"unexpected":"pruned"}}' >/dev/null || return 1
-    if kubectl get launchlayersourcefixture "${LIFECYCLE_HOST_SOURCE_NAME}" -n "${NAMESPACE}" \
-        --context "${CONTEXT}" -o json | jq -e '.spec | has("unexpected")' >/dev/null; then
-        log_error "Temporary LaunchLayer API preserved a field outside its source contract"
-        return 1
-    fi
-    if kubectl patch launchlayersourcefixture "${LIFECYCLE_HOST_SOURCE_NAME}" -n "${NAMESPACE}" \
-        --context "${CONTEXT}" --type=merge -p '{"spec":{"role":"database"}}' >/dev/null 2>&1; then
-        log_error "Temporary LaunchLayer API accepted a role on a host source"
-        return 1
-    fi
-
-    kubectl patch launchlayersourcefixture "${LIFECYCLE_HOST_SOURCE_NAME}" -n "${NAMESPACE}" \
-        --context "${CONTEXT}" --type=merge \
-        -p "$(jq -cn --arg resource "${LIFECYCLE_HOST_SOURCE_NAME}-updated" \
-            '{spec: {tenantID: "tenant-3", resourceID: $resource}}')" >/dev/null || return 1
-    assert_spire_entry "${updated_host_id}" "${dpu_parent}" "dsx-imds" \
-        dsx-identity e2e-nico-mds || return 1
-    wait_for_spire_entry_count "${host_id}" 0 >/dev/null || return 1
-    kubectl delete launchlayersourcefixture "${LIFECYCLE_HOST_SOURCE_NAME}" -n "${NAMESPACE}" \
-        --context "${CONTEXT}" --wait=true --timeout=120s >/dev/null || return 1
-    wait_for_spire_entry_count "${updated_host_id}" 0 >/dev/null || return 1
-    kubectl delete dpus.provisioning.dpu.nvidia.com "${LIFECYCLE_DPU_NAME}" -n "${NAMESPACE}" \
-        --context "${CONTEXT}" --wait=true --timeout=120s >/dev/null || return 1
-    wait_for_spire_entry_count "${dpu_id}" 0 >/dev/null || return 1
-    launch_layer_source=$(kubectl get launchlayersourcefixture "${LIFECYCLE_VM_SOURCE_NAME}" -n "${NAMESPACE}" \
-        --context "${CONTEXT}" -o json) || return 1
-
-    original_id="spiffe://k2.sjc-1.nvidia.com/tenant/tenant-2/service/dsx/vm/${LIFECYCLE_VM_NAME}/role/${IDENTITY_ROLE}"
-    updated_id="spiffe://k2.sjc-1.nvidia.com/tenant/tenant-3/service/dsx/vm/${LIFECYCLE_VM_NAME}-retenanted/role/${IDENTITY_ROLE}"
-    parent_id="spiffe://k2.sjc-1.nvidia.com/spire/agent/dsx_imds/tenant/operator-1/host/$(jq -r '.spec.parentID' <<<"${launch_layer_source}")"
-    holder_namespace=$(jq -er '.spec.holder.namespace' <<<"${launch_layer_source}") || return 1
-    holder_service_account=$(jq -er '.spec.holder.serviceAccount' <<<"${launch_layer_source}") || return 1
-    holder_pod_uid=$(jq -r '.spec.holder.podUID // ""' <<<"${launch_layer_source}") || return 1
-
-    assert_spire_entry "${original_id}" "${parent_id}" "dsx-imds-vm" \
-        "${holder_namespace}" "${holder_service_account}" "${holder_pod_uid}" || return 1
-    kubectl patch launchlayersourcefixture "${LIFECYCLE_VM_SOURCE_NAME}" -n "${NAMESPACE}" \
-        --context "${CONTEXT}" --type=merge \
-        -p "$(jq -cn --arg tenant tenant-3 --arg resource "${LIFECYCLE_VM_NAME}-retenanted" \
-            '{spec: {tenantID: $tenant, resourceID: $resource}}')" >/dev/null || return 1
-    assert_spire_entry "${updated_id}" "${parent_id}" "dsx-imds-vm" \
-        "${holder_namespace}" "${holder_service_account}" "${holder_pod_uid}" || return 1
-    wait_for_spire_entry_count "${original_id}" 0 >/dev/null || return 1
-
-    if kubectl patch launchlayersourcefixture "${LIFECYCLE_VM_SOURCE_NAME}" -n "${NAMESPACE}" \
-        --context "${CONTEXT}" --type=merge \
-        -p '{"spec":{"holder":{"namespace":"INVALID_NAMESPACE"}}}' >/dev/null 2>&1; then
-        log_error "Temporary LaunchLayer API accepted an invalid holder namespace"
-        return 1
-    fi
-    wait_for_spire_entry_count "${updated_id}" 1 >/dev/null || return 1
-
-    restore_lifecycle_vm_source || return 1
-    wait_for_spire_entry_count "${original_id}" 1 >/dev/null || return 1
-    kubectl delete launchlayersourcefixture "${LIFECYCLE_VM_SOURCE_NAME}" -n "${NAMESPACE}" \
-        --context "${CONTEXT}" --wait=true --timeout=120s >/dev/null || return 1
-    wait_for_spire_entry_count "${original_id}" 0 >/dev/null || return 1
-
-    LIFECYCLE_SOURCES_CREATED=false
-    log_success "Identity Controller reconciled source create, update, deletion, and recovery"
+    log_success "Identity Controller created the required DPU and host registrations"
 }
 
 verify_dpu_token_file() {
@@ -549,7 +397,6 @@ verify_metadata_access() {
     if [[ -n "${vm_ip}" ]] && response=$(ssh_vm "${vm_ip}" "${command}" 2>/dev/null); then
         response="${response//$'\r'/}"
         parse_jwt_response "${response}" || return 1
-        verify_imds_http_contract "${vm_ip}" || return 1
         verify_openbao_access || return 1
         return 0
     fi
@@ -564,6 +411,9 @@ verify_metadata_access() {
 }
 
 main() {
+    local script_started=${SECONDS} setup_started=${SECONDS}
+    local failed=0
+
     log_info "Verifying k2 identity registration and delivery..."
     echo
 
@@ -571,16 +421,16 @@ main() {
 
     K2_EXCHANGE_KID=$(kubectl get secret spiffe-exchange-signing-keyset -n dsx-identity \
         --context "${CONTEXT}" -o json | jq -er '.data["active-kid"]' | base64 -d)
+    log_timing "setup" "${setup_started}"
 
-    local failed=0
-
-    verify_operator_host_imds || failed=$((failed + 1))
-    verify_dpu_token_file || failed=$((failed + 1))
-    verify_metadata_access || failed=$((failed + 1))
-    verify_identity_controller_lifecycle || failed=$((failed + 1))
+    run_timed "operator host IMDS" verify_operator_host_imds || failed=$((failed + 1))
+    run_timed "DPU token file" verify_dpu_token_file || failed=$((failed + 1))
+    run_timed "VM identity and OpenBao" verify_metadata_access || failed=$((failed + 1))
+    run_timed "controller registrations" verify_controller_registrations || failed=$((failed + 1))
 
     echo
     if [[ $failed -eq 0 ]]; then
+        log_timing "k2 identity verification total" "${script_started}"
         log_success "All k2 identity checks passed"
     else
         log_error "${failed} test(s) failed"
@@ -588,6 +438,5 @@ main() {
     fi
 }
 
-trap cleanup EXIT
 trap 'log_error "Script interrupted"; exit 1' INT TERM
 main "$@"

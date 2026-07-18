@@ -38,6 +38,24 @@ log_test() {
     echo -e "${PURPLE}[TEST]${NC} $1"
 }
 
+run_timed() {
+    local name="$1" started=${SECONDS} result
+    shift
+
+    if "$@"; then
+        result=0
+    else
+        result=$?
+    fi
+    log_info "Timing: ${name}: $((SECONDS - started))s"
+    return "${result}"
+}
+
+log_timing() {
+    local name="$1" started="$2"
+    log_info "Timing: ${name}: $((SECONDS - started))s"
+}
+
 # Context validation helpers
 # NOTE: Do NOT use kubectl config use-context in scripts!
 # With parallel execution (make -j), scripts share kubeconfig and race.

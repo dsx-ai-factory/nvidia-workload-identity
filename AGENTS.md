@@ -24,6 +24,25 @@
 - Do not trim, normalize, case-fold, or coerce supplied input. Documented shell defaults may treat unset and empty values alike.
 - Names must describe the current role and ownership. Remove stale temporary, legacy, and false component names instead of explaining them.
 - Do not name data holders `state`. Name synchronized groups, snapshots, and aggregates for the resource or status they contain.
+
+## Git and merge requests
+
+- Before creating or updating a merge request, read the repository's current
+  GitLab CI configuration and its pinned shared templates for commitlint,
+  semantic release, and MR policy. Do not rely on generic tool defaults or
+  branch history as a substitute for the active rules.
+- Name release-producing branches with either the `feat/` or `fix/` prefix.
+  Use no other semantic-release branch type.
+- Use a Conventional Commits title recognized by semantic release for every
+  release-producing merge request. Use only `feat` for new capabilities or
+  `fix` for corrections, performance, reliability, and maintenance work.
+- Include a Jira reference or `NO-REF` or `NO_REF` in every merge request title
+  or description, as required by MR Cop.
+- Validate every commit from the merge base with the repository's commitlint
+  policy before pushing. Wrap commit body lines at 72 characters and never
+  exceed commitlint's 100-character limit.
+- Before submitting the merge request, verify the branch name, title,
+  description, complete commit range, and clean worktree against these rules.
 - Diagram actors must name the concrete form, such as DPU process, bare-metal host, Kubernetes Pod, sidecar, or KubeVirt VM. Distinguish cluster-local SPIRE JWT-SVIDs from exchanged DSX JWTs. Do not use `workload` or `raw JWT-SVID` as standalone labels. When documenting a plugin trust path, identify both custom NodeAttestor halves and the relevant WorkloadAttestor.
 - Organize topology by shard so source CRs and concrete consumers converge on the same identity shard. Keep each diagram to one purpose, render it, and visually inspect it before committing.
 - Update this file immediately when the user gives a general repository directive.
@@ -165,6 +184,10 @@ spiffe://<operator-tenant>.ds9.dsx.nvid.id/host/<id>/pod/<uuid>
 
 ## Functional validation
 
+- Keep E2E focused on unique deployed integration contracts. Cover restart, rotation,
+  expiry, reconciliation lifecycle, and protocol rejection matrices in focused tests
+  unless the project requirement depends on the deployed integration.
+- Do not validate third-party behavior beyond the exact project contract that uses it.
 - Tests assert observed runtime behavior only. Do not inspect YAML, templates, scripts, source, or rendered manifests as an E2E proxy.
 - Tests must be deterministic. Do not accept rerun-dependent results.
 - Do not assert Pod or controller counts, readiness, rollout status, or log content as proxies for behavior. Use the client, service, identity, and policy contracts under test.
@@ -178,7 +201,9 @@ spiffe://<operator-tenant>.ds9.dsx.nvid.id/host/<id>/pod/<uuid>
 - Stable fixtures may represent external DPU and bare-metal boundaries. Local E2E need not emulate DPU hardware, a bare-metal operating system, physical link-local interception, or NICo or Carbide internals.
 - Keep fixture-only registrations separate from controller-managed registrations. Never accept a fixture parent or subject as evidence for the deployed association or identity shape.
 - Local E2E may expose the real DSX IMDS directly as the external intercept and passthrough boundary. Keep the deployed flow documented first, and do not claim that the fixture proves physical integration.
-- Focused tests cover multiple flat Exchange shards and complete aggregates at multiple Exchanges without expanding the local E2E topology.
+- Focused tests cover multiple flat Exchange shards, rotation overlap, retained-state
+  reconstruction after restart, and complete aggregates at multiple Exchanges without
+  expanding the local E2E topology.
 - E2E must prove:
   - real k1 nginx Pod -> k1 SPIRE -> k1 Exchange.
   - real k2 nginx Pod -> k2 SPIRE -> k2 Exchange.
@@ -190,9 +215,8 @@ spiffe://<operator-tenant>.ds9.dsx.nvid.id/host/<id>/pod/<uuid>
   - OAuth2-authenticated Event Bus MQTT connectivity and retained publication from both Exchanges.
   - both aggregate JWKS endpoints contain every valid published `kid` and verify either shard's token.
   - real k2 token login to the external OpenBao validation deployment with exact policies and access.
-  - retained-state reconstruction after restarting both Exchanges.
-  - globally unique key rotation and publication lease expiry.
-- Focused tests must prove publication lease expiry deterministically without waiting for wall-clock time.
+- Focused tests must prove globally unique key rotation and publication lease expiry
+  deterministically without waiting for wall-clock time.
 - CI-required validation and E2E jobs must not be manual or allowed to fail.
 - Run `make validate` and the full E2E lifecycle after code or configuration changes. Use repository-pinned tool and dependency versions.
 

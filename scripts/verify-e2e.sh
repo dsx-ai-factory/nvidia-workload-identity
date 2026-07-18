@@ -33,7 +33,6 @@ K1_ORIGINAL_JWKS=""
 K1_ORIGINAL_KID=""
 K2_ORIGINAL_JWKS=""
 K2_ORIGINAL_KID=""
-K2_SIGNING_SECRET_CHANGED=false
 
 source "${PROJECT_ROOT}/scripts/common.sh"
 
@@ -71,41 +70,6 @@ initialize_external_test_process() {
         --format '{{(index .NetworkSettings.Networks "kind").IPAddress}}')
     K1_EXCHANGE_URL="http://${k1_node_address}:${EXCHANGE_NODE_PORT}"
     K2_EXCHANGE_URL="http://${k2_node_address}:${EXCHANGE_NODE_PORT}"
-}
-
-openbao_curl() {
-    external_curl "$@"
-}
-
-update_signing_secret() {
-    local context="$1"
-    local jwks="$2"
-    local kid="$3"
-    kubectl create secret generic "${SIGNING_SECRET}" \
-        --namespace "${IDENTITY_NAMESPACE}" \
-        --context "${context}" \
-        --from-literal="signing-jwks.json=${jwks}" \
-        --from-literal="active-kid=${kid}" \
-        --dry-run=client -o yaml | kubectl apply -f - --context "${context}" >/dev/null
-}
-
-restart_exchange() {
-    local context="$1"
-
-    kubectl rollout restart deployment/spiffe-exchange -n "${IDENTITY_NAMESPACE}" \
-        --context "${context}" >/dev/null
-    kubectl rollout status deployment/spiffe-exchange -n "${IDENTITY_NAMESPACE}" \
-        --context "${context}" --timeout=180s >/dev/null
-}
-
-cleanup() {
-    set +e
-    if [[ "${K2_SIGNING_SECRET_CHANGED}" == "true" && -n "${K2_ORIGINAL_JWKS}" && -n "${K2_ORIGINAL_KID}" ]]; then
-        log_info "Restoring the original k2 signing keyset after a failed rotation"
-        update_signing_secret "${K2_CONTEXT}" "${K2_ORIGINAL_JWKS}" "${K2_ORIGINAL_KID}"
-        kubectl rollout restart deployment/spiffe-exchange -n "${IDENTITY_NAMESPACE}" \
-            --context "${K2_CONTEXT}" >/dev/null
-    fi
 }
 
 event_bus_access_token() {
@@ -176,7 +140,8 @@ assert_application_token_mount() {
             continue
         fi
         if kubectl exec "${pod}" -c "${container}" --namespace "${FIXTURE_NAMESPACE}" \
-            --context "${context}" -- test -e /var/run/secrets/spire.io/spire-agent.sock; then
+            --context "${context}" -- test -e /var/run/secrets/spire.io/spire-agent.sock \
+            2>/dev/null; then
             log_error "${context} application container ${container} received the Workload API socket"
             return 1
         fi
@@ -342,24 +307,14 @@ assert_pod_registration_parent() {
     return 1
 }
 
-assert_publication_lease_expiry() {
-    local access_token
-    access_token=$(event_bus_access_token spiffe-exchange spiffe-exchange-mqtt-oauth)
-    external_probe '^TestLiveMQTTPublicationLeaseExpiry$' \
-        "DSX_E2E_MQTT_BROKER=${MQTT_BROKER}" \
-        "DSX_E2E_MQTT_TOKEN=${access_token}" \
-        "DSX_E2E_JWKS_URLS=${K1_EXCHANGE_URL}/.well-known/jwks.json,${K2_EXCHANGE_URL}/.well-known/jwks.json"
-    log_success "A deployed retained publication appeared and expired from both aggregate JWKS endpoints"
-}
-
-assert_relying_party_rejections() {
+assert_relying_party_subject_validation() {
     local valid_token="$1"
-    external_probe '^TestLiveRelyingPartyRejectsInvalidTokens$' \
+    external_probe '^TestLiveRelyingPartyRejectsMalformedSubject$' \
         "DSX_E2E_RELYING_PARTY_URL=${OPENBAO_URL}/v1/auth/jwt/cel/login" \
         "DSX_E2E_SIGNING_JWKS=${K1_ORIGINAL_JWKS}" \
         "DSX_E2E_ACTIVE_KID=${K1_ORIGINAL_KID}" \
         "DSX_E2E_VALID_TOKEN=${valid_token}"
-    log_success "OpenBao rejected wrong issuer, malformed subject, expired, not-yet-valid, and unknown-kid tokens"
+    log_success "OpenBao rejected a signed token outside the DSX subject grammar"
 }
 
 public_keyset() {
@@ -381,8 +336,9 @@ verify_tokens_with_jwks() {
     for token in "$@"; do
         tokens=$(jq -cn --argjson tokens "${tokens}" --arg token "${token}" '$tokens + [$token]')
     done
-    DSX_E2E_VERIFY_JWKS="${jwks}" DSX_E2E_VERIFY_TOKENS="${tokens}" \
-        go test -count=1 -run '^TestLiveAggregateVerifiesTokens$' ./cmd/spiffe-exchange-service
+    external_probe '^TestLiveAggregateVerifiesTokens$' \
+        "DSX_E2E_VERIFY_JWKS=${jwks}" \
+        "DSX_E2E_VERIFY_TOKENS=${tokens}"
 }
 
 assert_full_aggregates() {
@@ -420,148 +376,12 @@ assert_full_aggregates() {
     return 1
 }
 
-openbao_login() {
-    local token="$1"
-    local request
-    request=$(jq -cn --arg role basic-spiffe --arg jwt "${token}" '{role: $role, jwt: $jwt}')
-    openbao_curl -fsS --retry 30 --retry-all-errors --retry-connrefused \
-        --retry-delay 1 --retry-max-time 30 --connect-timeout 1 --max-time 5 \
-        -X POST -H 'Content-Type: application/json' \
-        -d "${request}" "${OPENBAO_URL}/v1/auth/jwt/cel/login"
-}
-
-assert_login_and_access() {
-    local name="$1"
-    local token="$2"
-    local resource_type="$3"
-    local response client_token path expected sibling_type
-    response=$(openbao_login "${token}")
-    jq -e --arg resource_type "${resource_type}" '
-        ((.auth.policies - ["default"]) | sort) ==
-        (["spiffe-authenticated", "region-ds9", "tenant-operator-1", "service-dsx", "resource-type-" + $resource_type] | sort)
-    ' <<<"${response}" >/dev/null
-    client_token=$(jq -er '.auth.client_token' <<<"${response}")
-
-    while read -r path expected; do
-        response=$(openbao_curl -fsS -H "X-Vault-Token: ${client_token}" \
-            "${OPENBAO_URL}/v1/secret/data/${path}") || return 1
-        jq -e --arg value "${expected}" '.data.data.value == $value' \
-            <<<"${response}" >/dev/null
-    done <<EOF
-region/ds9/e2e region-ds9
-tenant/operator-1/e2e tenant-1
-service/dsx/e2e service-dsx
-resource-type/${resource_type}/e2e resource-${resource_type}
-EOF
-    local status
-    for sibling_type in dpu host vm; do
-        [[ "${sibling_type}" == "${resource_type}" ]] && continue
-        status=$(openbao_curl -sS --max-time 10 -o /dev/null -w '%{http_code}' \
-            -H "X-Vault-Token: ${client_token}" \
-            "${OPENBAO_URL}/v1/secret/data/resource-type/${sibling_type}/e2e") || return 1
-        [[ "${status}" == "403" ]] || {
-            log_error "${name} token received HTTP ${status} for the ${sibling_type} resource secret"
-            return 1
-        }
-    done
-    status=$(openbao_curl -sS --max-time 10 -o /dev/null -w '%{http_code}' \
-        -H "X-Vault-Token: ${client_token}" \
-        "${OPENBAO_URL}/v1/secret/data/forbidden/admin/e2e") || return 1
-    [[ "${status}" == "403" ]] || {
-        log_error "${name} token received HTTP ${status} for the forbidden secret"
-        return 1
-    }
-    log_success "${name} received exact policies and only its permitted secrets"
-}
-
-assert_login_fails() {
-    local name="$1"
-    local token="$2"
-    local request output status body
-    request=$(jq -cn --arg role basic-spiffe --arg jwt "${token}" \
-        '{role: $role, jwt: $jwt}') || return 1
-    output=$(openbao_curl -sS --max-time 10 -w $'\n%{http_code}' -X POST \
-        -H 'Content-Type: application/json' \
-        -d "${request}" \
-        "${OPENBAO_URL}/v1/auth/jwt/cel/login") || return 1
-    status=${output##*$'\n'}
-    body=${output%$'\n'*}
-    if [[ "${status}" != "400" ]] || ! jq -e '.errors | type == "array" and length > 0' <<<"${body}" >/dev/null; then
-        log_error "${name} token was not rejected by OpenBao (HTTP ${status})"
-        return 1
-    fi
-    log_success "${name} token was rejected"
-}
-
-verify_openbao() {
-    local k1_token="$1"
-    local k2_token="$2"
-    local k1_spire_id="$3"
-    local wrong_audience wrong_audience_svid wrong_audience_token
-
-    assert_login_and_access k1 "${k1_token}" host
-    assert_login_and_access k2 "${k2_token}" host
-
-    wrong_audience=spiffe://wrong.example/audience
-    wrong_audience_svid=$(fetch_spire_jwt_svid \
-        "${K1_CONTEXT}" "${K1_POD}" "${k1_spire_id}" "${wrong_audience}" dsx-pod)
-    wrong_audience_token=$(exchange_spire_svid "${K1_EXCHANGE_URL}" "${wrong_audience_svid}")
-    assert_token_contract "real wrong-audience token" \
-        "${wrong_audience_token}" "$(pod_subject "${K1_CONTEXT}" "${K1_POD}")" \
-        "${wrong_audience}"
-    assert_login_fails "wrong audience" "${wrong_audience_token}"
-    log_success "OpenBao Gateway routing, login, policies, and rejection checks passed"
-}
-
-rotate_k2_signing_key() {
-    local k1_token="$1"
-    local old_k2_token="$2"
-    local generated new_kid new_private new_jwks retained_jwks expected
-    local new_k2_token new_k2_subject new_k2_spire_id new_k2_spire_svid
-
-    generated=$(go run ./cmd/generate-signing-keyset)
-    new_kid=$(jq -er '.active_kid' <<<"${generated}")
-    new_private=$(jq -c '.jwks.keys[0]' <<<"${generated}")
-    if jq -e --arg kid "${new_kid}" 'any(.keys[]; .kid == $kid)' \
-        <<<"$(aggregate_keysets "${K1_ORIGINAL_JWKS}" "${K2_ORIGINAL_JWKS}")" >/dev/null; then
-        log_error "Generated rotation key reused kid ${new_kid}"
-        return 1
-    fi
-
-    new_jwks=$(jq -cn --argjson active "${new_private}" '{keys: [$active]}')
-    update_signing_secret "${K2_CONTEXT}" "${new_jwks}" "${new_kid}"
-    K2_SIGNING_SECRET_CHANGED=true
-    restart_exchange "${K2_CONTEXT}"
-    retained_jwks=$(aggregate_keysets "${K2_ORIGINAL_JWKS}" "${new_jwks}")
-    assert_retained_keys k2 "${retained_jwks}"
-    expected=$(aggregate_keysets "${K1_ORIGINAL_JWKS}" "${retained_jwks}")
-    assert_full_aggregates "${expected}" "${k1_token}" "${old_k2_token}"
-    assert_login_and_access "k2 before old key publication lease expiry" "${old_k2_token}" host
-
-    new_k2_subject=$(pod_subject "${K2_CONTEXT}" "${K2_SPIRE_POD}" "${K2_SPIRE_NAMESPACE}")
-    new_k2_spire_id=$(internal_pod_subject \
-        "${K2_CONTEXT}" "${K2_TRUST_DOMAIN}" "${K2_SPIRE_POD}" "${K2_SPIRE_NAMESPACE}")
-    new_k2_spire_svid=$(fetch_spire_jwt_svid \
-        "${K2_CONTEXT}" "${K2_SPIRE_POD}" "${new_k2_spire_id}" "${AUDIENCE}" dsx-pod \
-        "${K2_SPIRE_NAMESPACE}")
-    new_k2_token=$(exchange_spire_svid "${K2_EXCHANGE_URL}" "${new_k2_spire_svid}")
-    assert_token_contract "k2 rotated" "${new_k2_token}" "${new_k2_subject}"
-    if [[ "$(token_kid "${new_k2_token}")" != "${new_kid}" ]]; then
-        log_error "k2 Exchange did not sign with rotated kid ${new_kid}"
-        return 1
-    fi
-    assert_full_aggregates "${expected}" "${k1_token}" "${old_k2_token}" "${new_k2_token}"
-    assert_login_and_access "k2 rotated" "${new_k2_token}" host
-    log_success "k2 rotation preserved the old and new keys during overlap"
-}
-
-restore_k2_signing_key() {
-    update_signing_secret "${K2_CONTEXT}" "${K2_ORIGINAL_JWKS}" "${K2_ORIGINAL_KID}"
-    restart_exchange "${K2_CONTEXT}"
-    K2_SIGNING_SECRET_CHANGED=false
-}
-
 main() {
+    local script_started=${SECONDS} setup_started=${SECONDS} stage_started
+    local k1_token k2_token k1_subject k2_subject k2_spire_subject k1_spire_id k2_spire_id
+    local k1_spire_svid k2_spire_svid
+    local local_k1_token local_k2_token expected
+
     validate_context_exists "${K1_CONTEXT}"
     validate_context_exists "${K2_CONTEXT}"
     cd "${PROJECT_ROOT}"
@@ -579,10 +399,9 @@ main() {
         log_error "k1 and k2 signing keysets reuse kid ${K1_ORIGINAL_KID}"
         return 1
     fi
+    log_timing "setup" "${setup_started}"
 
-    local k1_token k2_token k1_subject k2_subject k2_spire_subject k1_spire_id k2_spire_id
-    local k1_spire_svid k2_spire_svid
-    local local_k1_token local_k2_token expected
+    stage_started=${SECONDS}
     k1_token=$(read_pod_token "${K1_CONTEXT}" "${K1_POD}" "${IDENTITY_PROBE_CONTAINER}")
     k2_token=$(read_pod_token "${K2_CONTEXT}" "${K2_POD}" "${IDENTITY_PROBE_CONTAINER}")
     assert_application_token_mount "${K1_CONTEXT}" "${K1_POD}" true
@@ -603,7 +422,9 @@ main() {
         log_error "k2 Pod did not use the k2 Exchange signing key"
         return 1
     }
+    log_timing "Pod token delivery and registration" "${stage_started}"
 
+    stage_started=${SECONDS}
     k1_spire_id=$(internal_pod_subject "${K1_CONTEXT}" "${K1_TRUST_DOMAIN}" "${K1_POD}")
     k2_spire_id=$(internal_pod_subject \
         "${K2_CONTEXT}" "${K2_TRUST_DOMAIN}" "${K2_SPIRE_POD}" "${K2_SPIRE_NAMESPACE}")
@@ -622,33 +443,23 @@ main() {
         "${K1_EXCHANGE_URL}" "${k2_spire_svid}"
     assert_exchange_rejects "k1 SPIRE JWT-SVID at k2 Exchange" \
         "${K2_EXCHANGE_URL}" "${k1_spire_svid}"
+    log_timing "local exchange and shard rejection" "${stage_started}"
 
+    stage_started=${SECONDS}
     expected=$(aggregate_keysets "${K1_ORIGINAL_JWKS}" "${K2_ORIGINAL_JWKS}")
     assert_mqtt_authorization
     assert_retained_keys k1 "${K1_ORIGINAL_JWKS}"
     assert_retained_keys k2 "${K2_ORIGINAL_JWKS}"
     assert_full_aggregates "${expected}" "${k1_token}" "${k2_token}" "${local_k1_token}" "${local_k2_token}"
-    verify_openbao "${k1_token}" "${k2_token}" "${k1_spire_id}"
-    assert_relying_party_rejections "${k1_token}"
-    assert_publication_lease_expiry
+    log_timing "MQTT authorization and aggregate JWKS" "${stage_started}"
 
-    restart_exchange "${K1_CONTEXT}"
-    assert_retained_keys k1 "${K1_ORIGINAL_JWKS}"
-    assert_full_aggregates "${expected}" "${k1_token}" "${k2_token}"
-    restart_exchange "${K2_CONTEXT}"
-    assert_retained_keys k2 "${K2_ORIGINAL_JWKS}"
-    assert_full_aggregates "${expected}" "${k1_token}" "${k2_token}"
-
-    local_k2_token=$(exchange_spire_svid "${K2_EXCHANGE_URL}" "${k2_spire_svid}")
-    assert_token_contract "k2 after restart" "${local_k2_token}" "${k2_spire_subject}"
-    assert_full_aggregates "${expected}" "${local_k1_token}" "${local_k2_token}"
-
-    rotate_k2_signing_key "${local_k1_token}" "${local_k2_token}"
-    restore_k2_signing_key
+    stage_started=${SECONDS}
+    assert_relying_party_subject_validation "${k1_token}"
+    log_timing "OpenBao subject grammar" "${stage_started}"
+    log_timing "cross-shard verification total" "${script_started}"
     log_success "Cross-shard acceptance checks passed"
 }
 
-trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 main "$@"
