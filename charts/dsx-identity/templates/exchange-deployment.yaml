@@ -30,6 +30,13 @@ spec:
       {{- end }}
     spec:
       serviceAccountName: spiffe-exchange-sa
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              {{- include "dsx-identity.selectorLabels" (dict "root" . "name" "spiffe-exchange") | nindent 14 }}
       securityContext:
         fsGroup: 1000
         fsGroupChangePolicy: OnRootMismatch
