@@ -9,7 +9,7 @@ mise exec -- go run ./cmd/generate-signing-keyset > generated.json
 ```
 
 The output contains private key material. The Skaffold manifest hook splits it into the
-`signing-jwks.json` and `active-kid` entries used by an Exchange signing-keyset
+`signing-jwks.json` and `active-kid` entries used by the DSX Identity Keys signing-keyset
 Secret through `scripts/prepare-signing-keyset-source.sh`.
 
 The command has no flags and no runtime dependencies beyond a secure operating

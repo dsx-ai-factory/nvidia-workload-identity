@@ -6,11 +6,11 @@ resources:
 generatorOptions:
   disableNameSuffixHash: true
 secretGenerator:
-  - name: spiffe-exchange-signing-keyset
+  - name: dsx-identity-keys-signing-keyset
     files:
       - signing-jwks.json=generated/signing-jwks.json
       - active-kid=generated/active-kid
-  - name: spiffe-exchange-mqtt-oauth
+  - name: dsx-identity-keys-mqtt-oauth
     files:
       - client-id=../event-bus/generated/oauth/client-id
       - client-secret=../event-bus/generated/oauth/client-secret

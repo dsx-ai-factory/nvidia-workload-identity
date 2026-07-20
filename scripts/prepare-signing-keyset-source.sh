@@ -19,13 +19,13 @@ cleanup() {
 validate_sources() {
     local kid
     if [[ ! -s "${TEMP_DIR}/signing-jwks.json" || ! -s "${TEMP_DIR}/active-kid" ]]; then
-        log_error "Exchange signing keyset source is incomplete"
+        log_error "DSX Identity Keys signing keyset source is incomplete"
         return 1
     fi
     kid=$(<"${TEMP_DIR}/active-kid")
     if ! jq -e --arg kid "${kid}" '.keys | any(.kid == $kid)' \
         "${TEMP_DIR}/signing-jwks.json" >/dev/null; then
-        log_error "Exchange signing keyset does not contain its active kid"
+        log_error "DSX Identity Keys signing keyset does not contain its active kid"
         return 1
     fi
 }
@@ -35,10 +35,10 @@ write_existing() {
     json=$(kubectl get secret "${secret_name}" -n "${NAMESPACE}" --context "${CONTEXT}" -o json)
     if ! jq -er '.data["signing-jwks.json"]' <<<"${json}" | base64 -d >"${TEMP_DIR}/signing-jwks.json" ||
         ! jq -er '.data["active-kid"]' <<<"${json}" | base64 -d >"${TEMP_DIR}/active-kid"; then
-        log_error "Exchange signing keyset Secret is missing a required key. Refusing to rotate it"
+        log_error "DSX Identity Keys signing keyset Secret is missing a required key. Refusing to rotate it"
         return 1
     fi
-    log_info "Reusing the existing Exchange signing keyset in ${CONTEXT}"
+    log_info "Reusing the existing DSX Identity Keys signing keyset in ${CONTEXT}"
 }
 
 generate_sources() {
@@ -46,7 +46,7 @@ generate_sources() {
     generated=$(cd "${SCRIPT_DIR}/.." && go run ./cmd/generate-signing-keyset)
     jq -jc '.jwks' <<<"${generated}" >"${TEMP_DIR}/signing-jwks.json"
     jq -jr '.active_kid' <<<"${generated}" >"${TEMP_DIR}/active-kid"
-    log_info "Generated an Exchange signing keyset source for ${CONTEXT}"
+    log_info "Generated the DSX Identity Keys signing keyset source for ${CONTEXT}"
 }
 
 publish_sources() {
@@ -68,7 +68,7 @@ main() {
     fi
 
     validate_context_exists "${CONTEXT}"
-    secret_name=$(yq -r '.exchange.signingKeysetSecret // "spiffe-exchange-signing-keyset"' \
+    secret_name=$(yq -r '.identityKeys.signingKeysetSecret // "dsx-identity-keys-signing-keyset"' \
         "${VALUES_FILE}")
     mkdir -p "$(dirname "${OUTPUT_DIR}")"
     TEMP_DIR=$(mktemp -d "$(dirname "${OUTPUT_DIR}")/.generated.XXXXXX")
@@ -76,15 +76,15 @@ main() {
     if kubectl get secret "${secret_name}" -n "${NAMESPACE}" --context "${CONTEXT}" >/dev/null 2>&1; then
         write_existing "${secret_name}"
     else
-        if kubectl get deployment spiffe-exchange -n "${NAMESPACE}" --context "${CONTEXT}" >/dev/null 2>&1; then
-            log_error "Exchange exists but its signing keyset Secret is missing. Refusing to rotate it"
+        if kubectl get deployment dsx-identity-keys -n "${NAMESPACE}" --context "${CONTEXT}" >/dev/null 2>&1; then
+            log_error "DSX Identity Keys exists but its signing keyset Secret is missing. Refusing to rotate it"
             return 1
         fi
         generate_sources
     fi
     validate_sources
     publish_sources
-    log_success "Exchange signing keyset source is ready for ${CONTEXT}"
+    log_success "DSX Identity Keys signing keyset source is ready for ${CONTEXT}"
 }
 
 trap cleanup EXIT

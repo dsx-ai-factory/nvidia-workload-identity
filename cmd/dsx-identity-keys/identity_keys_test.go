@@ -55,7 +55,7 @@ func TestStaticSigningKeysetAndClaims(t *testing.T) {
 		}
 	}
 
-	server := &ExchangeServer{keys: keys}
+	server := &identityKeysServer{keys: keys}
 	original := map[string]any{
 		"iss":    "spiffe://k2.internal",
 		"sub":    "spiffe://k2.internal/original",
@@ -302,7 +302,7 @@ func TestJWKSAndDiscoveryAreConfiguredNotHostScoped(t *testing.T) {
 	if err := registerTestKey(registry, testJWKForAlgorithm(t, "two", jose.ES384, true), time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	server := &ExchangeServer{
+	server := &identityKeysServer{
 		registry: registry,
 		jwksURL:  "https://exchange.example/.well-known/jwks.json",
 	}
@@ -345,7 +345,7 @@ func TestJWKSAndDiscoveryAreConfiguredNotHostScoped(t *testing.T) {
 func TestTokenExchangeRequestContract(t *testing.T) {
 	t.Parallel()
 
-	server := new(ExchangeServer)
+	server := new(identityKeysServer)
 	tests := []struct {
 		name        string
 		contentType string

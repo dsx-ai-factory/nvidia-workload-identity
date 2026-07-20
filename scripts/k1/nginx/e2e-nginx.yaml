@@ -25,7 +25,7 @@ spec:
         - --svid-hint=dsx-pod
         - --output=/run/secrets/nvidia.com/dsx/token
         - --log-level=info
-        - --exchange-service-url=http://spiffe-exchange.dsx-identity.svc.cluster.local:8080/v1/exchange
+        - --identity-keys-url=http://dsx-identity-keys.dsx-identity.svc.cluster.local:8080/v1/exchange
       # Local E2E has no OTel collector.
       env:
         - name: OTEL_SDK_DISABLED

@@ -278,8 +278,8 @@ deploy:
           - ../scripts/identity-e2e-values.yaml
           - ../scripts/k1-values.yaml
         setValueTemplates:
-          exchange.image.repository: "{{.IMAGE_REPO_dsx_identity_spiffe_exchange_service}}"
-          exchange.image.tag: "{{.IMAGE_TAG_dsx_identity_spiffe_exchange_service}}"
+          identityKeys.image.repository: "{{.IMAGE_REPO_dsx_identity_dsx_identity_keys}}"
+          identityKeys.image.tag: "{{.IMAGE_TAG_dsx_identity_dsx_identity_keys}}"
           podTokenFetcher.image.repository: "{{.IMAGE_REPO_dsx_identity_dsx_token_fetcher}}"
           podTokenFetcher.image.tag: "{{.IMAGE_TAG_dsx_identity_dsx_token_fetcher}}"
           "spire.spire-server.initContainers[0].image": "{{.IMAGE_FULLY_QUALIFIED_dsx_identity_dsx_imds_node_attestor_server}}"

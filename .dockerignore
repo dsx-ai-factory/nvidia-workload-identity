@@ -27,9 +27,9 @@ Thumbs.db
 /target/
 /dsx-token-fetcher
 /metadata-service
-/spiffe-exchange-service
+/dsx-identity-keys
 /dsx-imds-network-setup
-/exchange-proxy-csi
+/dsx-identity-keys-proxy-csi
 
 # Test files and coverage
 *_test.go

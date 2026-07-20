@@ -6,7 +6,7 @@ global:
       enabled: false
     auth:
       permissions:
-        # Exchange clients use OAuth2. A null value disables anonymous fallback.
+        # DSX Identity Keys clients use OAuth2. A null value disables anonymous fallback.
         noauth: null
         oauth2:
           event-bus-e2e-observer:
@@ -17,18 +17,18 @@ global:
               sub:
                 allow:
                   - "outside.>"
-          spiffe-exchange:
-            azp: spiffe-exchange
+          dsx-identity-keys:
+            azp: dsx-identity-keys
             required_scope: mqtt
             account: CSC
             permissions:
               pub:
                 allow:
                   # NATS converts MQTT "/" separators to "." before applying subject permissions.
-                  - "spiffe-exchange.>"
+                  - "dsx-identity-keys.>"
               sub:
                 allow:
-                  - "spiffe-exchange.>"
+                  - "dsx-identity-keys.>"
     gateway:
       routes:
         mqtt:

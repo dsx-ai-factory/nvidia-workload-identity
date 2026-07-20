@@ -52,7 +52,7 @@ func ValidPodUID(uid string) bool {
 	return podUIDPattern.MatchString(uid)
 }
 
-// Subject is the trust-domain-independent payload preserved when Exchange
+// Subject is the trust-domain-independent payload preserved when DSX Identity Keys
 // converts a local SPIRE JWT-SVID subject into a DSX JWT subject.
 type Subject struct {
 	Tenant       string
@@ -64,7 +64,7 @@ type Subject struct {
 }
 
 // parseSPIFFEID parses the local SPIRE workload path. It intentionally does not
-// validate the trust domain because Exchange calls it only after local SPIRE
+// validate the trust domain because DSX Identity Keys calls it only after local SPIRE
 // has validated the JWT-SVID.
 func parseSPIFFEID(id spiffeid.ID) (Subject, error) {
 	segments, err := pathSegments(id)
@@ -93,9 +93,9 @@ func ParseDSXID(id spiffeid.ID) (Subject, error) {
 	return parseResourcePath(tenant, segments)
 }
 
-// ExchangeSPIFFEID changes only the encoding of a validated local SPIFFE ID.
+// ToDSXSPIFFEID changes only the encoding of a validated local SPIFFE ID.
 // It has no tenant input because the tenant in the local subject is preserved.
-func ExchangeSPIFFEID(id spiffeid.ID) (spiffeid.ID, error) {
+func ToDSXSPIFFEID(id spiffeid.ID) (spiffeid.ID, error) {
 	subject, err := parseSPIFFEID(id)
 	if err != nil {
 		return spiffeid.ID{}, err

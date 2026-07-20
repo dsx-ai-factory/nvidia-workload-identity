@@ -23,7 +23,7 @@ host processes.
 flowchart TB
   DPUIdentities["DPU local SPIRE identities<br/>from shard-local SPIRE"]
   HostIdentities["Host local SPIRE identities<br/>from shard-local SPIRE"]
-  Exchange["Shard-local Exchange"]
+  IdentityKeys["Shard-local DSX Identity Keys"]
   DPUAgent["DPU SPIRE agent process<br/>dsx_dpu agent plugin"]
   NICoIMDS["Paired DPU link-local intercept<br/>NICo or Carbide IMDS passthrough"]
   DSXIMDS["DSX IMDS<br/>(metadata-service)"]
@@ -32,8 +32,8 @@ flowchart TB
 
   DPUAgent -->|"dsx_dpu node attestation"| DPUIdentities
   DPUIdentities -->|"host SPIRE JWT-SVID"| DSXIMDS
-  DSXIMDS -->|"exchange for host DSX JWT"| Exchange
-  Exchange -->|"host DSX JWT"| DSXIMDS
+  DSXIMDS -->|"exchange for host DSX JWT"| IdentityKeys
+  IdentityKeys -->|"host DSX JWT"| DSXIMDS
   HostAgent <-->|"link-local IMDS"| NICoIMDS
   NICoIMDS <-->|"identity passthrough"| DSXIMDS
   HostAgent -->|"dsx_imds node attestation"| HostIdentities
@@ -47,14 +47,14 @@ sequenceDiagram
     participant DI as DSX IMDS process
     participant DA as External DPU SPIRE agent<br/>runtime WorkloadAttestor
     participant NI as Paired DPU intercept and NICo or Carbide IMDS
-    participant EX as Shard-local Exchange Pod
+    participant EX as Shard-local DSX Identity Keys Pod
     participant AP as dsx_imds NodeAttestor agent plugin
     participant HA as Bare-metal host SPIRE agent
     participant SS as Local SPIRE server Pod
     participant SP as dsx_imds NodeAttestor server plugin
     DI->>DA: Request host SPIRE JWT-SVID by dsx-imds hint
     DA-->>DI: Local host SPIRE JWT-SVID
-    DI->>EX: Exchange local SPIRE JWT-SVID
+    DI->>EX: DSX Identity Keys local SPIRE JWT-SVID
     EX-->>DI: Host DSX JWT
     HA->>AP: Begin node attestation
     AP->>NI: GET link-local identity with Metadata: true

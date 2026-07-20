@@ -51,7 +51,7 @@ spec:
                   - --audience={{ .Values.podTokenFetcher.audience }}
                   - --svid-hint=dsx-pod
                   - --output={{ .Values.podTokenFetcher.outputPath }}
-                  - --exchange-service-url={{ required "podTokenFetcher.exchangeServiceURL is required" .Values.podTokenFetcher.exchangeServiceURL }}
+                  - --identity-keys-url={{ required "podTokenFetcher.identityKeysURL is required" .Values.podTokenFetcher.identityKeysURL }}
                   - --log-level={{ .Values.observability.logLevel }}
                 # The consumer owns Pod annotations and the shared network namespace.
                 env:

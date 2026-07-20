@@ -1,4 +1,4 @@
-# k2 identity chart values for the Data Hall SPIRE and Exchange shard
+# k2 identity chart values for the Data Hall SPIRE and DSX Identity Keys shard
 # Used by: make identities
 
 global:
@@ -18,7 +18,7 @@ spire:
     controllerManager:
       # Kind's control-plane node emulates the external DPU boundary.
       parentIDTemplate: 'spiffe://{{ .TrustDomain }}/spire/agent/{{ if eq .NodeMeta.Name "k2-control-plane" }}k8s_psat/{{ .ClusterName }}/{{ .NodeMeta.UID }}{{ else }}dsx_imds/tenant/$OPERATOR_TENANT/host/{{ .NodeMeta.Name }}{{ end }}'
-exchange:
+identityKeys:
   shardID: k2
   mqtt:
     brokerURL: tcp://gateway.sjc-1.nvidia.com:1883
@@ -26,7 +26,7 @@ exchange:
       tokenURL: http://gateway.sjc-1.nvidia.com:8080/realms/event-bus/protocol/openid-connect/token
 
 podTokenFetcher:
-  exchangeServiceURL: http://spiffe-exchange.dsx-identity.svc.cluster.local:8080/v1/exchange
+  identityKeysURL: http://dsx-identity-keys.dsx-identity.svc.cluster.local:8080/v1/exchange
 
 vmSupport:
   enabled: true
@@ -34,8 +34,8 @@ vmSupport:
     - key: node-role.kubernetes.io/control-plane
       operator: Exists
       effect: NoSchedule
-  exchangeProxy:
-    target: TCP:spiffe-exchange.dsx-identity.svc.cluster.local:8080
+  identityKeysProxy:
+    target: TCP:dsx-identity-keys.dsx-identity.svc.cluster.local:8080
 identityController:
   enabled: true
   replicaCount: 1

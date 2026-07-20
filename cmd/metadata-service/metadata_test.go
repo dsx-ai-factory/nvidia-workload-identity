@@ -173,7 +173,7 @@ func TestIdentityRequest_RejectsForwardedRequests(t *testing.T) {
 func TestExchangeSPIRESVIDUsesCSIUnixSocket(t *testing.T) {
 	t.Parallel()
 
-	socketPath := filepath.Join(t.TempDir(), "exchange.sock")
+	socketPath := filepath.Join(t.TempDir(), "identity-keys.sock")
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
 		t.Fatal(err)
@@ -219,7 +219,7 @@ func TestExchangeSPIRESVIDRejectsUnavailableCSIUnixSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := client.Exchange(context.Background(), "local-svid"); err == nil {
-		t.Fatal("expected unavailable Exchange proxy socket to fail")
+		t.Fatal("expected unavailable DSX Identity Keys Proxy socket to fail")
 	}
 }
 
@@ -261,7 +261,7 @@ func TestDirectExchangeVerifiesTLSCertificate(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := client.Exchange(context.Background(), "local-svid"); err == nil {
-		t.Fatal("self-signed Exchange certificate was accepted")
+		t.Fatal("self-signed DSX Identity Keys certificate was accepted")
 	}
 }
 
@@ -274,7 +274,7 @@ func TestExchangeTransportConfiguration(t *testing.T) {
 		wantErr string
 	}{
 		{name: "missing", wantErr: "required"},
-		{name: "Unix endpoint", url: "unix:///exchange.sock"},
+		{name: "Unix endpoint", url: "unix:///identity-keys.sock"},
 		{name: "HTTP endpoint", url: "http://exchange.example.com/v1/exchange"},
 		{name: "HTTPS endpoint", url: "https://exchange.example.com/v1/exchange"},
 	} {

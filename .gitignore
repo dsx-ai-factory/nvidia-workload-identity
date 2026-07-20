@@ -6,9 +6,9 @@
 *.dylib
 /dsx-token-fetcher
 /metadata-service
-/spiffe-exchange-service
+/dsx-identity-keys
 /dsx-imds-network-setup
-/exchange-proxy-csi
+/dsx-identity-keys-proxy-csi
 
 # Test binary, built with `go test -c`
 *.test

@@ -273,16 +273,16 @@ deploy:
           - ../scripts/identity-e2e-values.yaml
           - ../scripts/k2-values.yaml
         setValueTemplates:
-          exchange.image.repository: "{{.IMAGE_REPO_dsx_identity_spiffe_exchange_service}}"
-          exchange.image.tag: "{{.IMAGE_TAG_dsx_identity_spiffe_exchange_service}}"
+          identityKeys.image.repository: "{{.IMAGE_REPO_dsx_identity_dsx_identity_keys}}"
+          identityKeys.image.tag: "{{.IMAGE_TAG_dsx_identity_dsx_identity_keys}}"
           podTokenFetcher.image.repository: "{{.IMAGE_REPO_dsx_identity_dsx_token_fetcher}}"
           podTokenFetcher.image.tag: "{{.IMAGE_TAG_dsx_identity_dsx_token_fetcher}}"
           vmSupport.metadataService.image.repository: "{{.IMAGE_REPO_dsx_identity_metadata_service}}"
           vmSupport.metadataService.image.tag: "{{.IMAGE_TAG_dsx_identity_metadata_service}}"
           vmSupport.imdsNetworkSetup.image.repository: "{{.IMAGE_REPO_dsx_identity_dsx_imds_network_setup}}"
           vmSupport.imdsNetworkSetup.image.tag: "{{.IMAGE_TAG_dsx_identity_dsx_imds_network_setup}}"
-          vmSupport.exchangeProxyCsi.image.repository: "{{.IMAGE_REPO_dsx_identity_exchange_proxy_csi}}"
-          vmSupport.exchangeProxyCsi.image.tag: "{{.IMAGE_TAG_dsx_identity_exchange_proxy_csi}}"
+          vmSupport.identityKeysProxyCsi.image.repository: "{{.IMAGE_REPO_dsx_identity_dsx_identity_keys_proxy_csi}}"
+          vmSupport.identityKeysProxyCsi.image.tag: "{{.IMAGE_TAG_dsx_identity_dsx_identity_keys_proxy_csi}}"
           identityController.image.repository: "{{.IMAGE_REPO_dsx_identity_dsx_identity_controller}}"
           identityController.image.tag: "{{.IMAGE_TAG_dsx_identity_dsx_identity_controller}}"
           "spire.spire-server.initContainers[0].image": "{{.IMAGE_FULLY_QUALIFIED_dsx_identity_dsx_imds_node_attestor_server}}"

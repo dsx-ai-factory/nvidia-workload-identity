@@ -30,10 +30,10 @@ spec:
           env:
             - name: JAVA_OPTS_KC_HEAP
               value: -XX:InitialRAMPercentage=25 -XX:MaxRAMPercentage=50
-            - name: SPIFFE_EXCHANGE_CLIENT_SECRET
+            - name: DSX_IDENTITY_KEYS_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: spiffe-exchange-mqtt-oauth
+                  name: dsx-identity-keys-mqtt-oauth
                   key: client-secret
             - name: E2E_OBSERVER_CLIENT_SECRET
               valueFrom:

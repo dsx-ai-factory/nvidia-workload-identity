@@ -9,15 +9,15 @@ sequenceDiagram
     participant DI as DSX IMDS process
     participant DA as External DPU SPIRE agent<br/>runtime WorkloadAttestor
     participant NI as Paired DPU intercept and NICo or Carbide IMDS
-    participant EX as Shard-local Exchange Pod
+    participant EX as Shard-local DSX Identity Keys Pod
     participant AP as dsx_imds NodeAttestor agent plugin
     participant HA as Bare-metal host SPIRE agent
     participant SS as Local SPIRE server Pod
     participant SP as dsx_imds NodeAttestor server plugin
-    participant JWKS as Reachable Exchange aggregate JWKS endpoint
+    participant JWKS as Reachable DSX Identity Keys aggregate JWKS endpoint
     DI->>DA: Request host SPIRE JWT-SVID by dsx-imds hint
     DA-->>DI: Local host SPIRE JWT-SVID
-    DI->>EX: Exchange local SPIRE JWT-SVID
+    DI->>EX: DSX Identity Keys local SPIRE JWT-SVID
     EX-->>DI: Host DSX JWT
     HA->>AP: Begin node attestation
     AP->>NI: GET link-local identity with Metadata: true
@@ -37,13 +37,13 @@ CLI flags. Configure it in the SPIRE server HCL:
 
 ```hcl
 plugin_data {
-  jwks_url = "https://exchange.shard.example.com/.well-known/jwks.json"
+  jwks_url = "https://identity-keys.shard.example.com/.well-known/jwks.json"
   audience = "spiffe://k2.sjc-1.nvidia.com/spire/server"
   trust_domain = "k2.sjc-1.nvidia.com"
 }
 ```
 
-All three fields are required. `jwks_url` may name any reachable Exchange's
+All three fields are required. `jwks_url` may name any reachable DSX Identity Keys instance's
 flat aggregate JWKS. The standard OIDC remote key set caches keys and refreshes
 when it encounters an unknown `kid`. The local E2E configuration stages the
 plugin in `scripts/identity-e2e-values.yaml` and supplies each shard's plugin

@@ -14,7 +14,7 @@ import (
 
 const (
 	Version    = "0.1.0"
-	PluginName = "csi.exchange.nvidia.com"
+	PluginName = "csi.dsx-identity-keys.nvidia.com"
 )
 
 // Driver provides the ephemeral inline CSI service.

@@ -147,13 +147,13 @@ func startHealthServer(address string, handler http.Handler) (*http.Server, erro
 
 func run() (runErr error) {
 	var (
-		socketPath         = flag.String("socket", "unix:///var/run/secrets/spire.io/spire-agent.sock", "Path to SPIRE Workload API socket")
-		audience           = flag.String("audience", "spiffe://example.org", "JWT audience")
-		outputPath         = flag.String("output", "/run/secrets/nvidia.com/dsx/token", "output file path for the DSX JWT")
-		logLevel           slog.Level
-		exchangeServiceURL = flag.String("exchange-service-url", "", "RFC 8693 endpoint of the SPIFFE exchange service")
-		healthPort         = flag.Int("health-port", 8080, "Port for the /healthz endpoint")
-		svidHint           = flag.String("svid-hint", "", "Optional exact JWT-SVID hint override")
+		socketPath      = flag.String("socket", "unix:///var/run/secrets/spire.io/spire-agent.sock", "Path to SPIRE Workload API socket")
+		audience        = flag.String("audience", "spiffe://example.org", "JWT audience")
+		outputPath      = flag.String("output", "/run/secrets/nvidia.com/dsx/token", "output file path for the DSX JWT")
+		logLevel        slog.Level
+		identityKeysURL = flag.String("identity-keys-url", "", "RFC 8693 endpoint of DSX Identity Keys")
+		healthPort      = flag.Int("health-port", 8080, "Port for the /healthz endpoint")
+		svidHint        = flag.String("svid-hint", "", "Optional exact JWT-SVID hint override")
 	)
 	flag.TextVar(&logLevel, "log-level", slog.LevelInfo, "log level (debug, info, warn, error)")
 	flag.Parse()
@@ -165,8 +165,8 @@ func run() (runErr error) {
 		runErr = errors.Join(runErr, sdk.Shutdown(context.Background()))
 	}()
 
-	if *exchangeServiceURL == "" {
-		return errors.New("--exchange-service-url is required")
+	if *identityKeysURL == "" {
+		return errors.New("--identity-keys-url is required")
 	}
 	var ready atomic.Bool
 
@@ -174,7 +174,7 @@ func run() (runErr error) {
 		"socket", *socketPath,
 		"audience", *audience,
 		"output", *outputPath,
-		"exchange_service_url", *exchangeServiceURL,
+		"identity_keys_url", *identityKeysURL,
 		"health_port", *healthPort,
 		"svid_hint", *svidHint)
 
@@ -220,8 +220,8 @@ func run() (runErr error) {
 			return time.Time{}, fmt.Errorf("fetch SPIRE JWT-SVID: %w", err)
 		}
 
-		slog.InfoContext(refreshCtx, "Exchanging SPIRE JWT-SVID", "exchange_service_url", *exchangeServiceURL)
-		exchangeResp, err := tokenexchange.Exchange(refreshCtx, httpClient, *exchangeServiceURL, spireSVID.Marshal())
+		slog.InfoContext(refreshCtx, "Exchanging SPIRE JWT-SVID", "identity_keys_url", *identityKeysURL)
+		exchangeResp, err := tokenexchange.Exchange(refreshCtx, httpClient, *identityKeysURL, spireSVID.Marshal())
 		if err != nil {
 			return time.Time{}, fmt.Errorf("exchange SPIRE JWT-SVID: %w", err)
 		}

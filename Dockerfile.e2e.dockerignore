@@ -4,7 +4,7 @@
 !cmd/
 !cmd/dsx-token-fetcher/
 !cmd/dsx-token-fetcher/**
-!cmd/spiffe-exchange-service/
-!cmd/spiffe-exchange-service/**
+!cmd/dsx-identity-keys/
+!cmd/dsx-identity-keys/**
 !internal/
 !internal/**

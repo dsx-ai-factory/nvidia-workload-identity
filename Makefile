@@ -51,7 +51,7 @@ test-helm:
 	@$(MISE_EXEC) skaffold diagnose --yaml-only >/dev/null
 
 # ============================================================
-# Multi-cluster environment with independent SPIRE and Exchange shards
+# Multi-cluster environment with independent SPIRE and DSX Identity Keys shards
 # ============================================================
 
 install: k1-cluster k2-cluster ## Install the complete local environment

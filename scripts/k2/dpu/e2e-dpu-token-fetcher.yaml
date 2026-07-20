@@ -6,7 +6,7 @@ metadata:
 automountServiceAccountToken: false
 ---
 # A Pod hosts the local external-agent boundary without modeling the DPU as a
-# Kubernetes node. The real fetcher and Exchange path run unchanged.
+# Kubernetes node. The real fetcher and DSX Identity Keys path run unchanged.
 apiVersion: v1
 kind: Pod
 metadata:
@@ -38,7 +38,7 @@ spec:
         - --audience=spiffe://ds9.dsx.nvid.id/openbao
         - --svid-hint=dsx-dpu
         - --output=/run/secrets/nvidia.com/dsx/token
-        - --exchange-service-url=http://spiffe-exchange.dsx-identity.svc.cluster.local:8080/v1/exchange
+        - --identity-keys-url=http://dsx-identity-keys.dsx-identity.svc.cluster.local:8080/v1/exchange
         - --health-port=8080
       env:
         - name: OTEL_SDK_DISABLED

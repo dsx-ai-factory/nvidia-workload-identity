@@ -32,7 +32,7 @@ secretGenerator:
     files:
       - seed=generated/csc/nkeys/nats-xkey/seed
       - pubkey=generated/csc/nkeys/nats-xkey/pubkey
-  - name: spiffe-exchange-mqtt-oauth
+  - name: dsx-identity-keys-mqtt-oauth
     files:
       - client-id=generated/oauth/client-id
       - client-secret=generated/oauth/client-secret
