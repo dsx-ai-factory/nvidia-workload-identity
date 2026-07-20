@@ -16,7 +16,7 @@ configuration comments, and `AGENTS.md`.
 - [x] Use generic DNS-label tenant identifiers without an `nca-` convention.
 - [x] Configure one operator tenant for every DPU, Kubernetes Pod, and
   Kubernetes worker host identity.
-- [x] Keep Exchange tenant-agnostic and preserve the tenant already present in
+- [x] Keep DSX Identity Keys tenant-agnostic and preserve the tenant already present in
   each validated local SPIFFE ID.
 - [x] Reconcile only DPU and LaunchLayer sources. Do not configure a Kubernetes
   worker inventory or node-to-DPU mapping.
@@ -32,8 +32,8 @@ configuration comments, and `AGENTS.md`.
   external DPU process.
 - [x] Use the real `metadata-service` for worker-host and KubeVirt VM identity
   delivery.
-- [x] Use direct Exchange HTTP for DPU-hosted metadata and Exchange Proxy CSI
-  for KubeVirt metadata.
+- [x] Use direct DSX Identity Keys HTTP for DPU-hosted metadata and DSX Identity
+  Keys Proxy CSI for KubeVirt metadata.
 - [x] Use `oauth2.Config.Exchange` with RFC 8693 parameters instead of a custom
   token-response client.
 - [x] Let the configured URL and its owning client select transport. Remove
@@ -42,8 +42,8 @@ configuration comments, and `AGENTS.md`.
 ## Chart and local deployment
 
 - [x] Keep one DSX Identity Controller and one controller-manager per shard.
-- [x] Install each identity chart once and use its normal Exchange deployment.
-- [x] Confine the local `k8s_psat` agent and Exchange Pod to the Phase 0 seed
+- [x] Install each identity chart once and use its normal DSX Identity Keys deployment.
+- [x] Confine the local `k8s_psat` agent and DSX Identity Keys Pod to the Phase 0 seed
   node while worker Pods use the emulated `dsx_imds` host agent.
 - [x] Keep the Event Bus, OAuth2 provider, Kyverno runtime, KubeVirt, OpenBao,
   and local clients outside the identity chart.

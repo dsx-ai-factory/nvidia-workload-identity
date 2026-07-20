@@ -1,5 +1,5 @@
 #!/bin/bash
-# Verify cross-shard Exchange, Event Bus, and OpenBao behavior.
+# Verify cross-shard DSX Identity Keys, Event Bus, and OpenBao behavior.
 
 set -euo pipefail
 
@@ -15,7 +15,7 @@ EVENT_BUS_OAUTH_URL="http://${GATEWAY_HOST}:8080/realms/event-bus/protocol/openi
 MQTT_BROKER="tcp://${GATEWAY_HOST}:1883"
 AUDIENCE="spiffe://ds9.dsx.nvid.id/openbao"
 ISSUER="spiffe://ds9.dsx.nvid.id"
-SIGNING_SECRET="spiffe-exchange-signing-keyset"
+SIGNING_SECRET="dsx-identity-keys-signing-keyset"
 IDENTITY_NAMESPACE="dsx-identity"
 OPERATOR_TENANT="operator-1"
 K1_POD="e2e-nginx"
@@ -24,11 +24,11 @@ K2_SPIRE_POD="e2e-spire-client"
 K2_SPIRE_NAMESPACE="dsx-identity-spire-e2e"
 FIXTURE_NAMESPACE="dsx-identity-e2e"
 IDENTITY_PROBE_CONTAINER="identity-probe"
-EXCHANGE_NODE_PORT=30080
+IDENTITY_KEYS_NODE_PORT=30080
 GATEWAY_ADDRESS=""
 E2E_PROBE_IMAGE=""
-K1_EXCHANGE_URL=""
-K2_EXCHANGE_URL=""
+K1_IDENTITY_KEYS_URL=""
+K2_IDENTITY_KEYS_URL=""
 K1_ORIGINAL_JWKS=""
 K1_ORIGINAL_KID=""
 K2_ORIGINAL_JWKS=""
@@ -52,7 +52,7 @@ external_probe() {
     docker run --rm --network kind \
         --add-host "${GATEWAY_HOST}:${GATEWAY_ADDRESS}" \
         "${docker_env[@]}" \
-        --entrypoint /usr/local/bin/exchange-probe "${E2E_PROBE_IMAGE}" \
+        --entrypoint /usr/local/bin/identity-keys-probe "${E2E_PROBE_IMAGE}" \
         -test.v -test.run "${test_pattern}"
 }
 
@@ -68,8 +68,8 @@ initialize_external_test_process() {
         --format '{{(index .NetworkSettings.Networks "kind").IPAddress}}')
     k2_node_address=$(docker inspect k2-control-plane \
         --format '{{(index .NetworkSettings.Networks "kind").IPAddress}}')
-    K1_EXCHANGE_URL="http://${k1_node_address}:${EXCHANGE_NODE_PORT}"
-    K2_EXCHANGE_URL="http://${k2_node_address}:${EXCHANGE_NODE_PORT}"
+    K1_IDENTITY_KEYS_URL="http://${k1_node_address}:${IDENTITY_KEYS_NODE_PORT}"
+    K2_IDENTITY_KEYS_URL="http://${k2_node_address}:${IDENTITY_KEYS_NODE_PORT}"
 }
 
 event_bus_access_token() {
@@ -87,7 +87,7 @@ event_bus_access_token() {
 
 assert_mqtt_authorization() {
     local access_token observer_token
-    access_token=$(event_bus_access_token spiffe-exchange spiffe-exchange-mqtt-oauth)
+    access_token=$(event_bus_access_token dsx-identity-keys dsx-identity-keys-mqtt-oauth)
     observer_token=$(event_bus_access_token event-bus-e2e-observer event-bus-e2e-observer-oauth)
     external_probe '^TestLiveMQTTAuthorization$' \
         "DSX_E2E_MQTT_BROKER=${MQTT_BROKER}" \
@@ -99,7 +99,7 @@ assert_retained_keys() {
     local shard_id="$1"
     local jwks="$2"
     local access_token expected_jwks output deadline=$((SECONDS + 60))
-    access_token=$(event_bus_access_token spiffe-exchange spiffe-exchange-mqtt-oauth)
+    access_token=$(event_bus_access_token dsx-identity-keys dsx-identity-keys-mqtt-oauth)
     expected_jwks=$(jq -c '{keys: [.keys[] | del(.d)]}' <<<"${jwks}")
     while ((SECONDS < deadline)); do
         if output=$(external_probe '^TestLiveMQTTRetainedReplay$' \
@@ -250,19 +250,19 @@ fetch_spire_jwt_svid() {
 }
 
 exchange_spire_svid() {
-    local exchange_url="$1"
+    local identity_keys_url="$1"
     local token="$2"
     external_curl -fsS --max-time 10 -X POST \
         -H 'Content-Type: application/x-www-form-urlencoded' \
         --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
         --data-urlencode "subject_token=${token}" \
         --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:jwt' \
-        "${exchange_url}/v1/exchange" | jq -er '.access_token'
+        "${identity_keys_url}/v1/exchange" | jq -er '.access_token'
 }
 
 assert_exchange_rejects() {
     local name="$1"
-    local exchange_url="$2"
+    local identity_keys_url="$2"
     local token="$3"
     local output status body
     output=$(external_curl -sS --max-time 10 -w $'\n%{http_code}' -X POST \
@@ -270,7 +270,7 @@ assert_exchange_rejects() {
         --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
         --data-urlencode "subject_token=${token}" \
         --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:jwt' \
-        "${exchange_url}/v1/exchange") || return 1
+        "${identity_keys_url}/v1/exchange") || return 1
     status=${output##*$'\n'}
     body=${output%$'\n'*}
     if [[ "${status}" != "401" ]] || ! jq -e '.error == "invalid_grant"' <<<"${body}" >/dev/null; then
@@ -352,9 +352,9 @@ assert_full_aggregates() {
     fi
     while ((SECONDS < deadline)); do
         k1_jwks=$(external_curl -fsS --max-time 5 \
-            "${K1_EXCHANGE_URL}/.well-known/jwks.json" 2>/dev/null) || continue
+            "${K1_IDENTITY_KEYS_URL}/.well-known/jwks.json" 2>/dev/null) || continue
         k2_jwks=$(external_curl -fsS --max-time 5 \
-            "${K2_EXCHANGE_URL}/.well-known/jwks.json" 2>/dev/null) || continue
+            "${K2_IDENTITY_KEYS_URL}/.well-known/jwks.json" 2>/dev/null) || continue
         if jq -en --argjson k1 "${k1_jwks}" --argjson k2 "${k2_jwks}" \
             --argjson required "${required}" '
               def valid:
@@ -368,11 +368,11 @@ assert_full_aggregates() {
             ' >/dev/null; then
             verify_tokens_with_jwks "${k1_jwks}" "$@"
             verify_tokens_with_jwks "${k2_jwks}" "$@"
-            log_success "Both Exchanges serve the complete aggregate and verify every required shard token"
+            log_success "Both DSX Identity Keys instances serve the complete aggregate and verify every required shard token"
             return 0
         fi
     done
-    log_error "Exchange aggregates did not converge with every required key"
+    log_error "DSX Identity Keys aggregates did not converge with every required key"
     return 1
 }
 
@@ -415,11 +415,11 @@ main() {
     assert_pod_registration_parent "${K2_CONTEXT}" "${K2_TRUST_DOMAIN}" \
         "${K2_POD}" "${FIXTURE_NAMESPACE}" operator-1
     [[ "$(token_kid "${k1_token}")" == "${K1_ORIGINAL_KID}" ]] || {
-        log_error "k1 Pod did not use the k1 Exchange signing key"
+        log_error "k1 Pod did not use the k1 DSX Identity Keys signing key"
         return 1
     }
     [[ "$(token_kid "${k2_token}")" == "${K2_ORIGINAL_KID}" ]] || {
-        log_error "k2 Pod did not use the k2 Exchange signing key"
+        log_error "k2 Pod did not use the k2 DSX Identity Keys signing key"
         return 1
     }
     log_timing "Pod token delivery and registration" "${stage_started}"
@@ -433,16 +433,16 @@ main() {
     k2_spire_svid=$(fetch_spire_jwt_svid \
         "${K2_CONTEXT}" "${K2_SPIRE_POD}" "${k2_spire_id}" "${AUDIENCE}" dsx-pod \
         "${K2_SPIRE_NAMESPACE}")
-    local_k1_token=$(exchange_spire_svid "${K1_EXCHANGE_URL}" "${k1_spire_svid}")
-    local_k2_token=$(exchange_spire_svid "${K2_EXCHANGE_URL}" "${k2_spire_svid}")
-    assert_token_contract "k1 SPIRE JWT-SVID through k1 Exchange" "${local_k1_token}" "${k1_subject}"
-    assert_token_contract "k2 SPIRE JWT-SVID through k2 Exchange" "${local_k2_token}" "${k2_spire_subject}"
+    local_k1_token=$(exchange_spire_svid "${K1_IDENTITY_KEYS_URL}" "${k1_spire_svid}")
+    local_k2_token=$(exchange_spire_svid "${K2_IDENTITY_KEYS_URL}" "${k2_spire_svid}")
+    assert_token_contract "k1 SPIRE JWT-SVID through k1 DSX Identity Keys" "${local_k1_token}" "${k1_subject}"
+    assert_token_contract "k2 SPIRE JWT-SVID through k2 DSX Identity Keys" "${local_k2_token}" "${k2_spire_subject}"
     [[ "$(token_kid "${local_k1_token}")" == "${K1_ORIGINAL_KID}" ]] || return 1
     [[ "$(token_kid "${local_k2_token}")" == "${K2_ORIGINAL_KID}" ]] || return 1
-    assert_exchange_rejects "k2 SPIRE JWT-SVID at k1 Exchange" \
-        "${K1_EXCHANGE_URL}" "${k2_spire_svid}"
-    assert_exchange_rejects "k1 SPIRE JWT-SVID at k2 Exchange" \
-        "${K2_EXCHANGE_URL}" "${k1_spire_svid}"
+    assert_exchange_rejects "k2 SPIRE JWT-SVID at k1 DSX Identity Keys" \
+        "${K1_IDENTITY_KEYS_URL}" "${k2_spire_svid}"
+    assert_exchange_rejects "k1 SPIRE JWT-SVID at k2 DSX Identity Keys" \
+        "${K2_IDENTITY_KEYS_URL}" "${k1_spire_svid}"
     log_timing "local exchange and shard rejection" "${stage_started}"
 
     stage_started=${SECONDS}

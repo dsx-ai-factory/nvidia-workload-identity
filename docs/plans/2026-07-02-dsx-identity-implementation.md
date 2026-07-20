@@ -8,11 +8,11 @@
 
 ## Implementation baseline
 
-k1 and k2 are independent identity shards. Each runs SPIRE and a local Exchange. There is no SPIRE federation. Each Exchange accepts JWT-SVIDs only from its co-located SPIRE installation.
+k1 and k2 are independent identity shards. Each runs SPIRE and a local DSX Identity Keys instance. There is no SPIRE federation. Each DSX Identity Keys instance accepts JWT-SVIDs only from its co-located SPIRE installation.
 
-k1 also runs the single DSX Event Bus, its OAuth2 provider, and OpenBao. Both Exchanges use OAuth2 client credentials to publish retained leased public keys to that Event Bus and subscribe to every key publication. Both Exchanges serve the same flat aggregate JWKS.
+k1 also runs the single DSX Event Bus, its OAuth2 provider, and OpenBao. Both DSX Identity Keys instances use OAuth2 client credentials to publish retained leased public keys to that Event Bus and subscribe to every key publication. Both DSX Identity Keys instances serve the same flat aggregate JWKS.
 
-k2 runs the DSX Identity Controller, KubeVirt, the layer-3 tenant UDN, `dsx_imds`, and the Exchange Proxy CSI path. KubeVirt metadata sidecars exchange their local SPIRE JWT-SVIDs through the proxy to k2 Exchange.
+k2 runs the DSX Identity Controller, KubeVirt, the layer-3 tenant UDN, `dsx_imds`, and the DSX Identity Keys Proxy CSI path. KubeVirt metadata sidecars exchange their local SPIRE JWT-SVIDs through the proxy to k2 DSX Identity Keys.
 
 ```text
 Contract + truthful tests
@@ -20,7 +20,7 @@ Contract + truthful tests
 Shared identity grammar
    ┌────┼──────────────┐
    ↓    ↓              ↓
-Exchange/keysets   Identity controller   dsx_imds/helpers
+DSX Identity Keys and keysets   Identity controller   dsx_imds/helpers
    └────┴──────────────┘
         ↓
 Shard-local Helm topology
@@ -32,12 +32,12 @@ The identity release is one `charts/dsx-identity` chart per shard. It depends di
 
 Locked contracts:
 
-- Exchange issuer: `spiffe://ds9.dsx.nvid.id`.
+- DSX Identity Keys issuer: `spiffe://ds9.dsx.nvid.id`.
 - Public identity service: `dsx`. Region: `ds9`. Partition: `nvid.id`.
-- Exchange signing: shard-local static signing JWKS Secret plus required active `kid`.
+- DSX Identity Keys signing: shard-local static signing JWKS Secret plus required active `kid`.
 - `kid` generation: go-jose SHA-256 public-JWK thumbprint. Every retained key across all shards has a unique `kid`, including keys present during rotation overlap. Retired values are never reused.
 - Event Bus: NVIDIA `dsx-exchange` v2.6.0, deployed only in k1.
-- Event Bus authentication: OAuth2 client credentials with narrow `spiffe-exchange.>` publish/subscribe permissions and no anonymous access.
+- Event Bus authentication: OAuth2 client credentials with narrow `dsx-identity-keys.>` publish/subscribe permissions and no anonymous access.
 - DPU source: unstructured `provisioning.dpu.nvidia.com/v1alpha1, Kind=DPU`. DPU ID: `metadata.name`.
 - DPU identity: first-class `/dpu/{dpu-id}` resource. In token-file delivery mode, configured Unix WorkloadAttestor selectors identify `dsx-token-fetcher`, the process that calls the Workload API. The protected token file is the capability consumed by the DPU process.
 - Host and VM source: one externally owned LaunchLayer source CR per resource. The E2E fixture stands in for that API.
@@ -54,7 +54,7 @@ Add validation targets for:
 - Helm lint and render for k1, k2, and local values
 - the external Event Bus values used by the demo
 
-All E2E assertions must observe deployed behavior. Tests must not inspect YAML, templates, scripts, or source as a proxy for behavior. Positive identity and token inputs must traverse the deployed SPIRE, controller where applicable, Exchange, metadata, and relying-party paths. VM IMDS requests originate from an external test client. Test-only JWT signers and static-token metadata responders are not permitted.
+All E2E assertions must observe deployed behavior. Tests must not inspect YAML, templates, scripts, or source as a proxy for behavior. Positive identity and token inputs must traverse the deployed SPIRE, controller where applicable, DSX Identity Keys, metadata, and relying-party paths. VM IMDS requests originate from an external test client. Test-only JWT signers and static-token metadata responders are not permitted.
 
 Implement `internal/identity` with table-driven tests for:
 
@@ -77,12 +77,12 @@ The package must:
 - Preserve valid process, pod, and role suffixes.
 - Use the configured operator tenant for operator DPU, Pod, and bare-metal host identities.
 - Enforce tenant ownership when registrations are created. Allow base host subjects to carry either the configured operator tenant or the dynamic tenant ID supplied by a source CR.
-- Keep Exchange tenant-agnostic. Validate the local credential and common subject grammar, then preserve the tenant already present in the subject.
+- Keep DSX Identity Keys tenant-agnostic. Validate the local credential and common subject grammar, then preserve the tenant already present in the subject.
 - Require Pod identities to use the host resource type.
 - Require the exact tenant, region, service, partition, resource type, and resource ID grammar.
 - Require UUID pod IDs.
 - Reject empty, malformed, or whitespace-normalized components.
-- Supply the builders used by Exchange and the controller.
+- Supply the builders used by DSX Identity Keys and the controller.
 
 A DPU CR creates the base `/dpu/{dpu-id}` identity. Kubernetes Pods use the operator tenant and their worker host ID. Process suffixes apply to separately declared processes.
 
@@ -101,7 +101,7 @@ Exit gate:
 - Canonical DPU, host, VM, process, pod, and role examples produce exact local and public IDs.
 - Invalid tenant, domain, path, and suffix cases fail.
 
-## 1. Implement shard-local Exchange signing
+## 1. Implement shard-local DSX Identity Keys signing
 
 `POST /v1/exchange` implements the RFC 8693 request and response contract:
 
@@ -110,16 +110,16 @@ Exit gate:
 - The submitted SPIRE JWT-SVID is validated through the local SPIRE JWT source.
 - A cluster-local SPIRE JWT-SVID issued by the other cluster is rejected.
 - Validated `aud`, `iat`, `exp`, and other claims remain unchanged.
-- `sub`, `iss`, and the signature are set by Exchange.
+- `sub`, `iss`, and the signature are set by DSX Identity Keys.
 
-`cmd/spiffe-exchange-service` must:
+`cmd/dsx-identity-keys` must:
 
 - Require issuer `spiffe://ds9.dsx.nvid.id`.
 - Load `signing-jwks.json` and `active-kid` from a mounted Secret.
 - Require the active key to contain private asymmetric signing material with an `alg` compatible with the key.
 - Allow non-active public keys so rotation overlap does not expose retired private material.
 - Require a non-empty, unique `kid` on every configured key.
-- Use the active shard key for every tenant and resource handled by that Exchange.
+- Use the active shard key for every tenant and resource handled by that DSX Identity Keys instance.
 - Project only public JWK fields.
 - Serve JWKS independently of the HTTP `Host` header.
 - Return the configured issuer and JWKS URL from OIDC discovery.
@@ -127,20 +127,20 @@ Exit gate:
 
 Exit gate:
 
-- Restarting Exchange retains its signing identity.
+- Restarting DSX Identity Keys retains its signing identity.
 - Different tenants receive the same configured issuer and shard signing key.
 - Claims other than `sub` and `iss` remain unchanged.
 - Discovery and JWKS use configured values.
 - Invalid signing configuration prevents readiness.
-- Each Exchange accepts a SPIRE JWT-SVID issued by its local SPIRE and rejects a SPIRE JWT-SVID issued by the other shard.
+- Each DSX Identity Keys instance accepts a SPIRE JWT-SVID issued by its local SPIRE and rejects a SPIRE JWT-SVID issued by the other shard.
 
 ## 2. Implement retained public-key propagation
 
-Publishing and aggregation run inside the Exchange binary. Record the local
+Publishing and aggregation run inside the DSX Identity Keys binary. Record the local
 contract in the component documentation and use the Event Bus MQTT endpoint:
 
 ```text
-Topic:    spiffe-exchange/v1/pub-keys/shard/{shard_id}/kid/{kid}
+Topic:    dsx-identity-keys/v1/pub-keys/shard/{shard_id}/kid/{kid}
 QoS:      1
 Retained: true
 Payload:  { "published_at": <unix-seconds>, "lease_expires_at": <unix-seconds>, "jwk": <public RFC 7517 JWK> }
@@ -150,12 +150,12 @@ The topic supplies the shard ID and globally unique `kid`. The payload `kid`
 must match the topic. Private JWK fields, symmetric keys, unsupported
 algorithms, malformed publications, and expired leases are rejected.
 
-Each Exchange:
+Each DSX Identity Keys instance:
 
 1. Loads its shard-local keyset.
 2. Obtains and refreshes an OAuth2 client-credentials token.
 3. Connects with MQTT username `oauthtoken`, the access token as password, and scope `mqtt`.
-4. Subscribes to `spiffe-exchange/v1/pub-keys/shard/+/kid/+`.
+4. Subscribes to `dsx-identity-keys/v1/pub-keys/shard/+/kid/+`.
 5. Publishes each local public key under its shard ID and `kid` with a lease.
 6. Stores accepted keys only by globally unique `kid`.
 7. Replaces one key atomically per valid publication.
@@ -171,7 +171,7 @@ Key handling:
 - Reconnection republishes local keys and consumes retained publications.
 - Rotation publishes the new key under its new `kid`. Retired keys disappear when their leases expire.
 
-Focused tests start an OAuth2-protected local broker and at least two Exchange/key-sync instances. They prove:
+Focused tests start an OAuth2-protected local broker and at least two DSX Identity Keys key-sync instances. They prove:
 
 - Both instances serve every published key.
 - Tokens from either shard verify with either aggregate.
@@ -288,13 +288,13 @@ The HTTP contract is:
 - Require exactly one SVID with the configured `dsx-imds` or `dsx-imds-vm` hint.
 - Use the exact hint to distinguish the tenant-facing VM identity selected for IMDS from the operator Pod identity available through the host-provisioned Workload API.
 - Exchange it through the RFC 8693 client.
-- Use the Exchange Proxy CSI Unix socket in KubeVirt sidecars.
-- Send k2 metadata exchanges to k2 Exchange.
+- Use the DSX Identity Keys Proxy CSI Unix socket in KubeVirt sidecars.
+- Send k2 metadata exchanges to k2 DSX Identity Keys.
 
 Implement both NodeAttestor halves:
 
 - Agent plugin: calls DSX IMDS v1 with `Metadata: true`, requests the configured SPIRE-server audience, and sends the returned exchanged host JWT as attestation data.
-- Server plugin: validates issuer, signature against the local Exchange aggregate JWKS, exact audience, expiry/not-before, canonical tenant grammar, and a base `/host/{host-id}` subject. It then emits:
+- Server plugin: validates issuer, signature against the local DSX Identity Keys aggregate JWKS, exact audience, expiry/not-before, canonical tenant grammar, and a base `/host/{host-id}` subject. It then emits:
 
   ```text
   spiffe://<local-trust-domain>/spire/agent/dsx_imds/tenant/<tenant>/host/<host-id>
@@ -308,8 +308,8 @@ Exit gate:
 - E2E checks the exact operator worker-host IMDS subject before `dsx_imds` attestation.
 - E2E fetches both the `dsx-pod` operator Pod identity and `dsx-imds-vm` dynamic VM identity from the virt-launcher host Workload API.
 - Wrong issuer, audience, signature, subject type, suffix, expiry, or not-before fails.
-- Missing metadata header, proxy headers, missing or duplicate hint, and unavailable Exchange proxy fail.
-- A real k2 VM obtains its token through metadata-service, SPIRE CSI, Exchange Proxy CSI, and k2 Exchange.
+- Missing metadata header, proxy headers, missing or duplicate hint, and an unavailable DSX Identity Keys Proxy fail.
+- A real k2 VM obtains its token through metadata-service, SPIRE CSI, DSX Identity Keys Proxy CSI, and k2 DSX Identity Keys.
 - The VM request is initiated by an external test client.
 - No recurring guest test process or test-only HTTP responder exists.
 
@@ -318,23 +318,23 @@ Exit gate:
 | Component | k1 | k2 |
 |---|---:|---:|
 | Local SPIRE | Yes | Yes |
-| Local Exchange | Yes | Yes |
+| Local DSX Identity Keys | Yes | Yes |
 | DSX Event Bus and OAuth2 provider | Yes | No |
 | DSX Identity Controller | No | Yes |
 | OpenBao | Yes | No |
 | KubeVirt, OVN, and layer-3 UDN | No | Yes |
-| Exchange Proxy CSI and VM injection | No | Yes |
+| DSX Identity Keys Proxy CSI and VM injection | No | Yes |
 | `dsx_imds` integration | No | Yes |
 
 Install one `charts/dsx-identity` release in each shard:
 
 - Use the official SPIRE chart as its third-party subchart.
-- Render Exchange, the Identity Controller, Exchange Proxy CSI, VM support, Pod support, and Kyverno policies directly from the identity chart.
+- Render DSX Identity Keys, the Identity Controller, DSX Identity Keys Proxy CSI, VM support, Pod support, and Kyverno policies directly from the identity chart.
 - Install the official `spire-crds` chart first.
-- Mount one distinct shard-local signing Secret in each Exchange.
-- Configure each Exchange with its local SPIRE JWT source.
+- Mount one distinct shard-local signing Secret in each DSX Identity Keys instance.
+- Configure each DSX Identity Keys instance with its local SPIRE JWT source.
 - Deploy the Identity Controller only in k2, where the watched CRs live.
-- Point k2 metadata and token-fetcher flows to k2 Exchange.
+- Point k2 metadata and token-fetcher flows to k2 DSX Identity Keys.
 
 Deploy external prerequisites separately:
 
@@ -347,20 +347,20 @@ Event Bus topology:
 
 - Deploy a single-node, memory-backed, OAuth2-authenticated Kind profile.
 - Use the pinned Keycloak 26.0.7 image and minimal realm fixture.
-- Store the Exchange OAuth2 client credential in each Exchange namespace.
-- Use in-cluster MQTT and OAuth endpoints for k1 Exchange.
-- Expose only the MQTT and OAuth endpoints that k2 Exchange needs through explicit Gateway and DNS resources.
+- Store the DSX Identity Keys OAuth2 client credential in each identity namespace.
+- Use in-cluster MQTT and OAuth endpoints for k1 DSX Identity Keys.
+- Expose only the MQTT and OAuth endpoints that k2 DSX Identity Keys needs through explicit Gateway and DNS resources.
 - Do not expose SPIRE bundle endpoints or configure SPIRE federation.
 - Configure shard IDs `k1` and `k2`.
 
 Exit gate:
 
-- k1 runs SPIRE, Exchange, the Event Bus, OAuth2 provider, and OpenBao.
-- k2 runs SPIRE, Exchange, the controller, KubeVirt support, Exchange Proxy CSI, and `dsx_imds`.
-- Both Exchanges obtain OAuth2 tokens and connect to the k1 Event Bus.
-- Each Exchange accepts a SPIRE JWT-SVID issued by its local SPIRE and rejects a SPIRE JWT-SVID issued by the other shard.
-- Both Exchanges publish their retained local public keys and serve the complete aggregate JWKS.
-- k2 VM traffic reaches k2 Exchange through the CSI socket.
+- k1 runs SPIRE, DSX Identity Keys, the Event Bus, OAuth2 provider, and OpenBao.
+- k2 runs SPIRE, DSX Identity Keys, the controller, KubeVirt support, DSX Identity Keys Proxy CSI, and `dsx_imds`.
+- Both DSX Identity Keys instances obtain OAuth2 tokens and connect to the k1 Event Bus.
+- Each DSX Identity Keys instance accepts a SPIRE JWT-SVID issued by its local SPIRE and rejects a SPIRE JWT-SVID issued by the other shard.
+- Both DSX Identity Keys instances publish their retained local public keys and serve the complete aggregate JWKS.
+- k2 VM traffic reaches k2 DSX Identity Keys through the CSI socket.
 - The identity chart lints and renders with both shard value sets.
 - Repeated installation is idempotent.
 
@@ -368,7 +368,7 @@ Exit gate:
 
 Configure OpenBao to:
 
-- Consume k1 Exchange's aggregate `/.well-known/jwks.json`.
+- Consume k1 DSX Identity Keys instance's aggregate `/.well-known/jwks.json`.
 - Use JWT CEL authentication at `/v1/auth/jwt/cel/login`.
 - Bind issuer `spiffe://ds9.dsx.nvid.id` and the requested audience.
 - Parse exact `<tenant>.ds9.dsx.nvid.id` subjects.
@@ -378,17 +378,17 @@ Configure OpenBao to:
 
 The full E2E suite must prove functional behavior:
 
-- A real k1 workload obtains a local SPIRE JWT-SVID, exchanges it through k1 Exchange, and authenticates to OpenBao.
-- A real k2 workload obtains a local SPIRE JWT-SVID, exchanges it through k2 Exchange, and authenticates to the same OpenBao.
-- A real k2 VM obtains its identity through metadata-service and Exchange Proxy CSI to k2 Exchange, then authenticates to OpenBao.
-- k1 Exchange rejects a raw k2 SPIRE JWT-SVID and k2 Exchange rejects a raw k1 SPIRE JWT-SVID.
-- Both Exchanges authenticate to the single k1 Event Bus with OAuth2 client credentials.
-- Both Exchanges publish retained public keys.
+- A real k1 workload obtains a local SPIRE JWT-SVID, exchanges it through k1 DSX Identity Keys, and authenticates to OpenBao.
+- A real k2 workload obtains a local SPIRE JWT-SVID, exchanges it through k2 DSX Identity Keys, and authenticates to the same OpenBao.
+- A real k2 VM obtains its identity through metadata-service and DSX Identity Keys Proxy CSI to k2 DSX Identity Keys, then authenticates to OpenBao.
+- k1 DSX Identity Keys rejects a raw k2 SPIRE JWT-SVID and k2 DSX Identity Keys rejects a raw k1 SPIRE JWT-SVID.
+- Both DSX Identity Keys instances authenticate to the single k1 Event Bus with OAuth2 client credentials.
+- Both DSX Identity Keys instances publish retained public keys.
 - Both aggregate JWKS endpoints contain every valid published key.
-- A token from either Exchange verifies against either aggregate endpoint.
+- A token from either DSX Identity Keys instance verifies against either aggregate endpoint.
 - A k2 token receives exactly the expected OpenBao policies and secret access. Forbidden access fails.
-- A real wrong-audience SPIRE JWT-SVID exchanged by its local Exchange is rejected by OpenBao.
-- Restarting both Exchanges reconstructs the full aggregate from retained Event Bus state without changing signing identities.
+- A real wrong-audience SPIRE JWT-SVID exchanged by its local DSX Identity Keys is rejected by OpenBao.
+- Restarting both DSX Identity Keys instances reconstructs the full aggregate from retained Event Bus state without changing signing identities.
 - Rotating either shard exposes its old and new globally unique keys during overlap.
 - Focused Go tests advance publication lease time deterministically and remove only the retired key.
 - The installation and complete E2E test succeed from a clean environment.

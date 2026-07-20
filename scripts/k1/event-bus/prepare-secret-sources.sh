@@ -128,7 +128,7 @@ prepare_oauth_secret() {
 }
 
 prepare_oauth() {
-    prepare_oauth_secret spiffe-exchange-mqtt-oauth spiffe-exchange "${TEMP_DIR}/oauth"
+    prepare_oauth_secret dsx-identity-keys-mqtt-oauth dsx-identity-keys "${TEMP_DIR}/oauth"
     prepare_oauth_secret event-bus-e2e-observer-oauth event-bus-e2e-observer \
         "${TEMP_DIR}/observer-oauth"
 }

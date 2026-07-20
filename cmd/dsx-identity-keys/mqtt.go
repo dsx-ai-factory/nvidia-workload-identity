@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	keyTopicPrefix       = "spiffe-exchange/v1/pub-keys/shard/"
+	keyTopicPrefix       = "dsx-identity-keys/v1/pub-keys/shard/"
 	keyTopicWildcard     = keyTopicPrefix + "+/kid/+"
 	mqttQoS              = byte(1)
 	mqttOperationTimeout = 10 * time.Second

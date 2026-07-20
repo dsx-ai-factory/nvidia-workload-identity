@@ -20,12 +20,12 @@ var (
 
 func run() (runErr error) {
 	flag.StringVar(&nodeID, "node-id", "", "Node ID")
-	flag.StringVar(&csiSocketPath, "csi-socket-path", "/exchange-proxy-csi/csi.sock", "CSI socket path")
-	flag.StringVar(&socketDir, "socket-dir", "/run/dsx", "Directory containing exchange socket")
+	flag.StringVar(&csiSocketPath, "csi-socket-path", "/dsx-identity-keys-proxy-csi/csi.sock", "CSI socket path")
+	flag.StringVar(&socketDir, "socket-dir", "/run/dsx", "Directory containing DSX Identity Keys socket")
 	flag.TextVar(&logLevel, "log-level", slog.LevelInfo, "log level (debug, info, warn, error)")
 	flag.Parse()
 
-	sdk, err := telemetry.Setup(context.Background(), "exchange-proxy-csi", os.Stdout, logLevel)
+	sdk, err := telemetry.Setup(context.Background(), "dsx-identity-keys-proxy-csi", os.Stdout, logLevel)
 	if err != nil {
 		return fmt.Errorf("configure OpenTelemetry: %w", err)
 	}
@@ -40,7 +40,7 @@ func run() (runErr error) {
 		return errors.New("socket directory is required")
 	}
 
-	slog.Info("Starting exchange-proxy-csi",
+	slog.Info("Starting dsx-identity-keys-proxy-csi",
 		"node_id", nodeID,
 		"plugin_name", PluginName,
 		"socket_dir", socketDir,
@@ -57,7 +57,7 @@ func run() (runErr error) {
 
 func main() {
 	if err := run(); err != nil {
-		slog.Error("Exchange proxy CSI failed", "error", err)
+		slog.Error("DSX Identity Keys Proxy CSI failed", "error", err)
 		os.Exit(1)
 	}
 }

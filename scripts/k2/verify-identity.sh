@@ -23,7 +23,7 @@ EXTERNAL_CLIENT_CONTAINER="external-client"
 OPERATOR_HOST_ID="k2-worker"
 DPU_TOKEN_FETCHER_POD="e2e-dpu-token-fetcher"
 VM_TOKEN=""
-K2_EXCHANGE_KID=""
+K2_IDENTITY_KEYS_KID=""
 GATEWAY_ADDRESS=""
 E2E_PROBE_IMAGE=""
 
@@ -144,10 +144,10 @@ check_token_contract() {
         log_error "Could not decode JWT header"
         return 1
     fi
-    if ! jq -e --arg kid "${K2_EXCHANGE_KID}" '
+    if ! jq -e --arg kid "${K2_IDENTITY_KEYS_KID}" '
         .alg == "ES256" and .kid == $kid
     ' <<<"${header}" >/dev/null; then
-        log_error "DSX token was not signed by the k2 Exchange active key"
+        log_error "DSX token was not signed by the k2 DSX Identity Keys active key"
         jq . <<<"${header}" 2>/dev/null || true
         return 1
     fi
@@ -419,7 +419,7 @@ main() {
 
     initialize_external_test_process
 
-    K2_EXCHANGE_KID=$(kubectl get secret spiffe-exchange-signing-keyset -n dsx-identity \
+    K2_IDENTITY_KEYS_KID=$(kubectl get secret dsx-identity-keys-signing-keyset -n dsx-identity \
         --context "${CONTEXT}" -o json | jq -er '.data["active-kid"]' | base64 -d)
     log_timing "setup" "${setup_started}"
 

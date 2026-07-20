@@ -49,28 +49,28 @@
 
 ## Authoritative topology
 
-- k1 and k2 each run independent SPIRE and a co-located Exchange. There is no SPIRE federation.
+- k1 and k2 each run independent SPIRE and a co-located DSX Identity Keys deployment. There is no SPIRE federation.
 - Common Services and Data Hall are deployment placement labels only. They do not define parent, group, or trust-set hierarchy in the key propagation protocol. Cluster names `k1` and `k2` describe only the local test topology.
 - DPUs are external hardware boundaries, not Kubernetes worker nodes. Each DPU runs a SPIRE agent that attests through `dsx_dpu` using its serial number or SPDM and receives the workload identities registered beneath that agent.
 - Every Kubernetes worker node is an operator-owned bare-metal host. Tenant-facing bare-metal hosts are standalone LaunchLayer and NICo resources and never join Kubernetes as worker nodes.
 - Every DPU and every Kubernetes Pod is operator-owned. The only tenant-owned resources are standalone NICo-managed bare-metal hosts and KubeVirt VMs, both declared by LaunchLayer. There are no tenant-owned Pods, Kubernetes workers, or DPUs.
 - KubeVirt VMs run on operator-owned bare-metal workers. The virt-launcher Pod is an operator Pod, while the VM identity uses the tenant supplied dynamically by its LaunchLayer source CR.
 - Every identity shard configures its own internal SPIRE trust domain and cluster name.
-- Exchange key propagation is flat. Every Exchange in one Event Bus topic space uses a globally unique shard ID, publishes only its local public keys at `spiffe-exchange/v1/pub-keys/shard/<shard-id>/kid/<kid>`, subscribes to `spiffe-exchange/v1/pub-keys/shard/+/kid/+`, retains all valid public keys by globally unique `kid`, and serves the aggregate JWKS.
+- DSX Identity Keys public-key propagation is flat. Every DSX Identity Keys instance in one Event Bus topic space uses a globally unique shard ID, publishes only its local public keys at `dsx-identity-keys/v1/pub-keys/shard/<shard-id>/kid/<kid>`, subscribes to `dsx-identity-keys/v1/pub-keys/shard/+/kid/+`, retains all valid public keys by globally unique `kid`, and serves the aggregate JWKS.
 - Do not add bundle endpoints, federated trust, federation CA synchronization, or federation-only routes and certificates.
-- Each Exchange accepts only SPIRE JWT-SVIDs issued by its local SPIRE and rejects SPIRE JWT-SVIDs issued by every nonlocal shard.
+- Each DSX Identity Keys instance accepts only SPIRE JWT-SVIDs issued by its local SPIRE and rejects SPIRE JWT-SVIDs issued by every nonlocal shard.
 - The DSX Event Bus and OAuth2 provider are external to the identity chart. Local E2E deploys one instance in k1. Data Hall shards do not deploy either component.
-- Every Exchange uses OAuth2 client credentials for Event Bus MQTT with only `spiffe-exchange.>` publish/subscribe access. Anonymous broker access is disabled.
-- Run two active Exchange replicas per shard with unique per-Pod MQTT client IDs. Rolling updates and Pod disruption must keep one replica available.
-- Expose only the MQTT and OAuth token endpoints required by Exchanges placed outside the Event Bus cluster.
+- Every DSX Identity Keys instance uses OAuth2 client credentials for Event Bus MQTT with only `dsx-identity-keys.>` publish/subscribe access. Anonymous broker access is disabled.
+- Run two active DSX Identity Keys replicas per shard with unique per-Pod MQTT client IDs. Rolling updates and Pod disruption must keep one replica available.
+- Expose only the MQTT and OAuth token endpoints required by DSX Identity Keys instances placed outside the Event Bus cluster.
 - Kyverno is external. Its DSX identity policies belong in the identity chart. The Kyverno runtime does not.
-- Relying parties use any reachable Exchange aggregate JWKS. Repository validation deploys OpenBao in k1 only for convenience.
+- Relying parties use the aggregate JWKS from any reachable DSX Identity Keys instance. Repository validation deploys OpenBao in k1 only for convenience.
 - Cross-shard trust exists only through exchanged DSX tokens and propagated public keys.
 
 ## Helm and deployment
 
 - `charts/dsx-identity` is the single identity chart installed in each shard.
-- Depend directly on the official SPIRE chart. Template repository-owned Exchange, controller, metadata, CSI, and policy resources directly. Configure node-attestor plugins through SPIRE values. Do not create separately packaged local wrapper charts.
+- Depend directly on the official SPIRE chart. Template repository-owned DSX Identity Keys, controller, metadata, CSI, and policy resources directly. Configure node-attestor plugins through SPIRE values. Do not create separately packaged local wrapper charts.
 - Install the official SPIRE CRD chart first where its APIs are required.
 - DSX Event Bus, Keycloak, Kyverno runtime, cluster infrastructure, OpenBao, nginx, VMs, and E2E clients remain external to the identity chart.
 - CI packages and publishes only artifacts the repository actually produces: the identity chart and current images.
@@ -84,7 +84,7 @@
 - Let Skaffold tolerate transient Kubernetes failures until each deployment deadline. Keep explicit provider gates only where an API, admission, or infrastructure contract must hold before a dependent config can be applied.
 - Use `kubectl rollout status` for controllers and `kubectl wait` for other resources. Avoid arbitrary sleeps.
 - The local k2 fixture uses OVN-Kubernetes layer-3 UDN and KubeVirt with a cached `containerDisk` image. WSL is unsupported because the metadata bridge requires nftables.
-- Local E2E installs each identity chart once. Its normal Exchange Pod runs on the Phase 0 seed node while the worker `dsx_imds` agent attests. Do not add a staged Exchange registration, bootstrap-specific Exchange identity, or second Helm release.
+- Local E2E installs each identity chart once. Its normal DSX Identity Keys Pod runs on the Phase 0 seed node while the worker `dsx_imds` agent attests. Do not add a staged DSX Identity Keys registration, bootstrap-specific DSX Identity Keys identity, or second Helm release.
 - Use CSI drivers for workload identity delivery, not hostPath mounts.
 
 ## Identity contract
@@ -103,17 +103,17 @@ spiffe://<operator-tenant>.ds9.dsx.nvid.id/host/<id>/pod/<uuid>
 - SPIRE Pod paths use `/tenant/<operator-tenant>/service/dsx/host/<node-name>/pod/<uuid>`.
 - Every Kubernetes Pod registration is parented to the `dsx_imds` agent for its operator-owned worker host. DPU agents and standalone tenant-host agents do not parent Kubernetes Pod registrations.
 
-## Exchange and key propagation
+## DSX Identity Keys and key propagation
 
 - Keep the existing unauthenticated RFC 8693 `/v1/exchange` HTTP contract. Do not add mTLS, endpoint authentication, sender constraints, or another audience form field.
 - Validate the submitted local SPIRE JWT-SVID. Preserve validated claims except for the existing `sub`, `iss`, and signature transformation.
 - Issue with `spiffe://ds9.dsx.nvid.id`.
 - The same configured operator tenant covers operator DPUs, operator Pods, and operator bare-metal hosts. Enforce that ownership when SPIRE registrations are created. A standalone tenant-facing host subject instead carries the dynamic tenant ID supplied by its LaunchLayer source CR. Kubernetes Pod subjects use the host resource type and Kubernetes node name.
-- Exchange is tenant-agnostic. It must not receive, configure, distinguish, authorize, or otherwise depend on the operator tenant or any individual tenant. It verifies locally issued SPIRE JWT-SVIDs, validates the common subject grammar, preserves the tenant already present in the subject, and changes only the subject and issuer encoding before signing the DSX JWT.
+- DSX Identity Keys is tenant-agnostic. It must not receive, configure, distinguish, authorize, or otherwise depend on the operator tenant or any individual tenant. It verifies locally issued SPIRE JWT-SVIDs, validates the common subject grammar, preserves the tenant already present in the subject, and changes only the subject and issuer encoding before signing the DSX JWT.
 - Each shard loads one static private JWKS Secret containing `signing-jwks.json` and `active-kid`. Every tenant in that shard uses it.
-- Publish each public JWK at `spiffe-exchange/v1/pub-keys/shard/<shard-id>/kid/<kid>` and store the aggregate only by globally unique `kid`. Refresh each lease often enough for at least three further publish attempts before expiry.
+- Publish each public JWK at `dsx-identity-keys/v1/pub-keys/shard/<shard-id>/kid/<kid>` and store the aggregate only by globally unique `kid`. Refresh each lease often enough for at least three further publish attempts before expiry.
 - Every `kid` is globally unique and never reused. Preserve configured values and generate new IDs from the go-jose SHA-256 public JWK thumbprint.
-- Derive each Exchange signing algorithm from the JWK `alg` and validate that it matches the key material. Discovery must advertise the algorithms present in the aggregate JWKS.
+- Derive the signing algorithm for each DSX Identity Keys instance from the JWK `alg` and validate that it matches the key material. Discovery must advertise the algorithms present in the aggregate JWKS.
 - Validate `kid` uniqueness within each local signing keyset. Retained publications replace the globally unique `kid` they address.
 - Rotation publishes the new key under its new kid. Old Pods stop refreshing the old key's publication when replaced, and its lease expires after the configured retention period.
 
@@ -135,9 +135,9 @@ spiffe://<operator-tenant>.ds9.dsx.nvid.id/host/<id>/pod/<uuid>
 - Run the DPU token fetcher under a dedicated OS account. Prefer Unix UID, executable path, and packaged-binary SHA-256 selectors. Path and SHA-256 selectors require the external DPU SPIRE agent to enable Unix workload path discovery. Keep the executable root-owned and immutable.
 - Do not use the Delegated Identity API or PID delegation for DPU token-file delivery. The ordinary Workload API attests its caller, so a separate fetcher cannot claim selectors belonging to the consuming DPU process.
 - `dsx_imds` is the shared host/VM contract. Both NodeAttestor sides live in this repository.
-- `dsx-token-fetcher` is the shared token-file delivery implementation. Kubernetes Pods run it as a sidecar. An external DPU supervisor runs the same binary as a local process outside the identity chart. Host-process-specific registration and delivery are outside the current remediation scope and require a concrete consumer and selector contract before they are added. Do not document a separate Local Exchange Helper or Exchange Sidecar component.
+- `dsx-token-fetcher` is the shared token-file delivery implementation. Kubernetes Pods run it as a sidecar. An external DPU supervisor runs the same binary as a local process outside the identity chart. Host-process-specific registration and delivery are outside the current remediation scope and require a concrete consumer and selector contract before they are added. Do not document a separate Local DSX Identity Keys Helper or DSX Identity Keys Sidecar component.
 - DSX IMDS is the `metadata-service` implementation shared by NICo or Carbide bare-metal delivery and KubeVirt VM delivery. Do not confuse it with the `dsx_imds` NodeAttestor contract.
-- DSX IMDS configures one `--exchange-service-url`, and its scheme selects direct HTTP or Exchange Proxy CSI over a Unix socket. The deployment topology chooses the transport independently of the SVID hint. Do not enforce a hint-to-transport pairing or add a helper proxy or separate metadata binary.
+- DSX IMDS configures one `--identity-keys-url`, and its scheme selects direct HTTP or DSX Identity Keys Proxy CSI over a Unix socket. The deployment topology chooses the transport independently of the SVID hint. Do not enforce a hint-to-transport pairing or add a helper proxy or separate metadata binary.
 - A NICo or Carbide bare-metal host reaches link-local IMDS through its paired DPU intercept. NICo or Carbide IMDS passes the identity request to DSX IMDS, which selects and exchanges the host SVID. The host SPIRE agent consumes the returned DSX JWT through `dsx_imds` for node attestation and serves host processes.
 - Support only tokenless GET at `/latest/meta-data/identity?aud=<audience>` and `/2009-04-04/meta-data/identity?aud=<audience>`. The `aud` parameter may repeat to request additional audiences.
 - Metadata responses support `application/json` and `text/plain`. An absent `Accept` header defaults to JSON. A present header with no acceptable supported media type returns HTTP 406.
@@ -145,11 +145,11 @@ spiffe://<operator-tenant>.ds9.dsx.nvid.id/host/<id>/pod/<uuid>
 - Serve metadata responses with IPv4 TTL 1 and IPv6 hop limit 1.
 - VM identity comes from the `dsx_imds`-attested agent and the real `metadata-service`, SPIRE CSI, and RFC 8693 path.
 - The operator-owned virt-launcher Pod and tenant-owned VM identities use the operator worker host's Workload API. `metadata-service` selects the tenant-facing VM SVID by its exact `dsx-imds-vm` hint. Do not describe them as separate SPIRE agent paths.
-- Data Hall KubeVirt metadata sidecars reach their local Exchange through Exchange Proxy CSI. Do not remove or bypass the proxy.
+- Data Hall KubeVirt metadata sidecars reach their local DSX Identity Keys through DSX Identity Keys Proxy CSI. Do not remove or bypass the proxy.
 
 ## OpenBao
 
-- Use `/v1/auth/jwt/cel/login` with any reachable Exchange's full aggregate JWKS. Local E2E uses k1 Exchange.
+- Use `/v1/auth/jwt/cel/login` with the full aggregate JWKS from any reachable DSX Identity Keys instance. Local E2E uses k1 DSX Identity Keys.
 - CEL validates the full subject grammar and extracts tenant, region, service, resource type, resource ID, and optional role for policy evaluation.
 - Policies remain narrowly scoped to authenticated, region, tenant, service, and resource-type identities.
 - Use the official OpenBao chart with native self-initialization and expose it through the k1 Gateway. Do not manage init keys or a root token, and do not use port-forwards.
@@ -197,23 +197,23 @@ spiffe://<operator-tenant>.ds9.dsx.nvid.id/host/<id>/pod/<uuid>
 - Positive E2E paths must not use fake metadata responders, test JWT signers, directly signed tokens, or test-only authentication paths. Focused unit tests may use local fakes and signers.
 - VM requests are initiated by an external client. Do not run recurring assertions or result markers inside the guest.
 - Do not create DPU Kubernetes Nodes or tenant-facing bare-metal Kubernetes Nodes in local E2E. Use stable fixtures for their source and registration contracts. The worker-host fixture already proves both `dsx_imds` plugin halves, so do not run a second standalone-host agent fixture.
-- Kind confines its ordinary `k8s_psat` agent to the Phase 0 seed node. The normal Exchange Pod runs there, and the same node emulates the external `dsx_dpu` execution boundary. The fixture entry is separate from the controller-managed entry beneath the `dsx_dpu` parent and is not evidence for that association. Metadata-service, both `dsx_imds` plugins, and every downstream component run in E2E.
+- Kind confines its ordinary `k8s_psat` agent to the Phase 0 seed node. The normal DSX Identity Keys Pod runs there, and the same node emulates the external `dsx_dpu` execution boundary. The fixture entry is separate from the controller-managed entry beneath the `dsx_dpu` parent and is not evidence for that association. Metadata-service, both `dsx_imds` plugins, and every downstream component run in E2E.
 - Local E2E proves repository-owned components and their exact runtime identity contracts. Assert subjects, parent IDs, selectors, hints, and tenant sources from live SPIRE registration state, then prove token delivery through the real applicable components.
 - Stable fixtures may represent external DPU and bare-metal boundaries. Local E2E need not emulate DPU hardware, a bare-metal operating system, physical link-local interception, or NICo or Carbide internals.
 - Keep fixture-only registrations separate from controller-managed registrations. Never accept a fixture parent or subject as evidence for the deployed association or identity shape.
 - Local E2E may expose the real DSX IMDS directly as the external intercept and passthrough boundary. Keep the deployed flow documented first, and do not claim that the fixture proves physical integration.
-- Focused tests cover multiple flat Exchange shards, rotation overlap, retained-state
-  reconstruction after restart, and complete aggregates at multiple Exchanges without
+- Focused tests cover multiple flat DSX Identity Keys shards, rotation overlap, retained-state
+  reconstruction after restart, and complete aggregates at multiple DSX Identity Keys instances without
   expanding the local E2E topology.
 - E2E must prove:
-  - real k1 nginx Pod -> k1 SPIRE -> k1 Exchange.
-  - real k2 nginx Pod -> k2 SPIRE -> k2 Exchange.
-  - real KubeVirt VM -> metadata-service -> Exchange Proxy CSI -> k2 Exchange.
-  - the controller-managed DPU entry has the exact `dsx_dpu` parent, base DPU subject, `dsx-dpu` hint, and Unix selectors for the real `dsx-token-fetcher` process. A stable external-agent fixture runs that fetcher through local SPIRE and Exchange and produces a protected DSX token file without creating a DPU Kubernetes Node.
+  - real k1 nginx Pod -> k1 SPIRE -> k1 DSX Identity Keys.
+  - real k2 nginx Pod -> k2 SPIRE -> k2 DSX Identity Keys.
+  - real KubeVirt VM -> metadata-service -> DSX Identity Keys Proxy CSI -> k2 DSX Identity Keys.
+  - the controller-managed DPU entry has the exact `dsx_dpu` parent, base DPU subject, `dsx-dpu` hint, and Unix selectors for the real `dsx-token-fetcher` process. A stable external-agent fixture runs that fetcher through local SPIRE and DSX Identity Keys and produces a protected DSX token file without creating a DPU Kubernetes Node.
   - operator worker-host IMDS returns the configured operator tenant and exact node ID.
   - the virt-launcher Pod's operator entry and dynamically tenant-supplied VM entry have the same operator-tenant host-agent parent. Real Pod token delivery and VM metadata delivery prove issuance through that agent.
   - mutual rejection of the other shard's SPIRE JWT-SVIDs.
-  - OAuth2-authenticated Event Bus MQTT connectivity and retained publication from both Exchanges.
+  - OAuth2-authenticated Event Bus MQTT connectivity and retained publication from both DSX Identity Keys instances.
   - both aggregate JWKS endpoints contain every valid published `kid` and verify either shard's token.
   - real k2 token login to the external OpenBao validation deployment with exact policies and access.
 - Focused tests must prove globally unique key rotation and publication lease expiry

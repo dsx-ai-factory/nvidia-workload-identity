@@ -9,10 +9,10 @@
   },
   "clients": [
     {
-      "clientId": "spiffe-exchange",
+      "clientId": "dsx-identity-keys",
       "enabled": true,
       "publicClient": false,
-      "secret": "${SPIFFE_EXCHANGE_CLIENT_SECRET}",
+      "secret": "${DSX_IDENTITY_KEYS_CLIENT_SECRET}",
       "directAccessGrantsEnabled": false,
       "standardFlowEnabled": false,
       "implicitFlowEnabled": false,

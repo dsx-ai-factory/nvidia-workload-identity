@@ -2,17 +2,18 @@
 
 `metadata-service` implements DSX IMDS. It serves DSX identity through the
 link-local IMDS v1 API, selects a local SPIRE JWT-SVID by hint, exchanges it,
-and returns the DSX JWT. KubeVirt uses Exchange Proxy CSI. Paired-DPU placement
-uses a direct URL to its reachable shard-local Exchange. Each process configures
-exactly one `--exchange-service-url`, whose scheme selects the transport.
+and returns the DSX JWT. KubeVirt uses DSX Identity Keys Proxy CSI. Paired-DPU
+placement uses a direct URL to its reachable shard-local DSX Identity Keys.
+Each process configures exactly one `--identity-keys-url`, whose scheme selects
+the transport.
 
 ```mermaid
 sequenceDiagram
     participant VM as KubeVirt VM external client
     participant MS as virt-launcher DSX IMDS sidecar
     participant SA as dsx_imds-attested host SPIRE agent process
-    participant CSI as Exchange Proxy CSI socket
-    participant EX as Shard-local Exchange Pod
+    participant CSI as DSX Identity Keys Proxy CSI socket
+    participant EX as Shard-local DSX Identity Keys Pod
     VM->>MS: GET identity with Metadata: true and aud
     MS->>SA: Request local SPIRE JWT-SVID by hint
     SA-->>MS: Local SPIRE JWT-SVID
@@ -34,7 +35,8 @@ identity uses the tenant supplied by its LaunchLayer source. The exact
 `dsx-imds-vm` hint selects the VM identity. It does not select a separate SPIRE
 agent path. The Kubernetes WorkloadAttestor serves the operator virt-launcher
 Pod identity, SPIFFE CSI exposes the same host agent socket to the sidecar, and
-Exchange Proxy CSI carries the exchange request to the shard-local Exchange.
+DSX Identity Keys Proxy CSI carries the exchange request to the shard-local DSX
+Identity Keys.
 
 ## VM identity trust path
 
@@ -46,8 +48,8 @@ flowchart TB
   HostAgent["Bare-metal host SPIRE agent process"]
   CSI["SPIFFE CSI node plugin Pod"]
   VMMetadata["virt-launcher Pod<br/>DSX IMDS (metadata-service) sidecar"]
-  Proxy["Exchange Proxy CSI<br/>node plugin Pod"]
-  Exchange["Shard-local Exchange"]
+  Proxy["DSX Identity Keys Proxy CSI<br/>node plugin Pod"]
+  IdentityKeys["Shard-local DSX Identity Keys"]
   VMJWT["VM SPIRE JWT-SVID"]
   DSXJWT["VM DSX JWT"]
   VM["KubeVirt VM"]
@@ -56,8 +58,8 @@ flowchart TB
   CSI -->|"mounted socket"| VMMetadata
   VMMetadata -->|"fetch from mounted socket"| VMJWT
   VMJWT -->|"exchange through proxy"| Proxy
-  Proxy --> Exchange
-  Exchange --> DSXJWT
+  Proxy --> IdentityKeys
+  IdentityKeys --> DSXJWT
   VM -->|"IMDS request"| VMMetadata
   DSXJWT -->|"served through IMDS"| VM
 ```
@@ -72,8 +74,8 @@ flowchart TB
   HostAgent["Bare-metal host SPIRE agent process"]
   CSI["Host-provisioned SPIFFE CSI<br/>node plugin Pod"]
   Metadata["virt-launcher Pod<br/>DSX IMDS (metadata-service) sidecar"]
-  Proxy["Exchange Proxy CSI<br/>node plugin Pod"]
-  Exchange["Shard-local Exchange Deployment"]
+  Proxy["DSX Identity Keys Proxy CSI<br/>node plugin Pod"]
+  IdentityKeys["Shard-local DSX Identity Keys Deployment"]
   VMJWT["VM SPIRE JWT-SVID"]
   DSXJWT["VM DSX JWT"]
   VM["KubeVirt VM guest"]
@@ -83,8 +85,8 @@ flowchart TB
   VM -->|"IMDS request<br/>Metadata: true"| Metadata
   Metadata -->|"fetch dsx-imds-vm hinted SVID"| VMJWT
   VMJWT -->|"exchange through proxy"| Proxy
-  Proxy --> Exchange
-  Exchange --> DSXJWT
+  Proxy --> IdentityKeys
+  IdentityKeys --> DSXJWT
   DSXJWT -->|"served through IMDS"| VM
 ```
 
@@ -121,7 +123,7 @@ checks, not a replacement for that network boundary.
 | Flag | Default | Purpose |
 | --- | --- | --- |
 | `--listen` | `:80` | HTTP listen address |
-| `--exchange-service-url` | required | RFC 8693 HTTP endpoint, or `unix:///path/to/socket` for Exchange Proxy CSI |
+| `--identity-keys-url` | required | RFC 8693 HTTP endpoint, or `unix:///path/to/socket` for DSX Identity Keys Proxy CSI |
 | `--spire-socket` | `/var/run/secrets/spire.io/spire-agent.sock` | SPIRE Workload API socket path |
 | `--svid-hint` | `dsx-imds` | Exact identity hint, either `dsx-imds` or `dsx-imds-vm` |
 | `--log-level` | `info` | JSON log level: `debug`, `info`, `warn`, or `error` |
@@ -133,4 +135,4 @@ go test ./cmd/metadata-service
 ```
 
 The focused tests cover request validation, response format, response TTL,
-identity selection, and Exchange transport.
+identity selection, and DSX Identity Keys transport.

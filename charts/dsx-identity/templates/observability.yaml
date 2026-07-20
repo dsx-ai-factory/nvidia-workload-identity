@@ -40,22 +40,22 @@ spec:
 {{- end }}
 ---
 {{- end }}
-{{/* Exchange metrics use the OTel Prometheus exporter configured by the chart. */}}
-{{- if and .Values.exchange.enabled .Values.observability.metrics.enabled .Values.observability.metrics.serviceMonitor.enabled }}
+{{/* DSX Identity Keys metrics use the OTel Prometheus exporter configured by the chart. */}}
+{{- if and .Values.identityKeys.enabled .Values.observability.metrics.enabled .Values.observability.metrics.serviceMonitor.enabled }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: spiffe-exchange
+  name: dsx-identity-keys
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "dsx-identity.labels" (dict "root" . "name" "spiffe-exchange") | nindent 4 }}
+    {{- include "dsx-identity.labels" (dict "root" . "name" "dsx-identity-keys") | nindent 4 }}
     {{- with .Values.observability.metrics.serviceMonitor.labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:
   selector:
     matchLabels:
-      {{- include "dsx-identity.selectorLabels" (dict "root" . "name" "spiffe-exchange") | nindent 6 }}
+      {{- include "dsx-identity.selectorLabels" (dict "root" . "name" "dsx-identity-keys") | nindent 6 }}
   endpoints:
     - port: metrics
       path: /metrics
@@ -71,14 +71,14 @@ avoids load balancing a Prometheus scrape across nodes.
 apiVersion: v1
 kind: Service
 metadata:
-  name: exchange-proxy-csi
-  namespace: {{ .Values.vmSupport.proxyNamespace }}
+  name: dsx-identity-keys-proxy-csi
+  namespace: {{ .Values.vmSupport.identityKeysProxyNamespace }}
   labels:
-    {{- include "dsx-identity.labels" (dict "root" . "name" "exchange-proxy-csi") | nindent 4 }}
+    {{- include "dsx-identity.labels" (dict "root" . "name" "dsx-identity-keys-proxy-csi") | nindent 4 }}
 spec:
   clusterIP: None
   selector:
-    {{- include "dsx-identity.selectorLabels" (dict "root" . "name" "exchange-proxy-csi") | nindent 4 }}
+    {{- include "dsx-identity.selectorLabels" (dict "root" . "name" "dsx-identity-keys-proxy-csi") | nindent 4 }}
   ports:
     - name: metrics
       port: {{ .Values.observability.metrics.port }}
@@ -88,17 +88,17 @@ spec:
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: exchange-proxy-csi
-  namespace: {{ .Values.vmSupport.proxyNamespace }}
+  name: dsx-identity-keys-proxy-csi
+  namespace: {{ .Values.vmSupport.identityKeysProxyNamespace }}
   labels:
-    {{- include "dsx-identity.labels" (dict "root" . "name" "exchange-proxy-csi") | nindent 4 }}
+    {{- include "dsx-identity.labels" (dict "root" . "name" "dsx-identity-keys-proxy-csi") | nindent 4 }}
     {{- with .Values.observability.metrics.serviceMonitor.labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:
   selector:
     matchLabels:
-      {{- include "dsx-identity.selectorLabels" (dict "root" . "name" "exchange-proxy-csi") | nindent 6 }}
+      {{- include "dsx-identity.selectorLabels" (dict "root" . "name" "dsx-identity-keys-proxy-csi") | nindent 6 }}
   endpoints:
     - port: metrics
       path: /metrics

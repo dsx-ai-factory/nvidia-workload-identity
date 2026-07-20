@@ -34,7 +34,7 @@ spec:
       args:
         - --listen=0.0.0.0:18080
         - --svid-hint=dsx-imds
-        - --exchange-service-url=http://spiffe-exchange.dsx-identity.svc.cluster.local:8080/v1/exchange
+        - --identity-keys-url=http://dsx-identity-keys.dsx-identity.svc.cluster.local:8080/v1/exchange
       env:
         - name: OTEL_SDK_DISABLED
           value: "true"

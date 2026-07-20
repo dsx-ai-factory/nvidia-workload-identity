@@ -6,13 +6,13 @@ Baseline commit: `ba3ec13c58c532b4fa1eb91b84229310fdf27a48`
 
 ## Executive summary
 
-The measured warm-cache E2E lifecycle takes 8m21.59s before validation and cleanup. A less-warm deployment took 12m08.12s by itself, making a full run roughly 14m30s. The dominant costs are deployment, especially KubeVirt and its network dependencies, followed by verification that restarts Exchange four times and runs deterministic behavior against live infrastructure.
+The measured warm-cache E2E lifecycle takes 8m21.59s before validation and cleanup. A less-warm deployment took 12m08.12s by itself, making a full run roughly 14m30s. The dominant costs are deployment, especially KubeVirt and its network dependencies, followed by verification that restarts DSX Identity Keys four times and runs deterministic behavior against live infrastructure.
 
 The topology is large, but most third-party components are required by explicit DSX Identity integration contracts. Removing KubeVirt, OVN-Kubernetes, SPIRE, the OAuth2 Event Bus path, or OpenBao would make the suite faster by removing required coverage. That is not recommended.
 
 The first speedups should instead remove deployed-environment churn and duplicate assertions:
 
-1. Move Exchange restart reconstruction, rotation, and lease expiry out of E2E. Existing focused tests already exercise those behaviors, including deterministic virtual-time expiry and retained replay into a restarted client.
+1. Move DSX Identity Keys restart reconstruction, rotation, and lease expiry out of E2E. Existing focused tests already exercise those behaviors, including deterministic virtual-time expiry and retained replay into a restarted client.
 2. Stop creating, patching, and deleting extra DPU, host, and VM sources in E2E. Existing reconciler tests cover lifecycle behavior. Keep the deployed static-source and exact live SPIRE registration assertions.
 3. Remove the repeated VM IMDS negative protocol matrix and most OpenBao generic JWT rejection cases. Keep the real positive VM path and the project-specific malformed DSX subject rejection.
 4. Run the two remaining read-only verification scripts concurrently.
@@ -111,7 +111,7 @@ Some provider hooks do not emit standalone elapsed values. Their cost is include
 | VM resources | applied after KubeVirt and worker host | VM and VMI became Ready about 12s after creation. Deployment returned before VM readiness. |
 | External client Pod | Ready about 5s after creation | Includes two containers. The real verification waits later as needed. |
 
-KubeVirt and OVN are expensive, but the real KubeVirt VM to metadata-service to Exchange Proxy CSI path is an explicit project requirement. Replacing it with a fake would invalidate the main VM contract.
+KubeVirt and OVN are expensive, but the real KubeVirt VM to metadata-service to DSX Identity Keys Proxy CSI path is an explicit project requirement. Replacing it with a fake would invalidate the main VM contract.
 
 ### Largest k2 and k1 runtime images
 
@@ -144,7 +144,7 @@ The external client Pod contains both the 218.7 MB netshoot container and the re
 | Live MQTT authorization | 2.01s | No | Within the serial cross-shard script. |
 | First live publication expiry | 9.41s | Publishes a temporary retained key | Within the serial cross-shard script. |
 | Second live publication expiry | 9.52s | Publishes a temporary retained key | Within the serial cross-shard script. |
-| Exchange restart and rotation block | about 44s | Four rollouts and two signing-secret updates | Within the serial cross-shard script. |
+| DSX Identity Keys restart and rotation block | about 44s | Four rollouts and two signing-secret updates | Within the serial cross-shard script. |
 
 The two separately measured scripts sum to 116.39s. The 5.76s difference from the clean-deploy 110.63s run is ordinary readiness and cache variation.
 
@@ -152,8 +152,8 @@ The two separately measured scripts sum to 116.39s. The 5.76s difference from th
 
 The cross-shard script:
 
-- Restarts k1 Exchange once to prove retained reconstruction.
-- Restarts k2 Exchange once to prove retained reconstruction.
+- Restarts k1 DSX Identity Keys once to prove retained reconstruction.
+- Restarts k2 DSX Identity Keys once to prove retained reconstruction.
 - Replaces the k2 signing Secret and restarts k2 for rotation.
 - Restores the original k2 signing Secret and restarts k2 again.
 - Runs live publication lease expiry twice, each with a real 9.4s to 9.5s wait.
@@ -166,7 +166,7 @@ The k2 identity script also creates, patches, and deletes temporary DPU, host, a
 
 | E2E behavior | Existing focused coverage | Recommendation |
 | --- | --- | --- |
-| Retained key reconstruction after client restart | `TestMQTTSynchronizesRetainedPublicKeys` starts an in-process broker and multiple shards, disconnects and reconnects, then starts a new client and verifies retained reconstruction. | Remove deployed Exchange restarts. |
+| Retained key reconstruction after client restart | `TestMQTTSynchronizesRetainedPublicKeys` starts an in-process broker and multiple shards, disconnects and reconnects, then starts a new client and verifies retained reconstruction. | Remove deployed DSX Identity Keys restarts. |
 | Key rotation overlap and aggregate convergence | The same MQTT synchronization test exercises rotated keys across shards. | Remove deployed Secret replacement and rollouts. |
 | Publication lease expiry | `TestKeyRegistryBackgroundLeaseExpiry` uses `testing/synctest`. `TestKeySyncRefreshesThreeTimesBeforeLeaseExpiry` also uses virtual time. | Remove both 9.4s live expiry waits. |
 | Controller create, drift, update, invalid source, delete, and conflict recovery | `internal/identitycontroller/reconciler_test.go` covers DPU and LaunchLayer lifecycle cases. | Keep only static live registration shape and delivery assertions in E2E. |
@@ -177,7 +177,7 @@ The k2 identity script also creates, patches, and deletes temporary DPU, host, a
 
 ### Process and container overhead
 
-The cross-shard script starts a new Docker container for each external curl or compiled probe invocation. Its aggregate checker also launches host `go test` twice per convergence check even though the compiled `exchange-probe` test binary is already present in the E2E image. This adds process startup and can trigger Go build-cache work. Reusing `exchange-probe` is simpler and keeps the verification environment consistent.
+The cross-shard script starts a new Docker container for each external curl or compiled probe invocation. Its aggregate checker also launches host `go test` twice per convergence check even though the compiled `identity-keys-probe` test binary is already present in the E2E image. This adds process startup and can trigger Go build-cache work. Reusing `identity-keys-probe` is simpler and keeps the verification environment consistent.
 
 The k2 VM script prints the complete JSON response, including the bearer token. That output is unnecessary for successful runs and should be removed independently of speed.
 
@@ -199,7 +199,7 @@ The current topology mostly tests required integrations, not arbitrary third-par
 
 ## Ranked findings
 
-### 1. Exchange lifecycle tests dominate verification
+### 1. DSX Identity Keys lifecycle tests dominate verification
 
 Confidence: high.
 
@@ -250,7 +250,7 @@ Measured variance: deployment changed from 359.50s to 728.12s. k2 Kyverno stabil
 Changes should be applied and measured in this order:
 
 1. Add stable stage timing output to both verification scripts so future results identify regressions without log archaeology.
-2. Remove deployed Exchange restarts, signing-key mutation, and wall-clock lease-expiry checks. Retain focused tests and static deployed aggregate convergence.
+2. Remove deployed DSX Identity Keys restarts, signing-key mutation, and wall-clock lease-expiry checks. Retain focused tests and static deployed aggregate convergence.
 3. Remove temporary controller lifecycle sources and keep exact assertions against the deployed source fixtures.
 4. Reduce IMDS and OpenBao checks to project-specific E2E contracts.
 5. Replace host `go test` aggregate checks with the existing deployed probe binary.
@@ -287,15 +287,15 @@ The target is not an arbitrary percentage. Success means a materially shorter an
 
 The improved E2E must still prove:
 
-- A real k1 Pod obtains a k1 SPIRE JWT-SVID and exchanges it through k1 Exchange.
-- A real k2 Pod obtains a k2 SPIRE JWT-SVID and exchanges it through k2 Exchange.
-- Each Exchange rejects the other shard's SPIRE JWT-SVID.
-- OAuth2-authenticated MQTT connectivity works and retained publications from both Exchanges converge into both aggregate JWKS endpoints.
+- A real k1 Pod obtains a k1 SPIRE JWT-SVID and exchanges it through k1 DSX Identity Keys.
+- A real k2 Pod obtains a k2 SPIRE JWT-SVID and exchanges it through k2 DSX Identity Keys.
+- Each DSX Identity Keys instance rejects the other shard's SPIRE JWT-SVID.
+- OAuth2-authenticated MQTT connectivity works and retained publications from both DSX Identity Keys instances converge into both aggregate JWKS endpoints.
 - Either aggregate verifies tokens from both shards.
 - Static controller-managed DPU, worker-host, virt-launcher Pod, and VM entries have exact subjects, parents, selectors, hints, and tenant sources.
 - The real DPU token fetcher produces a protected DSX token file without exposing the Workload API socket to its consumer.
 - Operator worker-host IMDS returns the configured operator tenant and exact node ID.
-- The real KubeVirt VM reaches metadata-service through Exchange Proxy CSI and receives the exact tenant VM identity.
+- The real KubeVirt VM reaches metadata-service through DSX Identity Keys Proxy CSI and receives the exact tenant VM identity.
 - The real k2 VM token logs in to OpenBao, receives exact DSX policies, can read allowed secrets, and cannot read forbidden secrets.
 - OpenBao rejects a token whose subject violates the repository-owned DSX subject grammar.
 
@@ -317,4 +317,4 @@ The improved deployment rebuilt the two changed source images while the baseline
 
 The first improved verification was dominated by 45s of initial VM SSH availability. Cross-shard verification completed concurrently in 12s. On the immediate warm rerun, k2 identity verification took 11s and cross-shard verification took 12s, producing an 11.93s overall wall time. The maximum verification concurrency is now two scripts.
 
-The improved verification passed all preserved E2E contracts. It performed no Exchange rollout, signing Secret update, temporary source create, patch, or delete, or wall-clock publication-expiry wait. `make validate`, the full clean install, the first clean-deploy verification, and two immediate read-only reruns all passed. The final rerun took 12.31s.
+The improved verification passed all preserved E2E contracts. It performed no DSX Identity Keys rollout, signing Secret update, temporary source create, patch, or delete, or wall-clock publication-expiry wait. `make validate`, the full clean install, the first clean-deploy verification, and two immediate read-only reruns all passed. The final rerun took 12.31s.

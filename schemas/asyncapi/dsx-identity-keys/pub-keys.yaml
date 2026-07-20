@@ -1,24 +1,24 @@
 asyncapi: 3.1.0
 info:
-  title: DSX SPIFFE Exchange public keys
+  title: DSX Identity Keys public keys
   version: 1.0.0
   description: |
-    Each Exchange publishes every public signing key separately. Messages use
-    MQTT 3.1.1 QoS 1 with retain enabled. Exchanges refresh publication leases
+    Each DSX Identity Keys instance publishes every public signing key separately. Messages use
+    MQTT 3.1.1 QoS 1 with retain enabled. DSX Identity Keys instances refresh publication leases
     before their expiry and discard publications whose leases have expired.
     Each lease allows three further publish opportunities before expiry. The
     publication timestamp provides a best-effort startup freshness watermark.
 servers:
-  dsxExchange:
+  identityKeys:
     host: nats:1883
     protocol: mqtt
     protocolVersion: '3.1.1'
 channels:
   publicKey:
-    address: spiffe-exchange/v1/pub-keys/shard/{shard_id}/kid/{kid}
+    address: dsx-identity-keys/v1/pub-keys/shard/{shard_id}/kid/{kid}
     parameters:
       shard_id:
-        description: Stable Exchange shard identifier.
+        description: Stable DSX Identity Keys shard identifier.
         x-pattern: '^[^/+#]+$'
         examples: [k1]
       kid:
@@ -65,7 +65,7 @@ components:
         published_at:
           type: integer
           format: int64
-          description: Unix timestamp when the Exchange published this lease.
+          description: Unix timestamp when the DSX Identity Keys published this lease.
         lease_expires_at:
           type: integer
           format: int64

@@ -1,4 +1,4 @@
-# k1 identity chart values for the primary SPIRE and Exchange shard
+# k1 identity chart values for the primary SPIRE and DSX Identity Keys shard
 # Used by: make identities
 
 global:
@@ -18,7 +18,7 @@ spire:
     controllerManager:
       # Kind's control-plane node emulates the external DPU boundary.
       parentIDTemplate: 'spiffe://{{ .TrustDomain }}/spire/agent/{{ if eq .NodeMeta.Name "k1-control-plane" }}k8s_psat/{{ .ClusterName }}/{{ .NodeMeta.UID }}{{ else }}dsx_imds/tenant/$OPERATOR_TENANT/host/{{ .NodeMeta.Name }}{{ end }}'
-exchange:
+identityKeys:
   shardID: k1
   mqtt:
     brokerURL: tcp://nats:1883

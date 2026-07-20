@@ -2,13 +2,13 @@
 
 DSX Identity turns shard-local SPIRE identities into DSX JWTs that relying
 parties can validate across shards. An identity shard contains an independent
-SPIRE deployment and a co-located Exchange. The Exchange validates only its
+SPIRE deployment and a co-located DSX Identity Keys deployment. DSX Identity Keys validates only its
 local SPIRE JWT-SVIDs, issues DSX JWTs, and distributes its public signing keys
 through the external DSX Event Bus.
 
 There is no SPIRE federation between shards. Cross-shard trust starts after
 token exchange, when another shard or relying party validates a DSX JWT with
-the aggregate public keys served by any Exchange.
+the aggregate public keys served by any DSX Identity Keys instance.
 
 Component commands and runtime configuration:
 
@@ -17,10 +17,10 @@ Component commands and runtime configuration:
 - [`dsx_imds` NodeAttestor agent plugin](cmd/dsx-imds-node-attestor-agent/README.md)
 - [`dsx_imds` NodeAttestor server plugin](cmd/dsx-imds-node-attestor-server/README.md)
 - [DSX Token Fetcher](cmd/dsx-token-fetcher/README.md)
-- [Exchange Proxy CSI Driver](cmd/exchange-proxy-csi/README.md)
+- [DSX Identity Keys Proxy CSI Driver](cmd/dsx-identity-keys-proxy-csi/README.md)
 - [Generate Signing Keyset](cmd/generate-signing-keyset/README.md)
 - [DSX IMDS](cmd/metadata-service/README.md)
-- [SPIFFE Exchange Service](cmd/spiffe-exchange-service/README.md)
+- [DSX Identity Keys](cmd/dsx-identity-keys/README.md)
 
 Do not use files under `docs/plans` as design authority.
 
@@ -115,7 +115,7 @@ flowchart TB
     CSEntries["ClusterStaticEntry CRs"]
     CSPodManager["one logical SPIRE controller-manager<br/>co-located in two SPIRE server Pods<br/>leader elected<br/>operator Pod registrations"]
     CSSPIRE["two Common Services SPIRE server replicas<br/>dsx_dpu and dsx_imds NodeAttestor server plugins"]
-    CSExchange["Common Services Exchange"]
+    CSIdentityKeys["Common Services DSX Identity Keys"]
   end
 
   CSSources --> CSController
@@ -130,22 +130,22 @@ flowchart TB
 
   CSHostAgent -->|"Kubernetes WorkloadAttestor<br/>dsx-pod"| CSHostSVIDs
   CSHostSVIDs --> CSHostPod
-  CSHostPod --> CSExchange
-  CSExchange --> CSHostDSX
+  CSHostPod --> CSIdentityKeys
+  CSIdentityKeys --> CSHostDSX
   CPHostAgent -->|"Kubernetes WorkloadAttestor<br/>dsx-pod"| CPHostSVIDs
   CPHostSVIDs --> CPHostPod
-  CPHostPod --> CSExchange
-  CSExchange --> CPHostDSX
+  CPHostPod --> CSIdentityKeys
+  CSIdentityKeys --> CPHostDSX
   CSDPUAgent -->|"Unix WorkloadAttestor<br/>DPU fetcher selectors, dsx-dpu"| CSDPUFetcher
   CSDPUAgent -->|"external DPU runtime selectors<br/>host identity, dsx-imds"| CSDPUIMDS
-  CSDPUFetcher --> CSExchange
-  CSDPUIMDS --> CSExchange
-  CSExchange --> CSDPUDSX
+  CSDPUFetcher --> CSIdentityKeys
+  CSDPUIMDS --> CSIdentityKeys
+  CSIdentityKeys --> CSDPUDSX
   CPDPUAgent -->|"Unix WorkloadAttestor<br/>DPU fetcher selectors, dsx-dpu"| CPDPUFetcher
   CPDPUAgent -->|"external DPU runtime selectors<br/>host identity, dsx-imds"| CPDPUIMDS
-  CPDPUFetcher --> CSExchange
-  CPDPUIMDS --> CSExchange
-  CSExchange --> CPDPUDSX
+  CPDPUFetcher --> CSIdentityKeys
+  CPDPUIMDS --> CSIdentityKeys
+  CSIdentityKeys --> CPDPUDSX
 
   CSHostAgent --> CSHostIMDS
   CSHostIMDS --> CSDPUIMDS
@@ -201,8 +201,8 @@ flowchart TB
     DHEntries["ClusterStaticEntry CRs"]
     DHPodManager["one logical SPIRE controller-manager<br/>co-located in two SPIRE server Pods<br/>leader elected<br/>operator Pod registrations"]
     DHSPIRE["two Data Hall SPIRE server replicas<br/>dsx_dpu and dsx_imds NodeAttestor server plugins"]
-    DHExchange["Data Hall Exchange"]
-    DHProxy["Exchange Proxy CSI<br/>node plugin Pod"]
+    DHIdentityKeys["Data Hall DSX Identity Keys"]
+    DHProxy["DSX Identity Keys Proxy CSI<br/>node plugin Pod"]
   end
 
   DHSources --> DHController
@@ -218,18 +218,18 @@ flowchart TB
   VMHostAgent -->|"Kubernetes WorkloadAttestor<br/>distinct dsx-pod and dsx-imds-vm hints"| VMHostSVIDs
   VMHostSVIDs --> VMDSXIMDS
   VMDSXIMDS --> DHProxy
-  DHProxy --> DHExchange
-  DHExchange --> VMHostDSX
+  DHProxy --> DHIdentityKeys
+  DHIdentityKeys --> VMHostDSX
   VMDPUAgent -->|"Unix WorkloadAttestor<br/>DPU fetcher selectors, dsx-dpu"| VMDPUFetcher
   VMDPUAgent -->|"external DPU runtime selectors<br/>host identity, dsx-imds"| VMDPUIMDS
-  VMDPUFetcher --> DHExchange
-  VMDPUIMDS --> DHExchange
-  DHExchange --> VMDPUDSX
+  VMDPUFetcher --> DHIdentityKeys
+  VMDPUIMDS --> DHIdentityKeys
+  DHIdentityKeys --> VMDPUDSX
   BMDPUAgent -->|"Unix WorkloadAttestor<br/>DPU fetcher selectors, dsx-dpu"| BMDPUFetcher
   BMDPUAgent -->|"external DPU runtime selectors<br/>host identity, dsx-imds"| BMDPUIMDS
-  BMDPUFetcher --> DHExchange
-  BMDPUIMDS --> DHExchange
-  DHExchange --> BMDPUDSX
+  BMDPUFetcher --> DHIdentityKeys
+  BMDPUIMDS --> DHIdentityKeys
+  DHIdentityKeys --> BMDPUDSX
 
   VMHostAgent --> VMHostIMDS
   VMHostIMDS --> VMDPUIMDS
@@ -250,29 +250,29 @@ Kubernetes node. A KubeVirt VM runs in an operator-owned virt-launcher Pod, so
 the Pod keeps its operator identity while its metadata sidecar selects the
 dynamically tenant-supplied VM SVID from the same operator host Workload API.
 
-Local consumers exchange local SPIRE JWT-SVIDs with their shard's Exchange for
-DSX JWTs. Exchanges share only public signing keys across shards.
+Local consumers exchange local SPIRE JWT-SVIDs with their shard's DSX Identity Keys for
+DSX JWTs. DSX Identity Keys instances share only public signing keys across shards.
 
 ```mermaid
 flowchart LR
   Local["dsx-token-fetcher and DSX IMDS"]
-  Exchange["Exchange Deployment"]
+  IdentityKeys["DSX Identity Keys Deployment"]
   Consumers["DPU, host, Pod, and VM consumers"]
 
-  Local -->|"local SPIRE JWT-SVID"| Exchange
-  Exchange -->|"DSX JWT"| Consumers
-  Exchange <-->|"public signing keys"| Bus["External DSX Event Bus"]
-  Bus <-->|"public signing keys"| Peers["Peer shard Exchanges"]
-  RelyingParty["External relying party"] -->|"aggregate JWKS"| Exchange
+  Local -->|"local SPIRE JWT-SVID"| IdentityKeys
+  IdentityKeys -->|"DSX JWT"| Consumers
+  IdentityKeys <-->|"public signing keys"| Bus["External DSX Event Bus"]
+  Bus <-->|"public signing keys"| Peers["Peer shard DSX Identity Keys instances"]
+  RelyingParty["External relying party"] -->|"aggregate JWKS"| IdentityKeys
 ```
 
 A SPIRE JWT-SVID is a cluster-local credential obtained from the local SPIRE
-Workload API. A DSX JWT is the credential returned by the local Exchange.
+Workload API. A DSX JWT is the credential returned by the local DSX Identity Keys.
 SPIRE JWT-SVIDs never establish trust between shards.
 
 Install the identity chart once per shard. Each regular management cluster that
 owns DPU or LaunchLayer source CRs runs the Identity Controller for its shard.
-Every Exchange validates only local SPIRE JWT-SVIDs through its node-local
+Every DSX Identity Keys instance validates only local SPIRE JWT-SVIDs through its node-local
 Workload API and serves the aggregate public keys received through the Event
 Bus.
 
@@ -285,19 +285,19 @@ external to the identity chart.
 |---|---|---|
 | [Kubernetes Pod](cmd/dsx-token-fetcher/README.md) | Kubernetes WorkloadAttestor under the worker's `dsx_imds`-attested host agent. The registration uses the operator tenant and worker host subject | The `dsx-token-fetcher` sidecar selects `dsx-pod`, exchanges the local SPIRE JWT-SVID, and writes the DSX JWT to a Pod-private volume mounted read-only in application containers |
 | [DPU process](cmd/dsx-token-fetcher/README.md) | The external DPU agent attests through the `dsx_dpu` NodeAttestor agent and server. For token-file delivery, Unix WorkloadAttestor selectors bind the base DPU SVID to the `dsx-token-fetcher` process because it is the Workload API caller | `dsx-token-fetcher` selects `dsx-dpu`, exchanges the local SPIRE JWT-SVID, and writes a protected token file. The DPU process consumes that file as a capability |
-| [Bare-metal host process](cmd/dsx-imds-node-attestor-agent/README.md) | The DPU agent is attested through `dsx_dpu`. The host agent is attested through the repository `dsx_imds` NodeAttestor agent and server, then can serve local processes through the Unix WorkloadAttestor | The paired DPU intercept carries link-local IMDS to NICo or Carbide IMDS, which passes identity requests to DSX IMDS. DPU-hosted DSX IMDS exchanges directly with its reachable shard-local Exchange. The host agent uses the returned DSX JWT for node attestation. A host-process-specific token delivery contract is not currently defined |
-| [KubeVirt VM](cmd/metadata-service/README.md) | The controller derives the VM subject from the dynamically supplied tenant ID and parents it to the operator-owned worker host's `dsx_imds` agent. The Kubernetes WorkloadAttestor serves the operator-owned virt-launcher Pod, and SPIFFE CSI exposes that same agent's Workload API socket | The DSX IMDS sidecar selects the VM SPIRE JWT-SVID by its exact `dsx-imds-vm` hint, exchanges it through Exchange Proxy CSI, and serves the DSX JWT through IMDS |
+| [Bare-metal host process](cmd/dsx-imds-node-attestor-agent/README.md) | The DPU agent is attested through `dsx_dpu`. The host agent is attested through the repository `dsx_imds` NodeAttestor agent and server, then can serve local processes through the Unix WorkloadAttestor | The paired DPU intercept carries link-local IMDS to NICo or Carbide IMDS, which passes identity requests to DSX IMDS. DPU-hosted DSX IMDS exchanges directly with its reachable shard-local DSX Identity Keys. The host agent uses the returned DSX JWT for node attestation. A host-process-specific token delivery contract is not currently defined |
+| [KubeVirt VM](cmd/metadata-service/README.md) | The controller derives the VM subject from the dynamically supplied tenant ID and parents it to the operator-owned worker host's `dsx_imds` agent. The Kubernetes WorkloadAttestor serves the operator-owned virt-launcher Pod, and SPIFFE CSI exposes that same agent's Workload API socket | The DSX IMDS sidecar selects the VM SPIRE JWT-SVID by its exact `dsx-imds-vm` hint, exchanges it through DSX Identity Keys Proxy CSI, and serves the DSX JWT through IMDS |
 
 ## Helm chart
 
 Install `charts/dsx-identity` once per identity shard. Install the official
 SPIRE CRD chart first. The identity chart installs SPIRE and can install the
-repository-owned Exchange, controller, metadata, CSI, and identity policies.
+repository-owned DSX Identity Keys, controller, metadata, CSI, and identity policies.
 
 Each installation supplies its shard identity, external Event Bus connection,
 OAuth2 client, and signing keyset.
 
-The chart defaults Exchange and the Identity Controller to two active replicas.
+The chart defaults DSX Identity Keys and the Identity Controller to two active replicas.
 SPIRE server deployment and datastore settings pass through to the official
 SPIRE chart.
 
@@ -316,23 +316,23 @@ spire:
         - name: OPERATOR_TENANT
           value: operator-1
 
-exchange:
+identityKeys:
   shardID: shard-a
-  jwksURL: https://exchange.shard.example.com/.well-known/jwks.json
-  signingKeysetSecret: spiffe-exchange-signing-keyset
+  jwksURL: https://identity-keys.shard.example.com/.well-known/jwks.json
+  signingKeysetSecret: dsx-identity-keys-signing-keyset
   mqtt:
     brokerURL: tls://event-bus.example.com
     oauth2:
       tokenURL: https://auth.example.com/oauth2/token
-      clientID: spiffe-exchange
-      clientSecretSecret: spiffe-exchange-mqtt-oauth
+      clientID: dsx-identity-keys
+      clientSecretSecret: dsx-identity-keys-mqtt-oauth
       clientSecretKey: client-secret
 ```
 
 Each identity shard configures the `dsx_imds` server plugin in SPIRE and exposes
 the external host agent's canonical socket through the single SPIFFE CSI
 driver. The plugin validates host bootstrap DSX JWTs against the shard's
-aggregate Exchange JWKS.
+aggregate JWKS served by DSX Identity Keys.
 
 ```yaml
 spire:
@@ -362,7 +362,7 @@ spire:
           plugin_data:
             trust_domain: shard.example.com
             audience: spiffe://shard.example.com/spire/server
-            jwks_url: https://exchange.shard.example.com/.well-known/jwks.json
+            jwks_url: https://identity-keys.shard.example.com/.well-known/jwks.json
   spiffe-csi-driver:
     enabled: true
     pluginName: csi.spiffe.io
@@ -381,12 +381,12 @@ selector sets configure distinct WorkloadAttestor contracts.
 ```yaml
 podTokenFetcher:
   enabled: true
-  exchangeServiceURL: https://exchange.shard.example.com/v1/exchange
+  identityKeysURL: https://identity-keys.shard.example.com/v1/exchange
 
 vmSupport:
   enabled: true
-  exchangeProxy:
-    target: TCP:spiffe-exchange.dsx-identity.svc.cluster.local:8080
+  identityKeysProxy:
+    target: TCP:dsx-identity-keys.dsx-identity.svc.cluster.local:8080
 
 identityController:
   enabled: true
@@ -414,7 +414,7 @@ Controller may manage derived `ClusterStaticEntry` objects, and the official
 controller-manager may update status and finalizers. The controller is the sole
 writer and validator for derived static entries. Admission validates release
 registration shapes and prevents application containers from mounting the
-Workload API or Exchange proxy sockets.
+Workload API or DSX Identity Keys Proxy sockets.
 
 ## Identity contract
 
@@ -503,9 +503,9 @@ determines a VM entry's operator-worker parent. It also has no SPIFFE IDs,
 selectors, hints, or class names because the Identity Controller derives those
 registration outputs.
 
-## Exchange and Event Bus
+## DSX Identity Keys and Event Bus
 
-The [SPIFFE Exchange Service](cmd/spiffe-exchange-service/README.md) validates
+[DSX Identity Keys](cmd/dsx-identity-keys/README.md) validates
 local SPIRE JWT-SVIDs, issues DSX JWTs, publishes public signing keys to the
 Event Bus, and serves aggregate JWKS. The external Gateway terminates TLS and
 applies source-aware request quotas. Clients configure the Gateway HTTPS
@@ -518,7 +518,7 @@ identity API. The
 [`dsx_imds` NodeAttestor agent](cmd/dsx-imds-node-attestor-agent/README.md) and
 [`dsx_imds` NodeAttestor server](cmd/dsx-imds-node-attestor-server/README.md)
 bootstrap the host SPIRE agent. The
-[Exchange Proxy CSI Driver](cmd/exchange-proxy-csi/README.md) carries VM
+[DSX Identity Keys Proxy CSI Driver](cmd/dsx-identity-keys-proxy-csi/README.md) carries VM
 exchange requests, and
 [DSX IMDS Network Setup](cmd/dsx-imds-network-setup/README.md) routes the VM's
 link-local metadata traffic.
@@ -580,11 +580,11 @@ See the
 ## Signing-key rotation
 
 Use [Generate Signing Keyset](cmd/generate-signing-keyset/README.md) to create a
-new keyset, replace the shard's configured Secret, and roll the Exchange
-Deployment. New Exchange replicas publish the new key. The previous public key
+new keyset, replace the shard's configured Secret, and roll the DSX Identity Keys
+Deployment. New DSX Identity Keys replicas publish the new key. The previous public key
 remains in aggregate JWKS responses until its publication lease expires, as
 defined by the
-[SPIFFE Exchange Service](cmd/spiffe-exchange-service/README.md).
+[DSX Identity Keys](cmd/dsx-identity-keys/README.md).
 
 ## Local E2E
 
@@ -607,9 +607,9 @@ shard-specific overrides are in:
 
 Kind starts without an external DPU or an attested worker agent. Before the
 worker agent is available, the control-plane node represents the Phase 0 seed
-host. Each identity chart is installed once. Its normal Exchange Pod runs on
+host. Each identity chart is installed once. Its normal DSX Identity Keys Pod runs on
 the seed node and uses the ordinary operator-Pod registration there while the
-worker's `dsx_imds` agent attests. Exchange has no bootstrap-specific identity
+worker's `dsx_imds` agent attests. DSX Identity Keys has no bootstrap-specific identity
 or deployment path.
 
 Both local shards must exercise host attestation without physical DPU hardware.
@@ -640,8 +640,8 @@ This external-agent fixture uses the shared
 flowchart TB
   DPUAgent -->|"Workload API socket"| CSI
   CSI -->|"host SPIRE JWT-SVID"| DPUMetadata
-  DPUMetadata -->|"direct RFC 8693 exchange"| Exchange
-  Exchange -->|"host DSX JWT"| DPUMetadata
+  DPUMetadata -->|"direct RFC 8693 exchange"| IdentityKeys
+  IdentityKeys -->|"host DSX JWT"| DPUMetadata
   Agent -->|"invokes"| Plugin
   Plugin -->|"IMDS identity request"| DPUMetadata
   DPUMetadata -->|"host DSX JWT"| Plugin
@@ -654,7 +654,7 @@ flowchart TB
   DPUMetadata["E2E DSX IMDS<br/>(metadata-service)"]
   Agent["Bare-metal worker<br/>dsx_imds SPIRE agent process"]
   Plugin["dsx_imds NodeAttestor<br/>agent plugin"]
-  Exchange["k2 Exchange Pod"]
+  IdentityKeys["k2 DSX Identity Keys Pod"]
   Server["k2 SPIRE server Pod<br/>dsx_imds server plugin"]
 ```
 
@@ -677,15 +677,15 @@ socket to fetch the VM SPIRE JWT-SVID.
 ### Cross-shard OpenBao validation
 
 The local E2E topology deploys OpenBao in k1 as an external relying party. A VM
-DSX JWT issued in k2 is accepted because the k2 Exchange public key propagates
-through the Event Bus and appears in the k1 Exchange aggregate JWKS.
+DSX JWT issued in k2 is accepted because the k2 DSX Identity Keys public key propagates
+through the Event Bus and appears in the k1 DSX Identity Keys aggregate JWKS.
 
 ```mermaid
 sequenceDiagram
   participant Test as E2E test process
   participant Gateway as Envoy Gateway<br/>data-plane Pod in k1
   participant Bao as OpenBao Pod in k1
-  participant JWKS as k1 Exchange Pod<br/>aggregate JWKS endpoint
+  participant JWKS as k1 DSX Identity Keys Pod<br/>aggregate JWKS endpoint
 
   Test->>Gateway: JWT CEL login with k2 VM DSX JWT
   Gateway->>Bao: Forward login request
@@ -718,14 +718,14 @@ mise exec -- jq -c '.jwks' "${KEYSET_DIR}/generated.json" \
   > "${KEYSET_DIR}/signing-jwks.json"
 mise exec -- jq -jr '.active_kid' "${KEYSET_DIR}/generated.json" \
   > "${KEYSET_DIR}/active-kid"
-mise exec -- kubectl create secret generic spiffe-exchange-signing-keyset \
+mise exec -- kubectl create secret generic dsx-identity-keys-signing-keyset \
   -n dsx-identity --context kind-k1 \
   --from-file="${KEYSET_DIR}/signing-jwks.json" \
   --from-file="${KEYSET_DIR}/active-kid" --dry-run=client -o yaml \
   | mise exec -- kubectl apply --context kind-k1 -f -
-mise exec -- kubectl rollout restart deployment/spiffe-exchange \
+mise exec -- kubectl rollout restart deployment/dsx-identity-keys \
   -n dsx-identity --context kind-k1
-mise exec -- kubectl rollout status deployment/spiffe-exchange \
+mise exec -- kubectl rollout status deployment/dsx-identity-keys \
   -n dsx-identity --context kind-k1
 ```
 

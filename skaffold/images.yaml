@@ -11,15 +11,15 @@ build:
   tagPolicy:
     inputDigest: {}
   artifacts:
-    - image: dsx-identity/spiffe-exchange-service
+    - image: dsx-identity/dsx-identity-keys
       context: ..
       docker:
         dockerfile: Dockerfile
-        target: spiffe-exchange-service
+        target: dsx-identity-keys
         buildArgs:
           <<: &coreBuildArgs
             BUILDER_IMG: 127.0.0.1:5002/library/golang:1.26.4
-          BINARY: spiffe-exchange-service
+          BINARY: dsx-identity-keys
     - image: dsx-identity/dsx-token-fetcher
       context: ..
       docker:
@@ -67,14 +67,14 @@ build:
         buildArgs:
           <<: *coreBuildArgs
           BINARY: dsx-imds-network-setup
-    - image: dsx-identity/exchange-proxy-csi
+    - image: dsx-identity/dsx-identity-keys-proxy-csi
       context: ..
       docker:
         dockerfile: Dockerfile
-        target: exchange-proxy-csi
+        target: dsx-identity-keys-proxy-csi
         buildArgs:
           <<: *coreBuildArgs
-          BINARY: exchange-proxy-csi
+          BINARY: dsx-identity-keys-proxy-csi
     - image: dsx-identity/dsx-identity-controller
       context: ..
       docker:

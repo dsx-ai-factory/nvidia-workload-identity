@@ -601,7 +601,7 @@ func TestKeySyncRecoversFailedPublicationOnRefresh(t *testing.T) {
 	})
 }
 
-func TestExchangeLivenessAndReadiness(t *testing.T) {
+func TestIdentityKeysLivenessAndReadiness(t *testing.T) {
 	t.Parallel()
 	key := testJWK(t, "one", true)
 	registry := newKeyRegistry()
@@ -614,7 +614,7 @@ func TestExchangeLivenessAndReadiness(t *testing.T) {
 		},
 		priming: newKeyCachePriming([]jose.JSONWebKey{key}),
 	}
-	handler := (&ExchangeServer{keySync: syncer}).handler()
+	handler := (&identityKeysServer{keySync: syncer}).handler()
 	status := func(path string) int {
 		recorder := httptest.NewRecorder()
 		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
@@ -779,7 +779,7 @@ func servedKeyset(t *testing.T, registry *keyRegistry) jose.JSONWebKeySet {
 	t.Helper()
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
-	(&ExchangeServer{registry: registry}).handleJWKS(recorder, request)
+	(&identityKeysServer{registry: registry}).handleJWKS(recorder, request)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("JWKS status = %d: %s", recorder.Code, recorder.Body.String())
 	}

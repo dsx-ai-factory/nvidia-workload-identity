@@ -67,7 +67,7 @@ spec:
                   - --listen=:80
                   - --log-level={{ .Values.observability.logLevel }}
                   - --svid-hint=dsx-imds-vm
-                  - --exchange-service-url=unix:///run/dsx/exchange.sock
+                  - --identity-keys-url=unix:///run/dsx/identity-keys.sock
                 ports:
                   - name: http
                     containerPort: 80
@@ -93,7 +93,7 @@ spec:
                   - name: spiffe-csi
                     mountPath: /var/run/secrets/spire.io
                     readOnly: true
-                  - name: exchange-csi
+                  - name: identity-keys-csi
                     mountPath: /run/dsx
                     readOnly: true
             volumes:
@@ -101,8 +101,8 @@ spec:
                 csi:
                   driver: csi.spiffe.io
                   readOnly: true
-              - name: exchange-csi
+              - name: identity-keys-csi
                 csi:
-                  driver: csi.exchange.nvidia.com
+                  driver: csi.dsx-identity-keys.nvidia.com
                   readOnly: true
 {{- end }}

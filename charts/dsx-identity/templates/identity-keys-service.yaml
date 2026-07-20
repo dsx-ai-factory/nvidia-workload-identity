@@ -1,0 +1,25 @@
+{{- if .Values.identityKeys.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: dsx-identity-keys
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dsx-identity.labels" (dict "root" . "name" "dsx-identity-keys") | nindent 4 }}
+spec:
+  selector:
+    {{- include "dsx-identity.selectorLabels" (dict "root" . "name" "dsx-identity-keys") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.identityKeys.service.port }}
+      targetPort: http
+      {{- with .Values.identityKeys.service.nodePort }}
+      nodePort: {{ . }}
+      {{- end }}
+    {{- if .Values.observability.metrics.enabled }}
+    - name: metrics
+      port: {{ .Values.observability.metrics.port }}
+      targetPort: metrics
+    {{- end }}
+  type: {{ .Values.identityKeys.service.type }}
+{{- end }}

@@ -105,10 +105,10 @@ observability:
       scrapeTimeout: 10s
       labels: {}
 
-exchange:
+identityKeys:
   enabled: true
   image:
-    repository: nvcr.io/0837451325059433/components-dev/spiffe-exchange-service
+    repository: nvcr.io/0837451325059433/components-dev/dsx-identity-keys
     tag: ""
     pullPolicy: IfNotPresent
   imagePullSecrets: []
@@ -122,15 +122,15 @@ exchange:
   jwksURL: ""
   # Must match the Event Bus retained-message maxAge and cover DSX JWT validity.
   publicKeyLeaseTTL: 10m
-  # Globally unique across every Exchange sharing this Event Bus fabric.
+  # Globally unique across every DSX Identity Keys instance sharing this Event Bus fabric.
   shardID: ""
-  signingKeysetSecret: spiffe-exchange-signing-keyset
+  signingKeysetSecret: dsx-identity-keys-signing-keyset
   mqtt:
     brokerURL: ""
     oauth2:
       tokenURL: ""
-      clientID: spiffe-exchange
-      clientSecretSecret: spiffe-exchange-mqtt-oauth
+      clientID: dsx-identity-keys
+      clientSecretSecret: dsx-identity-keys-mqtt-oauth
       clientSecretKey: client-secret
   resources:
     requests:
@@ -147,7 +147,7 @@ podTokenFetcher:
     tag: ""
     pullPolicy: IfNotPresent
   audience: spiffe://ds9.dsx.nvid.id/openbao
-  exchangeServiceURL: ""
+  identityKeysURL: ""
   outputPath: /run/secrets/nvidia.com/dsx/token
   startupProbe:
     httpGet:
@@ -169,9 +169,9 @@ podTokenFetcher:
 
 vmSupport:
   enabled: false
-  proxyNamespace: exchange-proxy-system
+  identityKeysProxyNamespace: dsx-identity-keys-proxy-system
   tolerations: []
-  exchangeProxy:
+  identityKeysProxy:
     target: ""
   socat:
     image:
@@ -193,13 +193,13 @@ vmSupport:
       repository: nvcr.io/0837451325059433/components-dev/dsx-imds-network-setup
       tag: ""
       pullPolicy: IfNotPresent
-  exchangeProxyCsi:
+  identityKeysProxyCsi:
     image:
-      repository: nvcr.io/0837451325059433/components-dev/exchange-proxy-csi
+      repository: nvcr.io/0837451325059433/components-dev/dsx-identity-keys-proxy-csi
       tag: ""
       pullPolicy: IfNotPresent
   resources:
-    proxy:
+    identityKeysProxy:
       requests: {cpu: 10m, memory: 16Mi}
       limits: {cpu: 50m, memory: 32Mi}
     driver:

@@ -96,11 +96,11 @@ type exchangeClient struct {
 
 func newExchangeClient(exchangeURL string) (*exchangeClient, error) {
 	if exchangeURL == "" {
-		return nil, errors.New("--exchange-service-url is required")
+		return nil, errors.New("--identity-keys-url is required")
 	}
 	u, err := url.Parse(exchangeURL)
 	if err != nil {
-		return nil, fmt.Errorf("parse Exchange URL: %w", err)
+		return nil, fmt.Errorf("parse DSX Identity Keys URL: %w", err)
 	}
 	if u.Scheme == "unix" {
 		return &exchangeClient{
@@ -304,7 +304,7 @@ func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// The local Exchange just minted this token over the CSI socket. Parse its
+	// The local DSX Identity Keys just minted this token over the CSI socket. Parse its
 	// SPIFFE claims only to expose the subject. Relying parties verify its signature.
 	dsxJWT, err := jwtsvid.ParseInsecure(exchangeResp.AccessToken, audiences)
 	if err != nil {
@@ -364,10 +364,10 @@ func run() (runErr error) {
 	var logLevel slog.Level
 	flag.TextVar(&logLevel, "log-level", slog.LevelInfo, "log level (debug, info, warn, error)")
 	var (
-		listenAddr         = flag.String("listen", ":80", "HTTP server listen address")
-		exchangeServiceURL = flag.String("exchange-service-url", "", "RFC 8693 endpoint of the shard-local Exchange")
-		spireSocketPath    = flag.String("spire-socket", defaultSpireSocketPath, "Path to SPIRE agent socket")
-		svidHint           = flag.String("svid-hint", "dsx-imds", "Exact JWT-SVID hint (dsx-imds or dsx-imds-vm)")
+		listenAddr      = flag.String("listen", ":80", "HTTP server listen address")
+		identityKeysURL = flag.String("identity-keys-url", "", "RFC 8693 endpoint of shard-local DSX Identity Keys")
+		spireSocketPath = flag.String("spire-socket", defaultSpireSocketPath, "Path to SPIRE agent socket")
+		svidHint        = flag.String("svid-hint", "dsx-imds", "Exact JWT-SVID hint (dsx-imds or dsx-imds-vm)")
 	)
 	flag.Parse()
 
@@ -378,7 +378,7 @@ func run() (runErr error) {
 	defer func() {
 		runErr = errors.Join(runErr, sdk.Shutdown(context.Background()))
 	}()
-	exchange, err := newExchangeClient(*exchangeServiceURL)
+	exchange, err := newExchangeClient(*identityKeysURL)
 	if err != nil {
 		return err
 	}
@@ -386,7 +386,7 @@ func run() (runErr error) {
 	slog.Info("Starting SPIFFE Metadata Service",
 		"listen_addr", *listenAddr,
 		"log_level", logLevel.String(),
-		"exchange_service_url", *exchangeServiceURL,
+		"identity_keys_url", *identityKeysURL,
 		"spire_socket", *spireSocketPath,
 		"svid_hint", *svidHint)
 

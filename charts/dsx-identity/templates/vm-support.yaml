@@ -1,41 +1,41 @@
 {{- if .Values.vmSupport.enabled }}
 {{- $imageTag := .Values.global.imageTag | default .Chart.Version -}}
-{{- $exchangeTarget := required "vmSupport.exchangeProxy.target is required" .Values.vmSupport.exchangeProxy.target -}}
+{{- $identityKeysTarget := required "vmSupport.identityKeysProxy.target is required" .Values.vmSupport.identityKeysProxy.target -}}
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: {{ .Values.vmSupport.proxyNamespace }}
+  name: {{ .Values.vmSupport.identityKeysProxyNamespace }}
   labels:
-    app.kubernetes.io/name: exchange-proxy-system
+    app.kubernetes.io/name: dsx-identity-keys-proxy-system
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: exchange-proxy-csi
-  namespace: {{ .Values.vmSupport.proxyNamespace }}
+  name: dsx-identity-keys-proxy-csi
+  namespace: {{ .Values.vmSupport.identityKeysProxyNamespace }}
 ---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: exchange-proxy-csi
-  namespace: {{ .Values.vmSupport.proxyNamespace }}
+  name: dsx-identity-keys-proxy-csi
+  namespace: {{ .Values.vmSupport.identityKeysProxyNamespace }}
   labels:
-    {{- include "dsx-identity.labels" (dict "root" . "name" "exchange-proxy-csi") | nindent 4 }}
+    {{- include "dsx-identity.labels" (dict "root" . "name" "dsx-identity-keys-proxy-csi") | nindent 4 }}
 spec:
   selector:
     matchLabels:
-      {{- include "dsx-identity.selectorLabels" (dict "root" . "name" "exchange-proxy-csi") | nindent 6 }}
+      {{- include "dsx-identity.selectorLabels" (dict "root" . "name" "dsx-identity-keys-proxy-csi") | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "dsx-identity.labels" (dict "root" . "name" "exchange-proxy-csi") | nindent 8 }}
+        {{- include "dsx-identity.labels" (dict "root" . "name" "dsx-identity-keys-proxy-csi") | nindent 8 }}
         {{- include "dsx-identity.dsxWorkloadLabel" . | nindent 8 }}
-      {{- with (include "dsx-identity.observabilityPodAnnotations" (dict "root" . "containerNames" "exchange-proxy-csi")) }}
+      {{- with (include "dsx-identity.observabilityPodAnnotations" (dict "root" . "containerNames" "dsx-identity-keys-proxy-csi")) }}
       annotations:
         {{- . | nindent 8 }}
       {{- end }}
     spec:
-      serviceAccountName: exchange-proxy-csi
+      serviceAccountName: dsx-identity-keys-proxy-csi
       securityContext:
         seccompProfile:
           type: RuntimeDefault
@@ -44,15 +44,15 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:
-        - name: exchange-proxy
+        - name: identity-keys-proxy
           image: "{{ .Values.vmSupport.socat.image.repository }}:{{ .Values.vmSupport.socat.image.tag }}"
           imagePullPolicy: {{ .Values.vmSupport.socat.image.pullPolicy }}
           args:
             # CSI consumers share no supplemental group, so any container UID must connect.
-            - UNIX-LISTEN:/run/dsx/exchange.sock,fork,mode=0777
-            - {{ $exchangeTarget | quote }}
+            - UNIX-LISTEN:/run/dsx/identity-keys.sock,fork,mode=0777
+            - {{ $identityKeysTarget | quote }}
           resources:
-            {{- toYaml .Values.vmSupport.resources.proxy | nindent 12 }}
+            {{- toYaml .Values.vmSupport.resources.identityKeysProxy | nindent 12 }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -62,17 +62,17 @@ spec:
             runAsNonRoot: false
             runAsUser: 0
           volumeMounts:
-            - name: exchange-socket-dir
+            - name: identity-keys-socket-dir
               mountPath: /run/dsx
-        - name: exchange-proxy-csi
-          image: "{{ .Values.vmSupport.exchangeProxyCsi.image.repository }}:{{ .Values.vmSupport.exchangeProxyCsi.image.tag | default $imageTag }}"
-          imagePullPolicy: {{ .Values.vmSupport.exchangeProxyCsi.image.pullPolicy }}
+        - name: dsx-identity-keys-proxy-csi
+          image: "{{ .Values.vmSupport.identityKeysProxyCsi.image.repository }}:{{ .Values.vmSupport.identityKeysProxyCsi.image.tag | default $imageTag }}"
+          imagePullPolicy: {{ .Values.vmSupport.identityKeysProxyCsi.image.pullPolicy }}
           command:
-            - /usr/local/bin/exchange-proxy-csi
+            - /usr/local/bin/dsx-identity-keys-proxy-csi
           args:
             - --node-id=$(MY_NODE_NAME)
             - --socket-dir=/run/dsx
-            - --csi-socket-path=/exchange-proxy-csi/csi.sock
+            - --csi-socket-path=/dsx-identity-keys-proxy-csi/csi.sock
             - --log-level={{ .Values.observability.logLevel }}
           {{- if .Values.observability.metrics.enabled }}
           ports:
@@ -87,7 +87,7 @@ spec:
                   fieldPath: spec.nodeName
             {{- include "dsx-identity.observabilityEnv" (dict
                   "root" .
-                  "serviceName" "exchange-proxy-csi"
+                  "serviceName" "dsx-identity-keys-proxy-csi"
                   "metricsExporter" (ternary "prometheus" "none" .Values.observability.metrics.enabled)) | nindent 12 }}
           # NodePublishVolume requires bind mounts into kubelet's pod tree.
           securityContext:
@@ -102,11 +102,11 @@ spec:
           resources:
             {{- toYaml .Values.vmSupport.resources.driver | nindent 12 }}
           volumeMounts:
-            - name: exchange-socket-dir
+            - name: identity-keys-socket-dir
               mountPath: /run/dsx
               readOnly: true
             - name: csi-socket-dir
-              mountPath: /exchange-proxy-csi
+              mountPath: /dsx-identity-keys-proxy-csi
             - name: mountpoint-dir
               mountPath: /var/lib/kubelet/pods
               mountPropagation: Bidirectional
@@ -114,8 +114,8 @@ spec:
           image: "{{ .Values.vmSupport.nodeDriverRegistrar.image.repository }}:{{ .Values.vmSupport.nodeDriverRegistrar.image.tag }}"
           imagePullPolicy: {{ .Values.vmSupport.nodeDriverRegistrar.image.pullPolicy }}
           args:
-            - --csi-address=/exchange-proxy-csi/csi.sock
-            - --kubelet-registration-path=/var/lib/kubelet/plugins/csi.exchange.nvidia.com/csi.sock
+            - --csi-address=/dsx-identity-keys-proxy-csi/csi.sock
+            - --kubelet-registration-path=/var/lib/kubelet/plugins/csi.dsx-identity-keys.nvidia.com/csi.sock
           resources:
             {{- toYaml .Values.vmSupport.resources.registrar | nindent 12 }}
           # Kubelet owns the driver socket and registration directories as root.
@@ -129,18 +129,18 @@ spec:
             runAsUser: 0
           volumeMounts:
             - name: csi-socket-dir
-              mountPath: /exchange-proxy-csi
+              mountPath: /dsx-identity-keys-proxy-csi
             - name: kubelet-plugin-registration-dir
               mountPath: /registration
       volumes:
-        - name: exchange-socket-dir
+        - name: identity-keys-socket-dir
           # Published bind mounts must survive a CSI DaemonSet rollout.
           hostPath:
-            path: /var/lib/kubelet/plugins/csi.exchange.nvidia.com/proxy
+            path: /var/lib/kubelet/plugins/csi.dsx-identity-keys.nvidia.com/proxy
             type: DirectoryOrCreate
         - name: csi-socket-dir
           hostPath:
-            path: /var/lib/kubelet/plugins/csi.exchange.nvidia.com
+            path: /var/lib/kubelet/plugins/csi.dsx-identity-keys.nvidia.com
             type: DirectoryOrCreate
         - name: mountpoint-dir
           hostPath:
@@ -154,7 +154,7 @@ spec:
 apiVersion: storage.k8s.io/v1
 kind: CSIDriver
 metadata:
-  name: csi.exchange.nvidia.com
+  name: csi.dsx-identity-keys.nvidia.com
 spec:
   attachRequired: false
   podInfoOnMount: true

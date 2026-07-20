@@ -22,7 +22,7 @@ func TestValidTenant(t *testing.T) {
 	}
 }
 
-func TestExchangeSPIFFEID(t *testing.T) {
+func TestToDSXSPIFFEID(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -67,7 +67,7 @@ func TestExchangeSPIFFEID(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			input := spiffeid.RequireFromString(test.spiffeID)
-			got, err := ExchangeSPIFFEID(input)
+			got, err := ToDSXSPIFFEID(input)
 			if err != nil {
 				t.Fatal(err)
 			}

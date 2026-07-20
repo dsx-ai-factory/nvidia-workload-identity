@@ -51,7 +51,7 @@ type TokenExchangeErrorResponse struct {
 	ErrorDescription string `json:"error_description,omitempty"`
 }
 
-type ExchangeServer struct {
+type identityKeysServer struct {
 	keys      *signingKeyset
 	registry  *keyRegistry
 	jwtSource *workloadapi.JWTSource
@@ -59,7 +59,7 @@ type ExchangeServer struct {
 	keySync   *keySync
 }
 
-func NewExchangeServer(ctx context.Context, keys *signingKeyset, registry *keyRegistry, socketPath, jwksURL string) (*ExchangeServer, error) {
+func newIdentityKeysServer(ctx context.Context, keys *signingKeyset, registry *keyRegistry, socketPath, jwksURL string) (*identityKeysServer, error) {
 	clientOptions := []workloadapi.ClientOption{
 		workloadapi.WithDialOptions(grpc.WithStatsHandler(otelgrpc.NewClientHandler())),
 	}
@@ -70,14 +70,14 @@ func NewExchangeServer(ctx context.Context, keys *signingKeyset, registry *keyRe
 	if err != nil {
 		return nil, fmt.Errorf("create JWT source: %w", err)
 	}
-	return &ExchangeServer{keys: keys, registry: registry, jwtSource: jwts, jwksURL: jwksURL}, nil
+	return &identityKeysServer{keys: keys, registry: registry, jwtSource: jwts, jwksURL: jwksURL}, nil
 }
 
-func (s *ExchangeServer) Close() error {
+func (s *identityKeysServer) Close() error {
 	return s.jwtSource.Close()
 }
 
-func (s *ExchangeServer) resignJWT(originalClaims map[string]any, newSubject spiffeid.ID) (string, error) {
+func (s *identityKeysServer) resignJWT(originalClaims map[string]any, newSubject spiffeid.ID) (string, error) {
 	// Preserve every validated claim except sub and iss.
 	newClaims := make(map[string]any, len(originalClaims))
 	maps.Copy(newClaims, originalClaims)
@@ -106,7 +106,7 @@ func writeTokenError(w http.ResponseWriter, statusCode int, errorCode, descripti
 	}
 }
 
-func (s *ExchangeServer) handleTokenExchange(w http.ResponseWriter, r *http.Request) {
+func (s *identityKeysServer) handleTokenExchange(w http.ResponseWriter, r *http.Request) {
 	slog.InfoContext(r.Context(), "Received token exchange request", "method", r.Method, "path", r.URL.Path, "remote_addr", r.RemoteAddr)
 	contentType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || contentType != ContentTypeFormURLEncoded {
@@ -142,7 +142,7 @@ func (s *ExchangeServer) handleTokenExchange(w http.ResponseWriter, r *http.Requ
 		writeTokenError(w, http.StatusUnauthorized, "invalid_grant", "subject_token validation failed")
 		return
 	}
-	newID, err := identity.ExchangeSPIFFEID(validatedSVID.ID)
+	newID, err := identity.ToDSXSPIFFEID(validatedSVID.ID)
 	if err != nil {
 		slog.WarnContext(r.Context(), "Rejected token exchange", "reason", "unsupported_subject", "error", err)
 		writeTokenError(w, http.StatusBadRequest, "invalid_request", "subject_token subject is not supported")
@@ -174,7 +174,7 @@ func (s *ExchangeServer) handleTokenExchange(w http.ResponseWriter, r *http.Requ
 	}
 }
 
-func (s *ExchangeServer) handleJWKS(w http.ResponseWriter, _ *http.Request) {
+func (s *identityKeysServer) handleJWKS(w http.ResponseWriter, _ *http.Request) {
 	responseBody, err := json.Marshal(s.registry.keyset())
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -188,7 +188,7 @@ func (s *ExchangeServer) handleJWKS(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-func (s *ExchangeServer) handleOIDCDiscovery(w http.ResponseWriter, _ *http.Request) {
+func (s *identityKeysServer) handleOIDCDiscovery(w http.ResponseWriter, _ *http.Request) {
 	responseBody, err := json.Marshal(oidc.ProviderConfig{
 		IssuerURL:  identity.Issuer,
 		JWKSURL:    s.jwksURL,
@@ -206,7 +206,7 @@ func (s *ExchangeServer) handleOIDCDiscovery(w http.ResponseWriter, _ *http.Requ
 	}
 }
 
-func (s *ExchangeServer) handleReady(w http.ResponseWriter, _ *http.Request) {
+func (s *identityKeysServer) handleReady(w http.ResponseWriter, _ *http.Request) {
 	if s.keySync != nil {
 		if !s.keySync.isConnectedAndSubscribed() {
 			http.Error(w, "MQTT is not connected and subscribed", http.StatusServiceUnavailable)
@@ -224,7 +224,7 @@ func handleLive(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (s *ExchangeServer) handler() http.Handler {
+func (s *identityKeysServer) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/exchange", s.handleTokenExchange)
 	mux.HandleFunc("GET /.well-known/jwks.json", s.handleJWKS)
@@ -272,11 +272,11 @@ func run() (runErr error) {
 		listenAddr        = flag.String("listen", ":8080", "HTTP server listen address")
 		socketPath        = flag.String("socket", "", "SPIFFE Workload API socket path")
 		jwksURL           = flag.String("jwks-url", "", "public JWKS URL advertised through discovery")
-		signingJWKS       = flag.String("signing-jwks", "/run/secrets/spiffe-exchange/signing-jwks.json", "private signing JWKS file")
-		activeKID         = flag.String("active-kid", "/run/secrets/spiffe-exchange/active-kid", "file containing the active signing kid")
-		shardID           = flag.String("shard-id", "", "stable Exchange shard identifier")
+		signingJWKS       = flag.String("signing-jwks", "/run/secrets/dsx-identity-keys/signing-jwks.json", "private signing JWKS file")
+		activeKID         = flag.String("active-kid", "/run/secrets/dsx-identity-keys/active-kid", "file containing the active signing kid")
+		shardID           = flag.String("shard-id", "", "stable DSX Identity Keys shard identifier")
 		mqttBroker        = flag.String("mqtt-broker", "", "MQTT 3.1.1 broker URL")
-		mqttClientID      = flag.String("mqtt-client-id", "", "MQTT client identifier (defaults to spiffe-exchange-<shard-id>)")
+		mqttClientID      = flag.String("mqtt-client-id", "", "MQTT client identifier (defaults to dsx-identity-keys-<shard-id>)")
 		publicKeyLeaseTTL = flag.Duration("public-key-lease-ttl", 10*time.Minute, "public key publication lease lifetime")
 		mqttTokenURL      = flag.String("mqtt-oauth-token-url", "", "OAuth2 client-credentials token endpoint for MQTT")
 		mqttOAuthID       = flag.String("mqtt-oauth-client-id", "", "OAuth2 client ID for MQTT")
@@ -284,7 +284,7 @@ func run() (runErr error) {
 	)
 	flag.Parse()
 
-	sdk, err := telemetry.Setup(context.Background(), "spiffe-exchange", os.Stdout, logLevel)
+	sdk, err := telemetry.Setup(context.Background(), "dsx-identity-keys", os.Stdout, logLevel)
 	if err != nil {
 		return fmt.Errorf("configure OpenTelemetry: %w", err)
 	}
@@ -293,7 +293,7 @@ func run() (runErr error) {
 	}()
 
 	if *mqttClientID == "" {
-		*mqttClientID = "spiffe-exchange-" + *shardID
+		*mqttClientID = "dsx-identity-keys-" + *shardID
 	}
 
 	keys, err := loadSigningKeyset(*signingJWKS, *activeKID)
@@ -316,9 +316,9 @@ func run() (runErr error) {
 	defer registry.stop()
 	defer syncer.Close()
 
-	server, err := NewExchangeServer(ctx, keys, registry, *socketPath, *jwksURL)
+	server, err := newIdentityKeysServer(ctx, keys, registry, *socketPath, *jwksURL)
 	if err != nil {
-		return fmt.Errorf("create exchange server: %w", err)
+		return fmt.Errorf("create DSX Identity Keys server: %w", err)
 	}
 	defer func() {
 		if err := server.Close(); err != nil {
@@ -329,13 +329,13 @@ func run() (runErr error) {
 
 	httpServer := &http.Server{
 		Addr: *listenAddr,
-		Handler: otelhttp.NewHandler(server.handler(), "spiffe-exchange",
+		Handler: otelhttp.NewHandler(server.handler(), "dsx-identity-keys",
 			otelhttp.WithFilter(filters.None(filters.Path("/live"), filters.Path("/ready")))),
 		ReadHeaderTimeout: 5 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	slog.Info("Starting SPIFFE Exchange Service", "listen_addr", *listenAddr, "issuer", identity.Issuer, "shard_id", *shardID, "active_kid", keys.activeKID)
+	slog.Info("Starting DSX Identity Keys", "listen_addr", *listenAddr, "issuer", identity.Issuer, "shard_id", *shardID, "active_kid", keys.activeKID)
 	if err := serveHTTP(ctx, httpServer); err != nil {
 		return fmt.Errorf("serve HTTP: %w", err)
 	}
@@ -344,7 +344,7 @@ func run() (runErr error) {
 
 func main() {
 	if err := run(); err != nil {
-		slog.Error("SPIFFE Exchange Service failed", "error", err)
+		slog.Error("DSX Identity Keys failed", "error", err)
 		os.Exit(1)
 	}
 }

@@ -139,7 +139,7 @@ initialize "jwt" {
     operation = "update"
     path      = "auth/jwt/config"
     data = {
-      jwks_url             = "http://spiffe-exchange.dsx-identity.svc.cluster.local:8080/.well-known/jwks.json"
+      jwks_url             = "http://dsx-identity-keys.dsx-identity.svc.cluster.local:8080/.well-known/jwks.json"
       bound_issuer         = "spiffe://ds9.dsx.nvid.id"
       jwt_supported_algs   = ["ES256"]
       skip_jwks_validation = true

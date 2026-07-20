@@ -190,11 +190,11 @@ docker-build:dsx-token-fetcher:
     DOCKER_IMAGE_NAME: dsx-token-fetcher
     EXTRA_BUILD_ARGS: "--target dsx-token-fetcher --build-arg BINARY=dsx-token-fetcher"
 
-docker-build:spiffe-exchange-service:
+docker-build:dsx-identity-keys:
   extends: [.container-build]
   variables:
-    DOCKER_IMAGE_NAME: spiffe-exchange-service
-    EXTRA_BUILD_ARGS: "--target spiffe-exchange-service --build-arg BINARY=spiffe-exchange-service"
+    DOCKER_IMAGE_NAME: dsx-identity-keys
+    EXTRA_BUILD_ARGS: "--target dsx-identity-keys --build-arg BINARY=dsx-identity-keys"
 
 docker-build:metadata-service:
   extends: [.container-build]
@@ -208,11 +208,11 @@ docker-build:dsx-imds-network-setup:
     DOCKER_IMAGE_NAME: dsx-imds-network-setup
     EXTRA_BUILD_ARGS: "--target dsx-imds-network-setup --build-arg BINARY=dsx-imds-network-setup"
 
-docker-build:exchange-proxy-csi:
+docker-build:dsx-identity-keys-proxy-csi:
   extends: [.container-build]
   variables:
-    DOCKER_IMAGE_NAME: exchange-proxy-csi
-    EXTRA_BUILD_ARGS: "--target exchange-proxy-csi --build-arg BINARY=exchange-proxy-csi"
+    DOCKER_IMAGE_NAME: dsx-identity-keys-proxy-csi
+    EXTRA_BUILD_ARGS: "--target dsx-identity-keys-proxy-csi --build-arg BINARY=dsx-identity-keys-proxy-csi"
 
 docker-build:dsx-identity-controller:
   extends: [.container-build]
@@ -244,15 +244,15 @@ pulse-scan:dsx-token-fetcher:
   variables:
     DOCKER_IMAGE_NAME: dsx-token-fetcher
 
-pulse-scan:spiffe-exchange-service:
+pulse-scan:dsx-identity-keys:
   extends:
     - .pulse-scan:container
   needs:
-    - job: docker-build:spiffe-exchange-service
+    - job: docker-build:dsx-identity-keys
       artifacts: true
     - compute-next-release-version
   variables:
-    DOCKER_IMAGE_NAME: spiffe-exchange-service
+    DOCKER_IMAGE_NAME: dsx-identity-keys
 
 pulse-scan:metadata-service:
   extends:
@@ -274,15 +274,15 @@ pulse-scan:dsx-imds-network-setup:
   variables:
     DOCKER_IMAGE_NAME: dsx-imds-network-setup
 
-pulse-scan:exchange-proxy-csi:
+pulse-scan:dsx-identity-keys-proxy-csi:
   extends:
     - .pulse-scan:container
   needs:
-    - job: docker-build:exchange-proxy-csi
+    - job: docker-build:dsx-identity-keys-proxy-csi
       artifacts: true
     - compute-next-release-version
   variables:
-    DOCKER_IMAGE_NAME: exchange-proxy-csi
+    DOCKER_IMAGE_NAME: dsx-identity-keys-proxy-csi
 
 pulse-scan:dsx-identity-controller:
   extends:
@@ -326,17 +326,17 @@ docker-push-ngc:dsx-token-fetcher:
   variables:
     DOCKER_IMAGE_NAME: dsx-token-fetcher
 
-docker-push-ngc:spiffe-exchange-service:
+docker-push-ngc:dsx-identity-keys:
   extends:
     - .docker-publish
   needs:
-    - job: docker-build:spiffe-exchange-service
+    - job: docker-build:dsx-identity-keys
       artifacts: true
-    - job: pulse-scan:spiffe-exchange-service
+    - job: pulse-scan:dsx-identity-keys
       optional: true
     - compute-next-release-version
   variables:
-    DOCKER_IMAGE_NAME: spiffe-exchange-service
+    DOCKER_IMAGE_NAME: dsx-identity-keys
 
 docker-push-ngc:metadata-service:
   extends:
@@ -362,17 +362,17 @@ docker-push-ngc:dsx-imds-network-setup:
   variables:
     DOCKER_IMAGE_NAME: dsx-imds-network-setup
 
-docker-push-ngc:exchange-proxy-csi:
+docker-push-ngc:dsx-identity-keys-proxy-csi:
   extends:
     - .docker-publish
   needs:
-    - job: docker-build:exchange-proxy-csi
+    - job: docker-build:dsx-identity-keys-proxy-csi
       artifacts: true
-    - job: pulse-scan:exchange-proxy-csi
+    - job: pulse-scan:dsx-identity-keys-proxy-csi
       optional: true
     - compute-next-release-version
   variables:
-    DOCKER_IMAGE_NAME: exchange-proxy-csi
+    DOCKER_IMAGE_NAME: dsx-identity-keys-proxy-csi
 
 docker-push-ngc:dsx-identity-controller:
   extends:

@@ -53,7 +53,7 @@ func newRemoteVerifier(ctx context.Context, jwksURL, audience string, trustDomai
 }
 
 func (v *Verifier) Verify(ctx context.Context, rawToken string) (spiffeid.ID, error) {
-	// Accept only the asymmetric algorithms supported by go-oidc and Exchange
+	// Accept only the asymmetric algorithms supported by go-oidc and DSX Identity Keys
 	// public JWKS. Symmetric algorithms cannot be verified from published keys.
 	verifier := oidc.NewVerifier(identity.Issuer, v.keySet, &oidc.Config{
 		ClientID: v.audience,

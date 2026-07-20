@@ -57,7 +57,7 @@ spire:
           plugin_cmd: /opt/spire/plugins/dsx-imds-node-attestor-server
           plugin_checksum: ""
           plugin_data:
-            jwks_url: http://spiffe-exchange.dsx-identity.svc.cluster.local:8080/.well-known/jwks.json
+            jwks_url: http://dsx-identity-keys.dsx-identity.svc.cluster.local:8080/.well-known/jwks.json
     controllerManager:
       extraEnv:
         - name: OPERATOR_TENANT
@@ -77,7 +77,7 @@ spire:
         operator: Exists
         effect: NoSchedule
 
-exchange:
+identityKeys:
   replicas: 1
   # The seed node emulates the external DPU execution boundary.
   nodeSelector:
@@ -86,8 +86,8 @@ exchange:
     - key: node-role.kubernetes.io/control-plane
       operator: Exists
       effect: NoSchedule
-  # The external E2E test process reaches Exchange through the Kind node.
+  # The external E2E test process reaches DSX Identity Keys through the Kind node.
   service:
     type: NodePort
     nodePort: 30080
-  jwksURL: http://spiffe-exchange.dsx-identity.svc.cluster.local:8080/.well-known/jwks.json
+  jwksURL: http://dsx-identity-keys.dsx-identity.svc.cluster.local:8080/.well-known/jwks.json
