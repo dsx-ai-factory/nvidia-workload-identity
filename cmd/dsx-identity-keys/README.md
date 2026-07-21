@@ -124,8 +124,7 @@ do not expose parser or verifier details.
 | `--mqtt-client-id` | `dsx-identity-keys-<shard-id>` | Unique MQTT client ID |
 | `--public-key-lease-ttl` | `10m` | Public key publication lease lifetime |
 | `--mqtt-oauth-token-url` | required | OAuth2 token endpoint for MQTT credentials |
-| `--mqtt-oauth-client-id` | required | OAuth2 client ID |
-| `--mqtt-oauth-client-secret` | required | File containing the OAuth2 client secret |
+| `--mqtt-oauth-credentials-file` | required | JSON file containing `client_id` and `client_secret` |
 | `--log-level` | `info` | JSON log level: `debug`, `info`, `warn`, or `error` |
 
 ## Testing

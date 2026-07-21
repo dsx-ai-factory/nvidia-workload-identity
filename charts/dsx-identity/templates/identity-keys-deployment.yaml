@@ -82,8 +82,7 @@ spec:
             - --mqtt-client-id=dsx-identity-keys-$(POD_NAME)
             - --public-key-lease-ttl={{ .Values.identityKeys.publicKeyLeaseTTL }}
             - --mqtt-oauth-token-url={{ required "identityKeys.mqtt.oauth2.tokenURL is required" .Values.identityKeys.mqtt.oauth2.tokenURL }}
-            - --mqtt-oauth-client-id={{ required "identityKeys.mqtt.oauth2.clientID is required" .Values.identityKeys.mqtt.oauth2.clientID }}
-            - --mqtt-oauth-client-secret=/run/secrets/dsx-identity-keys-mqtt/client-secret
+            - --mqtt-oauth-credentials-file=/run/secrets/dsx-identity-keys-mqtt/credentials.json
             - --log-level={{ .Values.observability.logLevel }}
           securityContext:
             allowPrivilegeEscalation: false
@@ -152,11 +151,11 @@ spec:
                 path: active-kid.json
         - name: mqtt-oauth
           secret:
-            secretName: {{ required "identityKeys.mqtt.oauth2.clientSecretSecret is required" .Values.identityKeys.mqtt.oauth2.clientSecretSecret }}
+            secretName: {{ required "identityKeys.mqtt.oauth2.credentialsSecret is required" .Values.identityKeys.mqtt.oauth2.credentialsSecret }}
             defaultMode: 0440
             items:
-              - key: {{ .Values.identityKeys.mqtt.oauth2.clientSecretKey }}
-                path: client-secret
+              - key: {{ required "identityKeys.mqtt.oauth2.credentialsKey is required" .Values.identityKeys.mqtt.oauth2.credentialsKey }}
+                path: credentials.json
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget

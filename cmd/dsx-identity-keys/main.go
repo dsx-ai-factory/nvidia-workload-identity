@@ -279,8 +279,7 @@ func run() (runErr error) {
 		mqttClientID      = flag.String("mqtt-client-id", "", "MQTT client identifier (defaults to dsx-identity-keys-<shard-id>)")
 		publicKeyLeaseTTL = flag.Duration("public-key-lease-ttl", 10*time.Minute, "public key publication lease lifetime")
 		mqttTokenURL      = flag.String("mqtt-oauth-token-url", "", "OAuth2 client-credentials token endpoint for MQTT")
-		mqttOAuthID       = flag.String("mqtt-oauth-client-id", "", "OAuth2 client ID for MQTT")
-		mqttSecret        = flag.String("mqtt-oauth-client-secret", "", "file containing the OAuth2 client secret for MQTT")
+		mqttCredentials   = flag.String("mqtt-oauth-credentials-file", "", "JSON file containing the OAuth2 client credentials for MQTT")
 	)
 	flag.Parse()
 
@@ -304,9 +303,8 @@ func run() (runErr error) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	mqttOAuth := mqttOAuthConfig{
-		tokenURL:         *mqttTokenURL,
-		clientID:         *mqttOAuthID,
-		clientSecretFile: *mqttSecret,
+		tokenURL:        *mqttTokenURL,
+		credentialsFile: *mqttCredentials,
 	}
 	syncer, err := startKeySync(ctx, *mqttBroker, *mqttClientID, *shardID, keys.public, *publicKeyLeaseTTL, registry, mqttOAuth)
 	if err != nil {

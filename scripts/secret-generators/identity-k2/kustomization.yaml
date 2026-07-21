@@ -14,5 +14,4 @@ secretGenerator:
       - active-kid.json=generated/active-kid.json
   - name: dsx-identity-keys-mqtt-oauth
     files:
-      - client-id=../event-bus/generated/oauth/client-id
-      - client-secret=../event-bus/generated/oauth/client-secret
+      - credentials.json=../event-bus/generated/oauth/credentials.json

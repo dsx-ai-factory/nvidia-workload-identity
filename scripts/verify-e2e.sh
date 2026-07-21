@@ -74,9 +74,11 @@ initialize_external_test_process() {
 }
 
 event_bus_access_token() {
-    local client_id="$1" secret_name="$2" client_secret
-    client_secret=$(kubectl get secret "${secret_name}" -n "${IDENTITY_NAMESPACE}" \
-        --context "${K1_CONTEXT}" -o json | jq -er '.data["client-secret"]' | base64 -d)
+    local client_id="$1" secret_name="$2" credentials client_secret
+    credentials=$(kubectl get secret "${secret_name}" -n "${IDENTITY_NAMESPACE}" \
+        --context "${K1_CONTEXT}" -o json | jq -er '.data["credentials.json"]' | base64 -d)
+    client_secret=$(jq -er --arg client_id "${client_id}" \
+        'select(.client_id == $client_id) | .client_secret' <<<"${credentials}")
     external_curl -fsS --retry 30 --retry-all-errors --retry-connrefused \
         --retry-delay 1 --retry-max-time 30 --connect-timeout 1 --max-time 10 \
         --data-urlencode grant_type=client_credentials \

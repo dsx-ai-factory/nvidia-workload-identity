@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -57,24 +58,24 @@ type keyCachePriming struct {
 }
 
 type mqttOAuthConfig struct {
-	tokenURL         string
-	clientID         string
-	clientSecretFile string
+	tokenURL        string
+	credentialsFile string
 }
 
 type mqttOAuthTokenSource struct {
-	ctx              context.Context
-	config           clientcredentials.Config
-	clientSecretFile string
+	ctx             context.Context
+	config          clientcredentials.Config
+	credentialsFile string
 }
 
 func (s mqttOAuthTokenSource) Token() (*oauth2.Token, error) {
-	secret, err := readClientSecret(s.clientSecretFile)
+	credentials, err := readOAuthCredentials(s.credentialsFile)
 	if err != nil {
 		return nil, err
 	}
 	config := s.config
-	config.ClientSecret = secret
+	config.ClientID = credentials.ClientID
+	config.ClientSecret = credentials.ClientSecret
 	return config.Token(s.ctx)
 }
 
@@ -191,15 +192,14 @@ func (s *keySync) Close() {
 }
 
 func (c mqttOAuthConfig) credentialsProvider(ctx context.Context) (mqtt.CredentialsProvider, error) {
-	if c.tokenURL == "" || c.clientID == "" || c.clientSecretFile == "" {
-		return nil, fmt.Errorf("MQTT OAuth2 token URL, client ID, and client-secret file are required")
+	if c.tokenURL == "" || c.credentialsFile == "" {
+		return nil, fmt.Errorf("MQTT OAuth2 token URL and credentials file are required")
 	}
-	// early exit if secret is missing
-	if _, err := readClientSecret(c.clientSecretFile); err != nil {
+	// Fail startup if the mounted credentials are missing or invalid.
+	if _, err := readOAuthCredentials(c.credentialsFile); err != nil {
 		return nil, err
 	}
 	config := clientcredentials.Config{
-		ClientID: c.clientID,
 		TokenURL: c.tokenURL,
 		Scopes:   []string{"mqtt"},
 	}
@@ -207,11 +207,11 @@ func (c mqttOAuthConfig) credentialsProvider(ctx context.Context) (mqtt.Credenti
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
 		Timeout:   10 * time.Second,
 	})
-	// Reuse valid tokens, but reread the mounted secret when a refresh is required.
+	// Reuse valid tokens, but reread both mounted credentials when a refresh is required.
 	tokens := oauth2.ReuseTokenSource(nil, mqttOAuthTokenSource{
-		ctx:              tokenContext,
-		config:           config,
-		clientSecretFile: c.clientSecretFile,
+		ctx:             tokenContext,
+		config:          config,
+		credentialsFile: c.credentialsFile,
 	})
 	// DSX auth-callout expects username "oauthtoken" and the access token as the MQTT password.
 	return func() (string, string) {
@@ -225,16 +225,24 @@ func (c mqttOAuthConfig) credentialsProvider(ctx context.Context) (mqtt.Credenti
 	}, nil
 }
 
-func readClientSecret(path string) (string, error) {
-	secretBytes, err := os.ReadFile(path)
+type mqttOAuthCredentials struct {
+	ClientID     string `json:"client_id"`
+	ClientSecret string `json:"client_secret"`
+}
+
+func readOAuthCredentials(path string) (mqttOAuthCredentials, error) {
+	credentialBytes, err := os.ReadFile(path)
 	if err != nil {
-		return "", fmt.Errorf("read MQTT OAuth2 client secret: %w", err)
+		return mqttOAuthCredentials{}, fmt.Errorf("read MQTT OAuth2 credentials: %w", err)
 	}
-	secret := string(secretBytes)
-	if secret == "" {
-		return "", fmt.Errorf("MQTT OAuth2 client secret must be non-empty")
+	var credentials mqttOAuthCredentials
+	if err := json.Unmarshal(credentialBytes, &credentials); err != nil {
+		return mqttOAuthCredentials{}, fmt.Errorf("parse MQTT OAuth2 credentials: %w", err)
 	}
-	return secret, nil
+	if credentials.ClientID == "" || credentials.ClientSecret == "" {
+		return mqttOAuthCredentials{}, fmt.Errorf("MQTT OAuth2 client_id and client_secret must be non-empty")
+	}
+	return credentials, nil
 }
 
 func waitMQTTToken(ctx context.Context, token mqtt.Token) error {
