@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -278,8 +279,11 @@ func run() (runErr error) {
 		mqttBroker        = flag.String("mqtt-broker", "", "MQTT 3.1.1 broker URL")
 		mqttClientID      = flag.String("mqtt-client-id", "", "MQTT client identifier (defaults to dsx-identity-keys-<shard-id>)")
 		publicKeyLeaseTTL = flag.Duration("public-key-lease-ttl", 10*time.Minute, "public key publication lease lifetime")
+		mqttAuthModeFlag  = flag.String("mqtt-auth-mode", "anonymous", "MQTT authentication mode: oauth2, basic, or anonymous")
+		mqttCredentials   = flag.String("mqtt-credentials-file", "", "JSON file containing MQTT credentials")
 		mqttTokenURL      = flag.String("mqtt-oauth-token-url", "", "OAuth2 client-credentials token endpoint for MQTT")
-		mqttCredentials   = flag.String("mqtt-oauth-credentials-file", "", "JSON file containing the OAuth2 client credentials for MQTT")
+		mqttScopes        = flag.String("mqtt-oauth-scopes", "mqtt", "comma-separated OAuth2 scopes for MQTT; empty requests no scopes")
+		mqttOAuthUsername = flag.String("mqtt-oauth-username", "oauthtoken", "MQTT username sent with the OAuth2 access token")
 	)
 	flag.Parse()
 
@@ -302,11 +306,18 @@ func run() (runErr error) {
 	registry := newKeyRegistry()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	mqttOAuth := mqttOAuthConfig{
-		tokenURL:        *mqttTokenURL,
-		credentialsFile: *mqttCredentials,
+	var scopes []string
+	if *mqttScopes != "" {
+		scopes = strings.Split(*mqttScopes, ",")
 	}
-	syncer, err := startKeySync(ctx, *mqttBroker, *mqttClientID, *shardID, keys.public, *publicKeyLeaseTTL, registry, mqttOAuth)
+	mqttAuth := mqttAuthConfig{
+		mode:            *mqttAuthModeFlag,
+		credentialsFile: *mqttCredentials,
+		oauthTokenURL:   *mqttTokenURL,
+		oauthScopes:     scopes,
+		oauthUsername:   *mqttOAuthUsername,
+	}
+	syncer, err := startKeySync(ctx, *mqttBroker, *mqttClientID, *shardID, keys.public, *publicKeyLeaseTTL, registry, mqttAuth)
 	if err != nil {
 		return fmt.Errorf("start public key synchronization: %w", err)
 	}

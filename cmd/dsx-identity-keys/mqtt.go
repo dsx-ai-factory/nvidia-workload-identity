@@ -28,6 +28,9 @@ const (
 	mqttConnectRetry     = time.Second
 	syncBackoffMin       = 100 * time.Millisecond
 	syncBackoffMax       = 2 * time.Second
+	mqttAuthOAuth2       = "oauth2"
+	mqttAuthBasic        = "basic"
+	mqttAuthAnonymous    = "anonymous"
 )
 
 // keySync owns one replica's MQTT client and publication worker. Close stops both.
@@ -57,9 +60,12 @@ type keyCachePriming struct {
 	completed           chan struct{}
 }
 
-type mqttOAuthConfig struct {
-	tokenURL        string
+type mqttAuthConfig struct {
+	mode            string
 	credentialsFile string
+	oauthTokenURL   string
+	oauthScopes     []string
+	oauthUsername   string
 }
 
 type mqttOAuthTokenSource struct {
@@ -69,7 +75,7 @@ type mqttOAuthTokenSource struct {
 }
 
 func (s mqttOAuthTokenSource) Token() (*oauth2.Token, error) {
-	credentials, err := readOAuthCredentials(s.credentialsFile)
+	credentials, err := readMQTTCredentials(s.credentialsFile, mqttAuthOAuth2)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +122,7 @@ func (p *keyCachePriming) isComplete() bool {
 	}
 }
 
-func startKeySync(ctx context.Context, brokerURL, clientID, shardID string, keys []jose.JSONWebKey, leaseTTL time.Duration, registry *keyRegistry, oauth mqttOAuthConfig) (*keySync, error) {
+func startKeySync(ctx context.Context, brokerURL, clientID, shardID string, keys []jose.JSONWebKey, leaseTTL time.Duration, registry *keyRegistry, auth mqttAuthConfig) (*keySync, error) {
 	if brokerURL == "" {
 		return nil, fmt.Errorf("MQTT broker URL is required")
 	}
@@ -159,12 +165,14 @@ func startKeySync(ctx context.Context, brokerURL, clientID, shardID string, keys
 		SetConnectRetryInterval(mqttConnectRetry).
 		SetMaxReconnectInterval(5 * time.Second).
 		SetOrderMatters(true)
-	provider, err := oauth.credentialsProvider(syncContext)
+	provider, err := auth.credentialsProvider(syncContext)
 	if err != nil {
 		syncer.Close()
 		return nil, err
 	}
-	opts.SetCredentialsProvider(provider)
+	if provider != nil {
+		opts.SetCredentialsProvider(provider)
+	}
 	opts.OnConnect = func(mqtt.Client) {
 		syncer.connectionOpened(syncContext)
 	}
@@ -191,17 +199,30 @@ func (s *keySync) Close() {
 	})
 }
 
-func (c mqttOAuthConfig) credentialsProvider(ctx context.Context) (mqtt.CredentialsProvider, error) {
-	if c.tokenURL == "" || c.credentialsFile == "" {
-		return nil, fmt.Errorf("MQTT OAuth2 token URL and credentials file are required")
+func (c mqttAuthConfig) credentialsProvider(ctx context.Context) (mqtt.CredentialsProvider, error) {
+	switch c.mode {
+	case mqttAuthOAuth2:
+		return c.oauthCredentialsProvider(ctx)
+	case mqttAuthBasic:
+		return c.basicCredentialsProvider()
+	case mqttAuthAnonymous:
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("MQTT auth mode %q must be oauth2, basic, or anonymous", c.mode)
+	}
+}
+
+func (c mqttAuthConfig) oauthCredentialsProvider(ctx context.Context) (mqtt.CredentialsProvider, error) {
+	if c.oauthTokenURL == "" || c.oauthUsername == "" || c.credentialsFile == "" {
+		return nil, fmt.Errorf("MQTT OAuth2 token URL, username, and credentials file are required")
 	}
 	// Fail startup if the mounted credentials are missing or invalid.
-	if _, err := readOAuthCredentials(c.credentialsFile); err != nil {
+	if _, err := readMQTTCredentials(c.credentialsFile, mqttAuthOAuth2); err != nil {
 		return nil, err
 	}
 	config := clientcredentials.Config{
-		TokenURL: c.tokenURL,
-		Scopes:   []string{"mqtt"},
+		TokenURL: c.oauthTokenURL,
+		Scopes:   c.oauthScopes,
 	}
 	tokenContext := context.WithValue(ctx, oauth2.HTTPClient, &http.Client{
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
@@ -213,34 +234,59 @@ func (c mqttOAuthConfig) credentialsProvider(ctx context.Context) (mqtt.Credenti
 		config:          config,
 		credentialsFile: c.credentialsFile,
 	})
-	// DSX auth-callout expects username "oauthtoken" and the access token as the MQTT password.
 	return func() (string, string) {
 		token, err := tokens.Token()
 		if err != nil {
 			slog.Error("Failed to obtain MQTT OAuth2 token", "error", err)
 			// An empty password makes the broker reject this connection attempt.
-			return "oauthtoken", ""
+			return c.oauthUsername, ""
 		}
-		return "oauthtoken", token.AccessToken
+		return c.oauthUsername, token.AccessToken
 	}, nil
 }
 
-type mqttOAuthCredentials struct {
-	ClientID     string `json:"client_id"`
-	ClientSecret string `json:"client_secret"`
+func (c mqttAuthConfig) basicCredentialsProvider() (mqtt.CredentialsProvider, error) {
+	if c.credentialsFile == "" {
+		return nil, fmt.Errorf("MQTT basic credentials file is required")
+	}
+	if _, err := readMQTTCredentials(c.credentialsFile, mqttAuthBasic); err != nil {
+		return nil, err
+	}
+	return func() (string, string) {
+		credentials, err := readMQTTCredentials(c.credentialsFile, mqttAuthBasic)
+		if err != nil {
+			slog.Error("Failed to read MQTT basic credentials", "error", err)
+			return "", ""
+		}
+		return credentials.Username, credentials.Password
+	}, nil
 }
 
-func readOAuthCredentials(path string) (mqttOAuthCredentials, error) {
+type mqttCredentials struct {
+	ClientID     string `json:"client_id"`
+	ClientSecret string `json:"client_secret"`
+	Username     string `json:"username"`
+	Password     string `json:"password"`
+}
+
+func readMQTTCredentials(path, mode string) (mqttCredentials, error) {
 	credentialBytes, err := os.ReadFile(path)
 	if err != nil {
-		return mqttOAuthCredentials{}, fmt.Errorf("read MQTT OAuth2 credentials: %w", err)
+		return mqttCredentials{}, fmt.Errorf("read MQTT %s credentials: %w", mode, err)
 	}
-	var credentials mqttOAuthCredentials
+	var credentials mqttCredentials
 	if err := json.Unmarshal(credentialBytes, &credentials); err != nil {
-		return mqttOAuthCredentials{}, fmt.Errorf("parse MQTT OAuth2 credentials: %w", err)
+		return mqttCredentials{}, fmt.Errorf("parse MQTT %s credentials: %w", mode, err)
 	}
-	if credentials.ClientID == "" || credentials.ClientSecret == "" {
-		return mqttOAuthCredentials{}, fmt.Errorf("MQTT OAuth2 client_id and client_secret must be non-empty")
+	switch mode {
+	case mqttAuthOAuth2:
+		if credentials.ClientID == "" || credentials.ClientSecret == "" {
+			return mqttCredentials{}, fmt.Errorf("MQTT OAuth2 client_id and client_secret must be non-empty")
+		}
+	case mqttAuthBasic:
+		if credentials.Username == "" || credentials.Password == "" {
+			return mqttCredentials{}, fmt.Errorf("MQTT basic username and password must be non-empty")
+		}
 	}
 	return credentials, nil
 }

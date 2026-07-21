@@ -323,16 +323,13 @@ identityKeys:
   activeKIDSecret: dsx-identity-keys-active-kid
   mqtt:
     brokerURL: tls://event-bus.example.com
-    oauth2:
-      tokenURL: https://auth.example.com/oauth2/token
+    auth:
+      mode: oauth2
       credentialsSecret: dsx-identity-keys-mqtt-oauth
       credentialsKey: credentials.json
+      oauth2:
+        tokenURL: https://auth.example.com/oauth2/token
 ```
-
-The MQTT OAuth Secret key is one JSON document containing non-empty
-`client_id` and `client_secret` fields. DSX Identity Keys rereads the file when
-the cached access token expires, so external secret automation can rotate both
-credentials together.
 
 Each identity shard configures the `dsx_imds` server plugin in SPIRE and exposes
 the external host agent's canonical socket through the single SPIFFE CSI

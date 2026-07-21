@@ -53,10 +53,18 @@ Public keys use retained QoS 1 topics of the form
 `dsx-identity-keys/v1/pub-keys/shard/<shard-id>/kid/<kid>`. Publications carry a
 lease expiry and are refreshed every quarter of the configured lease lifetime,
 leaving three further publish opportunities before lease expiry. Each valid
-publication replaces the globally unique `kid` it addresses. The process
-obtains MQTT credentials from the configured OAuth2 client-credentials
-endpoint. Those credentials are restricted to `dsx-identity-keys.>` publish and
-subscribe access.
+publication replaces the globally unique `kid` it addresses. MQTT connections
+use the configured OAuth2, basic, or anonymous authentication mode. Event Bus
+authorization remains external to DSX Identity Keys.
+
+Anonymous is the default and sends no MQTT credentials. OAuth2 mode reads one
+JSON credentials file containing non-empty `client_id` and `client_secret`
+fields. It rereads both values when the cached access token expires. OAuth
+scopes and the MQTT username paired with the access token are configurable; an
+empty scope list sends no scope parameter. Basic mode reads one JSON credentials
+file containing non-empty `username` and `password` fields and rereads it for
+each connection attempt. The Helm chart mounts no MQTT credentials Secret in
+anonymous mode.
 
 The retained JSON payload contains `published_at`, `lease_expires_at`, and one
 public `jwk`. The topic supplies the shard ID and `kid`, and the payload JWK
@@ -123,8 +131,11 @@ do not expose parser or verifier details.
 | `--mqtt-broker` | required | MQTT 3.1.1 broker URL |
 | `--mqtt-client-id` | `dsx-identity-keys-<shard-id>` | Unique MQTT client ID |
 | `--public-key-lease-ttl` | `10m` | Public key publication lease lifetime |
-| `--mqtt-oauth-token-url` | required | OAuth2 token endpoint for MQTT credentials |
-| `--mqtt-oauth-credentials-file` | required | JSON file containing `client_id` and `client_secret` |
+| `--mqtt-auth-mode` | `anonymous` | MQTT authentication mode: `oauth2`, `basic`, or `anonymous` |
+| `--mqtt-credentials-file` | OAuth2/basic mode | JSON file containing the selected mode's credentials |
+| `--mqtt-oauth-token-url` | OAuth2 mode | OAuth2 token endpoint |
+| `--mqtt-oauth-scopes` | `mqtt` | Comma-separated scopes; empty requests none |
+| `--mqtt-oauth-username` | `oauthtoken` | MQTT username paired with the access token |
 | `--log-level` | `info` | JSON log level: `debug`, `info`, `warn`, or `error` |
 
 ## Testing
@@ -135,6 +146,6 @@ go test ./cmd/dsx-identity-keys
 
 The focused tests cover signing configuration, RFC 8693 behavior, flat `kid`
 aggregation, deterministic publication lease expiry, rotation overlap,
-MQTT retained synchronization, OAuth2 credentials, and discovery. Live MQTT
+MQTT retained synchronization, MQTT authentication, and discovery. Live MQTT
 and deployed aggregate checks are enabled by the `DSX_E2E_MQTT_*` and
 `DSX_E2E_VERIFY_*` environment variables used by the E2E scripts.

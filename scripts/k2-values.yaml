@@ -22,8 +22,11 @@ identityKeys:
   shardID: k2
   mqtt:
     brokerURL: tcp://gateway.sjc-1.nvidia.com:1883
-    oauth2:
-      tokenURL: http://gateway.sjc-1.nvidia.com:8080/realms/event-bus/protocol/openid-connect/token
+    auth:
+      mode: oauth2
+      credentialsSecret: dsx-identity-keys-mqtt-oauth
+      oauth2:
+        tokenURL: http://gateway.sjc-1.nvidia.com:8080/realms/event-bus/protocol/openid-connect/token
 
 podTokenFetcher:
   identityKeysURL: http://dsx-identity-keys.dsx-identity.svc.cluster.local:8080/v1/exchange

@@ -2,6 +2,17 @@
 {{- $clusterName := required "global.spire.clusterName is required" .Values.global.spire.clusterName -}}
 {{- if .Values.identityKeys.enabled }}
 {{- $imageTag := .Values.identityKeys.image.tag | default .Values.global.imageTag | default .Chart.Version -}}
+{{- $mqttAuth := .Values.identityKeys.mqtt.auth -}}
+{{- $mqttAuthMode := required "identityKeys.mqtt.auth.mode is required" $mqttAuth.mode -}}
+{{- if not (has $mqttAuthMode (list "oauth2" "basic" "anonymous")) -}}
+{{- fail "identityKeys.mqtt.auth.mode must be oauth2, basic, or anonymous" -}}
+{{- end -}}
+{{- $mqttCredentialsSecret := "" -}}
+{{- $mqttCredentialsKey := "" -}}
+{{- if ne $mqttAuthMode "anonymous" -}}
+{{- $mqttCredentialsSecret = required "identityKeys.mqtt.auth.credentialsSecret is required" $mqttAuth.credentialsSecret -}}
+{{- $mqttCredentialsKey = required "identityKeys.mqtt.auth.credentialsKey is required" $mqttAuth.credentialsKey -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -81,8 +92,15 @@ spec:
             # Pod name keeps every active replica on a separate MQTT session.
             - --mqtt-client-id=dsx-identity-keys-$(POD_NAME)
             - --public-key-lease-ttl={{ .Values.identityKeys.publicKeyLeaseTTL }}
-            - --mqtt-oauth-token-url={{ required "identityKeys.mqtt.oauth2.tokenURL is required" .Values.identityKeys.mqtt.oauth2.tokenURL }}
-            - --mqtt-oauth-credentials-file=/run/secrets/dsx-identity-keys-mqtt/credentials.json
+            - --mqtt-auth-mode={{ $mqttAuthMode }}
+            {{- if ne $mqttAuthMode "anonymous" }}
+            - --mqtt-credentials-file=/run/secrets/dsx-identity-keys-mqtt/credentials.json
+            {{- end }}
+            {{- if eq $mqttAuthMode "oauth2" }}
+            - --mqtt-oauth-token-url={{ required "identityKeys.mqtt.auth.oauth2.tokenURL is required" $mqttAuth.oauth2.tokenURL }}
+            - --mqtt-oauth-scopes={{ join "," $mqttAuth.oauth2.scopes }}
+            - --mqtt-oauth-username={{ required "identityKeys.mqtt.auth.oauth2.username is required" $mqttAuth.oauth2.username }}
+            {{- end }}
             - --log-level={{ .Values.observability.logLevel }}
           securityContext:
             allowPrivilegeEscalation: false
@@ -101,9 +119,11 @@ spec:
             - name: active-kid
               mountPath: /run/secrets/dsx-identity-keys-active-kid
               readOnly: true
-            - name: mqtt-oauth
+            {{- if ne $mqttAuthMode "anonymous" }}
+            - name: mqtt-auth
               mountPath: /run/secrets/dsx-identity-keys-mqtt
               readOnly: true
+            {{- end }}
           # DSX Identity Keys owns its Pod ports, including the metrics listener.
           env:
             - name: POD_NAME
@@ -149,13 +169,15 @@ spec:
             items:
               - key: active-kid.json
                 path: active-kid.json
-        - name: mqtt-oauth
+        {{- if ne $mqttAuthMode "anonymous" }}
+        - name: mqtt-auth
           secret:
-            secretName: {{ required "identityKeys.mqtt.oauth2.credentialsSecret is required" .Values.identityKeys.mqtt.oauth2.credentialsSecret }}
+            secretName: {{ $mqttCredentialsSecret }}
             defaultMode: 0440
             items:
-              - key: {{ required "identityKeys.mqtt.oauth2.credentialsKey is required" .Values.identityKeys.mqtt.oauth2.credentialsKey }}
+              - key: {{ $mqttCredentialsKey }}
                 path: credentials.json
+        {{- end }}
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
