@@ -30,16 +30,6 @@ spec:
           env:
             - name: JAVA_OPTS_KC_HEAP
               value: -XX:InitialRAMPercentage=25 -XX:MaxRAMPercentage=50
-            - name: DSX_IDENTITY_KEYS_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: dsx-identity-keys-mqtt-oauth
-                  key: client-secret
-            - name: E2E_OBSERVER_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: event-bus-e2e-observer-oauth
-                  key: client-secret
           ports:
             - name: http
               containerPort: 8080
@@ -74,8 +64,8 @@ spec:
               readOnly: true
       volumes:
         - name: realm-import
-          configMap:
-            name: keycloak-realm-import
+          secret:
+            secretName: keycloak-realm-import
             defaultMode: 0444
 ---
 apiVersion: v1

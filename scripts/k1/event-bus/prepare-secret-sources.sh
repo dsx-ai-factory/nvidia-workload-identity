@@ -94,22 +94,21 @@ prepare_nkeys() {
 prepare_oauth_secret() {
     local secret_name="$1"
     local expected_client_id="$2"
-    local client_secret_dir="$3"
-    local json client_id
-    mkdir -p "${client_secret_dir}"
+    local credentials_dir="$3"
+    local json client_id client_secret
+    mkdir -p "${credentials_dir}"
 
     if secret_exists "${secret_name}"; then
         json=$(kubectl get secret "${secret_name}" -n "${NAMESPACE}" \
             --context "${CONTEXT}" -o json)
-        if ! jq -er '.data["client-id"]' <<<"${json}" | base64 -d >"${client_secret_dir}/client-id" ||
-            ! jq -er '.data["client-secret"]' <<<"${json}" | base64 -d >"${client_secret_dir}/client-secret"; then
-            log_error "OAuth2 Secret is missing a required key. Refusing to rotate credentials"
+        if ! jq -er '.data["credentials.json"]' <<<"${json}" | base64 -d >"${credentials_dir}/credentials.json"; then
+            log_error "OAuth2 Secret is missing credentials.json. Refusing to rotate credentials"
             return 1
         fi
-        client_id=$(<"${client_secret_dir}/client-id")
-        if [[ "${client_id}" != "${expected_client_id}" ||
-            "$(wc -c <"${client_secret_dir}/client-secret")" -ne 64 ]] ||
-            ! grep -Eq '^[0-9a-f]{64}$' "${client_secret_dir}/client-secret"; then
+        client_id=$(jq -er '.client_id' "${credentials_dir}/credentials.json")
+        client_secret=$(jq -er '.client_secret' "${credentials_dir}/credentials.json")
+        if [[ "${client_id}" != "${expected_client_id}" || "${#client_secret}" -ne 64 ]] ||
+            ! grep -Eq '^[0-9a-f]{64}$' <<<"${client_secret}"; then
             log_error "OAuth2 Secret ${secret_name} is invalid. Refusing to rotate credentials"
             return 1
         fi
@@ -122,8 +121,9 @@ prepare_oauth_secret() {
         return 1
     fi
 
-    printf '%s' "${expected_client_id}" >"${client_secret_dir}/client-id"
-    printf '%s' "$(openssl rand -hex 32)" >"${client_secret_dir}/client-secret"
+    client_secret=$(openssl rand -hex 32)
+    jq -cn --arg client_id "${expected_client_id}" --arg client_secret "${client_secret}" \
+        '{client_id: $client_id, client_secret: $client_secret}' >"${credentials_dir}/credentials.json"
     log_info "Generated OAuth2 Secret source ${secret_name}"
 }
 
@@ -131,6 +131,12 @@ prepare_oauth() {
     prepare_oauth_secret dsx-identity-keys-mqtt-oauth dsx-identity-keys "${TEMP_DIR}/oauth"
     prepare_oauth_secret event-bus-e2e-observer-oauth event-bus-e2e-observer \
         "${TEMP_DIR}/observer-oauth"
+
+    jq --arg identity_secret "$(jq -er '.client_secret' "${TEMP_DIR}/oauth/credentials.json")" \
+        --arg observer_secret "$(jq -er '.client_secret' "${TEMP_DIR}/observer-oauth/credentials.json")" \
+        '(.clients[] | select(.clientId == "dsx-identity-keys").secret) = $identity_secret |
+         (.clients[] | select(.clientId == "event-bus-e2e-observer").secret) = $observer_secret' \
+        "${SCRIPT_DIR}/event-bus-realm.json" >"${TEMP_DIR}/event-bus-realm.json"
 }
 
 publish_sources() {

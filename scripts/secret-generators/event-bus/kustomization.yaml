@@ -6,6 +6,9 @@ resources:
 generatorOptions:
   disableNameSuffixHash: true
 secretGenerator:
+  - name: keycloak-realm-import
+    files:
+      - event-bus-realm.json=generated/event-bus-realm.json
   - name: auth-callout-keys
     files:
       - nkey-seed=generated/csc/nkeys/auth-callout-keys/nkey-seed
@@ -34,9 +37,7 @@ secretGenerator:
       - pubkey=generated/csc/nkeys/nats-xkey/pubkey
   - name: dsx-identity-keys-mqtt-oauth
     files:
-      - client-id=generated/oauth/client-id
-      - client-secret=generated/oauth/client-secret
+      - credentials.json=generated/oauth/credentials.json
   - name: event-bus-e2e-observer-oauth
     files:
-      - client-id=generated/observer-oauth/client-id
-      - client-secret=generated/observer-oauth/client-secret
+      - credentials.json=generated/observer-oauth/credentials.json

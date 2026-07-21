@@ -131,9 +131,9 @@ identityKeys:
     brokerURL: ""
     oauth2:
       tokenURL: ""
-      clientID: dsx-identity-keys
-      clientSecretSecret: dsx-identity-keys-mqtt-oauth
-      clientSecretKey: client-secret
+      # credentials.json must contain client_id and client_secret.
+      credentialsSecret: dsx-identity-keys-mqtt-oauth
+      credentialsKey: credentials.json
   resources:
     requests:
       cpu: 100m
