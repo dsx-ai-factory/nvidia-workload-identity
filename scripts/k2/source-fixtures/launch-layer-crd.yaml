@@ -65,7 +65,5 @@ spec:
                       type: string
                       pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
               x-kubernetes-validations:
-                - rule: "self.type == 'vm' || !has(self.role)"
-                  message: spec.role is valid only when spec.type is vm
                 - rule: "self.type == 'vm' ? has(self.holder) : !has(self.holder)"
                   message: spec.holder is required only when spec.type is vm

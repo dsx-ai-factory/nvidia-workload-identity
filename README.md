@@ -493,7 +493,7 @@ spec:
   tenantID: tenant-2       # supplied dynamically by this source
   resourceID: vm-1234
   parentID: host-1234                  # DPU ID for host, operator worker host ID for VM
-  role: database                       # optional for a VM only
+  role: database                       # optional for host or VM
   holder:
     namespace: tenant-tenant1
     serviceAccount: vm-identity-client

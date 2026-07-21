@@ -172,7 +172,7 @@ func TestLaunchLayerSourceReconcileLifecycle(t *testing.T) {
 
 	ctx := context.Background()
 	host := newLaunchLayerSource("host-source", "tenant-system", "7ae7fe75-e671-4b0e-a76d-ef02bb5b040b", map[string]any{
-		"type": "host", "tenantID": "tenant-2", "resourceID": "host-1", "parentID": "dpu-1",
+		"type": "host", "tenantID": "tenant-2", "resourceID": "host-1", "role": "database", "parentID": "dpu-1",
 	})
 	vm := newLaunchLayerSource("vm-source", "tenant-system", "e35e41ae-a112-4f64-8841-298c2a6662b0", map[string]any{
 		"type": "vm", "tenantID": "tenant-2", "resourceID": "vm-1", "role": "database", "parentID": "host-1",
@@ -202,7 +202,7 @@ func TestLaunchLayerSourceReconcileLifecycle(t *testing.T) {
 
 	hostEntry := getEntry(t, c, childName(host))
 	assertEntry(t, hostEntry,
-		"spiffe://k2.sjc-1.nvidia.com/tenant/tenant-2/service/dsx/host/host-1",
+		"spiffe://k2.sjc-1.nvidia.com/tenant/tenant-2/service/dsx/host/host-1/role/database",
 		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dsx_dpu/dpu-1",
 		"dsx-imds",
 		[]string{"k8s:ns:dsx-imds", "k8s:sa:metadata-service"},
@@ -222,12 +222,6 @@ func TestLaunchLayerSourceReconcileLifecycle(t *testing.T) {
 	if _, err := r.desiredEntry(invalidRole); err == nil {
 		t.Fatal("expected invalid role to be rejected")
 	}
-	invalidHostRole := host.DeepCopy()
-	setSourceSpecField(t, invalidHostRole, "role", "database")
-	if _, err := r.desiredEntry(invalidHostRole); err == nil || !strings.Contains(err.Error(), "role is only valid for VM") {
-		t.Fatalf("host role error = %v, want VM-only role error", err)
-	}
-
 	hostEntry.Spec.ParentID = "spiffe://drift.invalid/spire/agent/wrong"
 	if err := c.Update(ctx, hostEntry); err != nil {
 		t.Fatal(err)
@@ -241,7 +235,7 @@ func TestLaunchLayerSourceReconcileLifecycle(t *testing.T) {
 	}
 	hostEntry = getEntry(t, c, hostEntry.Name)
 	assertEntry(t, hostEntry,
-		"spiffe://k2.sjc-1.nvidia.com/tenant/tenant-2/service/dsx/host/host-1",
+		"spiffe://k2.sjc-1.nvidia.com/tenant/tenant-2/service/dsx/host/host-1/role/database",
 		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dsx_dpu/dpu-1",
 		"dsx-imds",
 		[]string{"k8s:ns:dsx-imds", "k8s:sa:metadata-service"},
@@ -263,7 +257,7 @@ func TestLaunchLayerSourceReconcileLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertEntry(t, getEntry(t, c, hostEntry.Name),
-		"spiffe://k2.sjc-1.nvidia.com/tenant/tenant-3/service/dsx/host/host-2",
+		"spiffe://k2.sjc-1.nvidia.com/tenant/tenant-3/service/dsx/host/host-2/role/database",
 		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dsx_dpu/dpu-2",
 		"dsx-imds",
 		[]string{"k8s:ns:dsx-imds", "k8s:sa:metadata-service"},

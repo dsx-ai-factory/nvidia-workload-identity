@@ -108,9 +108,6 @@ func (s launchLayerSpec) parentAgent(td spiffeid.TrustDomain, operatorTenant str
 
 	switch s.Type {
 	case identity.ResourceHost:
-		if s.Role != "" {
-			return spiffeid.ID{}, "", errors.New("role is only valid for VM LaunchLayer source entries")
-		}
 		if !s.Holder.empty() {
 			return spiffeid.ID{}, "", errors.New("holder is only valid for VM LaunchLayer source entries")
 		}
