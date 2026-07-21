@@ -272,8 +272,8 @@ func run() (runErr error) {
 		listenAddr        = flag.String("listen", ":8080", "HTTP server listen address")
 		socketPath        = flag.String("socket", "", "SPIFFE Workload API socket path")
 		jwksURL           = flag.String("jwks-url", "", "public JWKS URL advertised through discovery")
-		signingJWKS       = flag.String("signing-jwks", "/run/secrets/dsx-identity-keys/signing-jwks.json", "private signing JWKS file")
-		activeKID         = flag.String("active-kid", "/run/secrets/dsx-identity-keys/active-kid", "file containing the active signing kid")
+		signingKeyset     = flag.String("signing-keyset", "/run/secrets/dsx-identity-keys/keyset.json", "private signing keyset file")
+		activeKID         = flag.String("active-kid", "/run/secrets/dsx-identity-keys-active-kid/active-kid.json", "JSON file containing the active signing kid and algorithm")
 		shardID           = flag.String("shard-id", "", "stable DSX Identity Keys shard identifier")
 		mqttBroker        = flag.String("mqtt-broker", "", "MQTT 3.1.1 broker URL")
 		mqttClientID      = flag.String("mqtt-client-id", "", "MQTT client identifier (defaults to dsx-identity-keys-<shard-id>)")
@@ -296,7 +296,7 @@ func run() (runErr error) {
 		*mqttClientID = "dsx-identity-keys-" + *shardID
 	}
 
-	keys, err := loadSigningKeyset(*signingJWKS, *activeKID)
+	keys, err := loadSigningKeyset(*signingKeyset, *activeKID)
 	if err != nil {
 		return fmt.Errorf("load signing keyset: %w", err)
 	}

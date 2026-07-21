@@ -16,36 +16,19 @@ cleanup() {
     [[ -z "${TEMP_DIR}" || ! -d "${TEMP_DIR}" ]] || rm -rf "${TEMP_DIR}"
 }
 
-validate_sources() {
-    local kid
-    if [[ ! -s "${TEMP_DIR}/signing-jwks.json" || ! -s "${TEMP_DIR}/active-kid" ]]; then
-        log_error "DSX Identity Keys signing keyset source is incomplete"
-        return 1
-    fi
-    kid=$(<"${TEMP_DIR}/active-kid")
-    if ! jq -e --arg kid "${kid}" '.keys | any(.kid == $kid)' \
-        "${TEMP_DIR}/signing-jwks.json" >/dev/null; then
-        log_error "DSX Identity Keys signing keyset does not contain its active kid"
-        return 1
-    fi
-}
-
 write_existing() {
-    local secret_name="$1" json
-    json=$(kubectl get secret "${secret_name}" -n "${NAMESPACE}" --context "${CONTEXT}" -o json)
-    if ! jq -er '.data["signing-jwks.json"]' <<<"${json}" | base64 -d >"${TEMP_DIR}/signing-jwks.json" ||
-        ! jq -er '.data["active-kid"]' <<<"${json}" | base64 -d >"${TEMP_DIR}/active-kid"; then
-        log_error "DSX Identity Keys signing keyset Secret is missing a required key. Refusing to rotate it"
-        return 1
-    fi
+    kubectl get secret "$1" -n "${NAMESPACE}" --context "${CONTEXT}" -o json \
+        | jq -er '.data["keyset.json"]' | base64 -d >"${TEMP_DIR}/keyset.json"
+    kubectl get secret "$2" -n "${NAMESPACE}" --context "${CONTEXT}" -o json \
+        | jq -er '.data["active-kid.json"]' | base64 -d >"${TEMP_DIR}/active-kid.json"
     log_info "Reusing the existing DSX Identity Keys signing keyset in ${CONTEXT}"
 }
 
 generate_sources() {
     local generated
     generated=$(cd "${SCRIPT_DIR}/.." && go run ./cmd/generate-signing-keyset)
-    jq -jc '.jwks' <<<"${generated}" >"${TEMP_DIR}/signing-jwks.json"
-    jq -jr '.active_kid' <<<"${generated}" >"${TEMP_DIR}/active-kid"
+    jq -jc '{keys}' <<<"${generated}" >"${TEMP_DIR}/keyset.json"
+    jq -jc '{active_kid, alg}' <<<"${generated}" >"${TEMP_DIR}/active-kid.json"
     log_info "Generated the DSX Identity Keys signing keyset source for ${CONTEXT}"
 }
 
@@ -61,28 +44,26 @@ publish_sources() {
 }
 
 main() {
-    local secret_name
+    local keyset_secret active_kid_secret
     if [[ -z "${CONTEXT}" || -z "${VALUES_FILE}" || -z "${OUTPUT_DIR}" ]]; then
         log_error "Usage: $0 <kube-context> <values-file> <output-directory>"
         return 1
     fi
 
     validate_context_exists "${CONTEXT}"
-    secret_name=$(yq -r '.identityKeys.signingKeysetSecret // "dsx-identity-keys-signing-keyset"' \
+    keyset_secret=$(yq -r '.identityKeys.signingKeysetSecret // "dsx-identity-keys-signing-keyset"' \
+        "${VALUES_FILE}")
+    active_kid_secret=$(yq -r '.identityKeys.activeKIDSecret // "dsx-identity-keys-active-kid"' \
         "${VALUES_FILE}")
     mkdir -p "$(dirname "${OUTPUT_DIR}")"
     TEMP_DIR=$(mktemp -d "$(dirname "${OUTPUT_DIR}")/.generated.XXXXXX")
 
-    if kubectl get secret "${secret_name}" -n "${NAMESPACE}" --context "${CONTEXT}" >/dev/null 2>&1; then
-        write_existing "${secret_name}"
+    if kubectl get secret "${keyset_secret}" -n "${NAMESPACE}" --context "${CONTEXT}" >/dev/null 2>&1 ||
+        kubectl get secret "${active_kid_secret}" -n "${NAMESPACE}" --context "${CONTEXT}" >/dev/null 2>&1; then
+        write_existing "${keyset_secret}" "${active_kid_secret}"
     else
-        if kubectl get deployment dsx-identity-keys -n "${NAMESPACE}" --context "${CONTEXT}" >/dev/null 2>&1; then
-            log_error "DSX Identity Keys exists but its signing keyset Secret is missing. Refusing to rotate it"
-            return 1
-        fi
         generate_sources
     fi
-    validate_sources
     publish_sources
     log_success "DSX Identity Keys signing keyset source is ready for ${CONTEXT}"
 }

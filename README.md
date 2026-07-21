@@ -320,6 +320,7 @@ identityKeys:
   shardID: shard-a
   jwksURL: https://identity-keys.shard.example.com/.well-known/jwks.json
   signingKeysetSecret: dsx-identity-keys-signing-keyset
+  activeKIDSecret: dsx-identity-keys-active-kid
   mqtt:
     brokerURL: tls://event-bus.example.com
     oauth2:
@@ -577,15 +578,6 @@ spec:
 See the
 [DSX service observability guide](https://gitlab-master.nvidia.com/ncp/dsx/dsx-docs/-/blob/9aa5ed1e74f2cd33261bd05e118372ef220c0aba/docs/dev-environments/observability-guide.md).
 
-## Signing-key rotation
-
-Use [Generate Signing Keyset](cmd/generate-signing-keyset/README.md) to create a
-new keyset, replace the shard's configured Secret, and roll the DSX Identity Keys
-Deployment. New DSX Identity Keys replicas publish the new key. The previous public key
-remains in aggregate JWKS responses until its publication lease expires, as
-defined by the
-[DSX Identity Keys](cmd/dsx-identity-keys/README.md).
-
 ## Local E2E
 
 The repository validates the architecture with two Kind clusters. k1 hosts a
@@ -697,36 +689,6 @@ sequenceDiagram
   Gateway->>Bao: Forward secret requests
   Bao-->>Gateway: Values or 403
   Gateway-->>Test: Return responses
-```
-
-### Local signing-key rotation
-
-The following commands rotate the k1 fixture keyset:
-
-```bash
-umask 077
-KEYSET_DIR=/secure/path/k1-key-rotation
-install -d -m 0700 "${KEYSET_DIR}"
-mise exec -- go run ./cmd/generate-signing-keyset > "${KEYSET_DIR}/generated.json"
-```
-
-[Generate Signing Keyset](cmd/generate-signing-keyset/README.md) writes the
-private JWKS and active `kid` consumed below. Apply the generated keyset:
-
-```bash
-mise exec -- jq -c '.jwks' "${KEYSET_DIR}/generated.json" \
-  > "${KEYSET_DIR}/signing-jwks.json"
-mise exec -- jq -jr '.active_kid' "${KEYSET_DIR}/generated.json" \
-  > "${KEYSET_DIR}/active-kid"
-mise exec -- kubectl create secret generic dsx-identity-keys-signing-keyset \
-  -n dsx-identity --context kind-k1 \
-  --from-file="${KEYSET_DIR}/signing-jwks.json" \
-  --from-file="${KEYSET_DIR}/active-kid" --dry-run=client -o yaml \
-  | mise exec -- kubectl apply --context kind-k1 -f -
-mise exec -- kubectl rollout restart deployment/dsx-identity-keys \
-  -n dsx-identity --context kind-k1
-mise exec -- kubectl rollout status deployment/dsx-identity-keys \
-  -n dsx-identity --context kind-k1
 ```
 
 ### Workflow

@@ -73,6 +73,7 @@
 - Depend directly on the official SPIRE chart. Template repository-owned DSX Identity Keys, controller, metadata, CSI, and policy resources directly. Configure node-attestor plugins through SPIRE values. Do not create separately packaged local wrapper charts.
 - Install the official SPIRE CRD chart first where its APIs are required.
 - DSX Event Bus, Keycloak, Kyverno runtime, cluster infrastructure, OpenBao, nginx, VMs, and E2E clients remain external to the identity chart.
+- Vault Secrets Operator and all Vault or OpenBao secret-source resources remain external to the identity chart. The chart only references the resulting Kubernetes Secrets.
 - CI packages and publishes only artifacts the repository actually produces: the identity chart and current images.
 - Apply every resource in an admission-compatible deployment phase before readiness waits. Split phases only to establish an API or admission webhook required to accept later resources.
 - Put each required API, admission, or infrastructure status gate in its provider Skaffold config's deploy after-hook. Every direct consumer must require that provider. Do not rely on config traversal order or a designated first consumer.
@@ -110,12 +111,12 @@ spiffe://<operator-tenant>.ds9.dsx.nvid.id/host/<id>/pod/<uuid>
 - Issue with `spiffe://ds9.dsx.nvid.id`.
 - The same configured operator tenant covers operator DPUs, operator Pods, and operator bare-metal hosts. Enforce that ownership when SPIRE registrations are created. A standalone tenant-facing host subject instead carries the dynamic tenant ID supplied by its LaunchLayer source CR. Kubernetes Pod subjects use the host resource type and Kubernetes node name.
 - DSX Identity Keys is tenant-agnostic. It must not receive, configure, distinguish, authorize, or otherwise depend on the operator tenant or any individual tenant. It verifies locally issued SPIRE JWT-SVIDs, validates the common subject grammar, preserves the tenant already present in the subject, and changes only the subject and issuer encoding before signing the DSX JWT.
-- Each shard loads one static private JWKS Secret containing `signing-jwks.json` and `active-kid`. Every tenant in that shard uses it.
+- Each shard loads a private signing-keyset Secret containing `keyset.json` and a separate active-keyset Secret containing `active-kid.json` as `{"active_kid":"<kid>","alg":"<JOSE algorithm>"}`. Every tenant in that shard uses them. External secret automation requests the Transit signing-key export with `format=pem` and renders its versioned private keys into the keyset array. DSX Identity Keys derives each `kid` from its public JWK thumbprint.
 - Publish each public JWK at `dsx-identity-keys/v1/pub-keys/shard/<shard-id>/kid/<kid>` and store the aggregate only by globally unique `kid`. Refresh each lease often enough for at least three further publish attempts before expiry.
-- Every `kid` is globally unique and never reused. Preserve configured values and generate new IDs from the go-jose SHA-256 public JWK thumbprint.
-- Derive the signing algorithm for each DSX Identity Keys instance from the JWK `alg` and validate that it matches the key material. Discovery must advertise the algorithms present in the aggregate JWKS.
+- Every `kid` is globally unique and never reused. Derive local IDs from the go-jose SHA-256 public JWK thumbprint and preserve IDs received in valid remote publications.
+- Apply the active keyset's configured signing algorithm to every local key and validate that it matches the key material. Discovery must advertise the algorithms present in the aggregate JWKS.
 - Validate `kid` uniqueness within each local signing keyset. Retained publications replace the globally unique `kid` they address.
-- Rotation publishes the new key under its new kid. Old Pods stop refreshing the old key's publication when replaced, and its lease expires after the configured retention period.
+- Rotation adds the new Transit version to the keyset while the old kid remains active, waits for public-key propagation, then changes the active-kid Secret. After old JWTs expire, advancing the Transit minimum valid version removes the old key, and its publication lease expires.
 
 ## Controller and metadata
 

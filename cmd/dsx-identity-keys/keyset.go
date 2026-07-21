@@ -6,10 +6,13 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rsa"
+	"crypto/x509"
 
 	// Register SHA-256 for go-jose's crypto.Hash-based JWK thumbprints.
 	_ "crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"maps"
 	"os"
@@ -27,63 +30,120 @@ type signingKeyset struct {
 	public    []jose.JSONWebKey
 }
 
-func loadSigningKeyset(jwksPath, activeKIDPath string) (*signingKeyset, error) {
-	rawJWKS, err := os.ReadFile(jwksPath)
+// privateKeyset reads keyset.json as
+// {"keys":["<Transit-exported private PEM>", ...]}.
+// Entries may be SEC 1 EC, PKCS#1 RSA, or PKCS#8 asymmetric private keys.
+type privateKeyset struct {
+	Keys []string `json:"keys"`
+}
+
+// activeKeysetDocument reads active-kid.json as
+// {"active_kid":"<kid>","alg":"<JOSE signing algorithm>"}.
+// The kid is the RFC 7638 SHA-256 public JWK thumbprint of a key in keyset.json.
+type activeKeysetDocument struct {
+	ActiveKID string                  `json:"active_kid"`
+	Algorithm jose.SignatureAlgorithm `json:"alg"`
+}
+
+func loadSigningKeyset(keysetPath, activeKIDPath string) (*signingKeyset, error) {
+	rawKeyset, err := os.ReadFile(keysetPath)
 	if err != nil {
-		return nil, fmt.Errorf("read signing JWKS: %w", err)
+		return nil, fmt.Errorf("read signing keyset: %w", err)
 	}
 	rawKID, err := os.ReadFile(activeKIDPath)
 	if err != nil {
 		return nil, fmt.Errorf("read active kid: %w", err)
 	}
-	activeKID := string(rawKID)
-	if err := validateKeyID(activeKID); err != nil {
+	var activeDocument activeKeysetDocument
+	if err := json.Unmarshal(rawKID, &activeDocument); err != nil {
+		return nil, fmt.Errorf("parse active kid: %w", err)
+	}
+	if err := validateKeyID(activeDocument.ActiveKID); err != nil {
 		return nil, fmt.Errorf("active kid: %w", err)
 	}
 
-	var jwks jose.JSONWebKeySet
-	if err := json.Unmarshal(rawJWKS, &jwks); err != nil {
-		return nil, fmt.Errorf("parse signing JWKS: %w", err)
+	var document privateKeyset
+	if err := json.Unmarshal(rawKeyset, &document); err != nil {
+		return nil, fmt.Errorf("parse signing keyset: %w", err)
 	}
-	if len(jwks.Keys) == 0 {
-		return nil, fmt.Errorf("signing JWKS contains no keys")
+	if len(document.Keys) == 0 {
+		return nil, fmt.Errorf("signing keyset contains no keys")
 	}
 
-	seen := make(map[string]struct{}, len(jwks.Keys))
-	public := make([]jose.JSONWebKey, 0, len(jwks.Keys))
+	seen := make(map[string]struct{}, len(document.Keys))
+	public := make([]jose.JSONWebKey, 0, len(document.Keys))
 	var active *jose.JSONWebKey
-	var activeAlgorithm jose.SignatureAlgorithm
-	for i := range jwks.Keys {
-		key := &jwks.Keys[i]
-		algorithm, err := validateSigningKey(key, false)
+	for i, encoded := range document.Keys {
+		key, err := parsePrivateSigningKey(encoded, activeDocument.Algorithm)
 		if err != nil {
-			return nil, fmt.Errorf("signing JWKS key %d: %w", i, err)
+			return nil, fmt.Errorf("signing keyset key %d: %w", i, err)
 		}
 		if _, ok := seen[key.KeyID]; ok {
-			return nil, fmt.Errorf("signing JWKS contains duplicate kid %q", key.KeyID)
+			return nil, fmt.Errorf("signing keyset contains duplicate kid %q", key.KeyID)
 		}
 		seen[key.KeyID] = struct{}{}
 		public = append(public, key.Public())
-		if key.KeyID == activeKID {
-			active = key
-			activeAlgorithm = algorithm
+		if key.KeyID == activeDocument.ActiveKID {
+			active = &key
 		}
 	}
 	if active == nil {
-		return nil, fmt.Errorf("active kid %q not found in signing JWKS", activeKID)
-	}
-	if active.IsPublic() {
-		return nil, fmt.Errorf("active kid %q has no private key material", activeKID)
+		return nil, fmt.Errorf("active kid %q not found in signing keyset", activeDocument.ActiveKID)
 	}
 
 	signer, err := jose.NewSigner(
-		jose.SigningKey{Algorithm: activeAlgorithm, Key: active.Key},
-		(&jose.SignerOptions{}).WithHeader(jose.HeaderKey("kid"), activeKID),
+		jose.SigningKey{Algorithm: activeDocument.Algorithm, Key: active.Key},
+		(&jose.SignerOptions{}).WithHeader(jose.HeaderKey("kid"), activeDocument.ActiveKID),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("create signer for active kid %q: %w", activeKID, err)
+		return nil, fmt.Errorf("create signer for active kid %q: %w", activeDocument.ActiveKID, err)
 	}
-	return &signingKeyset{activeKID: activeKID, signer: signer, public: public}, nil
+	return &signingKeyset{activeKID: activeDocument.ActiveKID, signer: signer, public: public}, nil
+}
+
+func parsePrivateSigningKey(encoded string, algorithm jose.SignatureAlgorithm) (jose.JSONWebKey, error) {
+	block, rest := pem.Decode([]byte(encoded))
+	if block == nil {
+		return jose.JSONWebKey{}, fmt.Errorf("decode PEM")
+	}
+	if len(rest) != 0 {
+		return jose.JSONWebKey{}, fmt.Errorf("PEM contains trailing data")
+	}
+	var key any
+	var err error
+	switch block.Type {
+	case "EC PRIVATE KEY":
+		key, err = x509.ParseECPrivateKey(block.Bytes)
+	case "RSA PRIVATE KEY":
+		key, err = x509.ParsePKCS1PrivateKey(block.Bytes)
+	case "PRIVATE KEY":
+		key, err = x509.ParsePKCS8PrivateKey(block.Bytes)
+	default:
+		return jose.JSONWebKey{}, fmt.Errorf("unsupported PEM block type %q", block.Type)
+	}
+	if err != nil {
+		return jose.JSONWebKey{}, fmt.Errorf("parse %s: %w", block.Type, err)
+	}
+	if !slices.Contains(supportedSignatureAlgorithms(key), algorithm) {
+		return jose.JSONWebKey{}, fmt.Errorf("algorithm %q is incompatible with private key type %T", algorithm, key)
+	}
+	private := jose.JSONWebKey{Key: key}
+	public := private.Public()
+	thumbprint, err := public.Thumbprint(crypto.SHA256)
+	if err != nil {
+		return jose.JSONWebKey{}, fmt.Errorf("compute public JWK thumbprint: %w", err)
+	}
+	kid := base64.RawURLEncoding.EncodeToString(thumbprint)
+	jwk := jose.JSONWebKey{
+		Key:       key,
+		KeyID:     kid,
+		Algorithm: string(algorithm),
+		Use:       "sig",
+	}
+	if _, err := validateSigningKey(&jwk, false); err != nil {
+		return jose.JSONWebKey{}, err
+	}
+	return jwk, nil
 }
 
 func validateSigningKey(key *jose.JSONWebKey, publicOnly bool) (jose.SignatureAlgorithm, error) {

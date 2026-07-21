@@ -6,10 +6,12 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
 	// Register SHA-256 for go-jose's crypto.Hash-based JWK thumbprints.
 	_ "crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -21,8 +23,9 @@ import (
 )
 
 type generatedKeyset struct {
-	ActiveKID string             `json:"active_kid"`
-	JWKS      jose.JSONWebKeySet `json:"jwks"`
+	ActiveKID string                  `json:"active_kid"`
+	Algorithm jose.SignatureAlgorithm `json:"alg"`
+	Keys      []string                `json:"keys"`
 }
 
 func generate() (generatedKeyset, error) {
@@ -38,15 +41,14 @@ func generate() (generatedKeyset, error) {
 	// Deriving kid from public material makes independently generated key IDs
 	// stable and globally collision-resistant without a separate ID allocator.
 	kid := base64.RawURLEncoding.EncodeToString(thumbprint)
-	return generatedKeyset{
-		ActiveKID: kid,
-		JWKS: jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{
-			Key:       key,
-			KeyID:     kid,
-			Use:       "sig",
-			Algorithm: string(jose.ES256),
-		}}},
-	}, nil
+	der, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		return generatedKeyset{}, fmt.Errorf("marshal EC private key: %w", err)
+	}
+	return generatedKeyset{ActiveKID: kid, Algorithm: jose.ES256, Keys: []string{string(pem.EncodeToMemory(&pem.Block{
+		Type:  "EC PRIVATE KEY",
+		Bytes: der,
+	}))}}, nil
 }
 
 func run() error {

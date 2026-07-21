@@ -74,8 +74,8 @@ spec:
             - --listen=:{{ .Values.identityKeys.service.port }}
             - --socket=unix:///var/run/secrets/spire.io/spire-agent.sock
             - --jwks-url={{ required "identityKeys.jwksURL is required" .Values.identityKeys.jwksURL }}
-            - --signing-jwks=/run/secrets/dsx-identity-keys/signing-jwks.json
-            - --active-kid=/run/secrets/dsx-identity-keys/active-kid
+            - --signing-keyset=/run/secrets/dsx-identity-keys/keyset.json
+            - --active-kid=/run/secrets/dsx-identity-keys-active-kid/active-kid.json
             - --shard-id={{ required "identityKeys.shardID is required" .Values.identityKeys.shardID }}
             - --mqtt-broker={{ required "identityKeys.mqtt.brokerURL is required" .Values.identityKeys.mqtt.brokerURL }}
             # Pod name keeps every active replica on a separate MQTT session.
@@ -98,6 +98,9 @@ spec:
               readOnly: true
             - name: signing-keyset
               mountPath: /run/secrets/dsx-identity-keys
+              readOnly: true
+            - name: active-kid
+              mountPath: /run/secrets/dsx-identity-keys-active-kid
               readOnly: true
             - name: mqtt-oauth
               mountPath: /run/secrets/dsx-identity-keys-mqtt
@@ -137,6 +140,16 @@ spec:
           secret:
             secretName: {{ required "identityKeys.signingKeysetSecret is required" .Values.identityKeys.signingKeysetSecret }}
             defaultMode: 0440
+            items:
+              - key: keyset.json
+                path: keyset.json
+        - name: active-kid
+          secret:
+            secretName: {{ required "identityKeys.activeKIDSecret is required" .Values.identityKeys.activeKIDSecret }}
+            defaultMode: 0440
+            items:
+              - key: active-kid.json
+                path: active-kid.json
         - name: mqtt-oauth
           secret:
             secretName: {{ required "identityKeys.mqtt.oauth2.clientSecretSecret is required" .Values.identityKeys.mqtt.oauth2.clientSecretSecret }}
