@@ -419,8 +419,8 @@ main() {
 
     initialize_external_test_process
 
-    K2_IDENTITY_KEYS_KID=$(kubectl get secret dsx-identity-keys-signing-keyset -n dsx-identity \
-        --context "${CONTEXT}" -o json | jq -er '.data["active-kid"]' | base64 -d)
+    K2_IDENTITY_KEYS_KID=$(kubectl get secret dsx-identity-keys-active-kid -n dsx-identity \
+        --context "${CONTEXT}" -o json | jq -er '.data["active-kid.json"]' | base64 -d | jq -er '.active_kid')
     log_timing "setup" "${setup_started}"
 
     run_timed "operator host IMDS" verify_operator_host_imds || failed=$((failed + 1))

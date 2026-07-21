@@ -124,7 +124,9 @@ identityKeys:
   publicKeyLeaseTTL: 10m
   # Globally unique across every DSX Identity Keys instance sharing this Event Bus fabric.
   shardID: ""
+  # External secret automation owns both Secrets. This chart only mounts them.
   signingKeysetSecret: dsx-identity-keys-signing-keyset
+  activeKIDSecret: dsx-identity-keys-active-kid
   mqtt:
     brokerURL: ""
     oauth2:

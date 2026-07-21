@@ -1,19 +1,56 @@
 # Generate Signing Keyset
 
-`generate-signing-keyset` creates one P-256 ES256 private JWK and derives its
-globally unique `kid` from the SHA-256 public JWK thumbprint. It writes a JSON
-object containing `active_kid` and `jwks` to standard output.
+`generate-signing-keyset` is the fallback for deployments that do not source
+signing keys from Vault or OpenBao. It creates one P-256 private key and derives
+its `kid` from the SHA-256 public JWK thumbprint.
 
 ```bash
 mise exec -- go run ./cmd/generate-signing-keyset > generated.json
 ```
 
-The output contains private key material. The Skaffold manifest hook splits it into the
-`signing-jwks.json` and `active-kid` entries used by the DSX Identity Keys signing-keyset
-Secret through `scripts/prepare-signing-keyset-source.sh`.
+## Output
 
-The command has no flags and no runtime dependencies beyond a secure operating
-system random source.
+```json
+{
+  "active_kid": "<RFC 7638 base64url SHA-256 public JWK thumbprint>",
+  "alg": "ES256",
+  "keys": [
+    "-----BEGIN EC PRIVATE KEY-----\n<SEC 1 P-256 private key>\n-----END EC PRIVATE KEY-----\n"
+  ]
+}
+```
+
+Create the two files consumed by DSX Identity Keys:
+
+```bash
+jq -c '{keys}' generated.json > keyset.json
+jq -c '{active_kid, alg}' generated.json > active-kid.json
+```
+
+`keyset.json`:
+
+```json
+{
+  "keys": [
+    "-----BEGIN EC PRIVATE KEY-----\n<SEC 1 P-256 private key>\n-----END EC PRIVATE KEY-----\n"
+  ]
+}
+```
+
+`active-kid.json`:
+
+```json
+{
+  "active_kid": "<RFC 7638 base64url SHA-256 public JWK thumbprint>",
+  "alg": "ES256"
+}
+```
+
+The local E2E uses this generator because it does not deploy a Vault or OpenBao
+signing-key source.
+
+The command has no runtime dependencies beyond a secure operating-system
+random source. Its output contains private key material.
 
 ## Testing
 
@@ -21,5 +58,5 @@ system random source.
 mise exec -- go test ./cmd/generate-signing-keyset
 ```
 
-The focused test verifies the key type, algorithm, private material, active
+The focused test verifies the PEM type, curve, private material, active
 `kid`, and thumbprint-derived identifier.

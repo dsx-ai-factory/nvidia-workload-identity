@@ -16,6 +16,7 @@ MQTT_BROKER="tcp://${GATEWAY_HOST}:1883"
 AUDIENCE="spiffe://ds9.dsx.nvid.id/openbao"
 ISSUER="spiffe://ds9.dsx.nvid.id"
 SIGNING_SECRET="dsx-identity-keys-signing-keyset"
+ACTIVE_KID_SECRET="dsx-identity-keys-active-kid"
 IDENTITY_NAMESPACE="dsx-identity"
 OPERATOR_TENANT="operator-1"
 K1_POD="e2e-nginx"
@@ -29,9 +30,9 @@ GATEWAY_ADDRESS=""
 E2E_PROBE_IMAGE=""
 K1_IDENTITY_KEYS_URL=""
 K2_IDENTITY_KEYS_URL=""
-K1_ORIGINAL_JWKS=""
+K1_ORIGINAL_KEYSET=""
 K1_ORIGINAL_KID=""
-K2_ORIGINAL_JWKS=""
+K2_ORIGINAL_KEYSET=""
 K2_ORIGINAL_KID=""
 
 source "${PROJECT_ROOT}/scripts/common.sh"
@@ -97,11 +98,20 @@ assert_mqtt_authorization() {
 
 assert_retained_keys() {
     local shard_id="$1"
-    local jwks="$2"
-    local access_token expected_jwks output deadline=$((SECONDS + 60))
+    local kid="$2"
+    local source_url access_token aggregate expected_jwks output deadline=$((SECONDS + 60))
+    if [[ "${shard_id}" == "k1" ]]; then
+        source_url=${K1_IDENTITY_KEYS_URL}
+    else
+        source_url=${K2_IDENTITY_KEYS_URL}
+    fi
     access_token=$(event_bus_access_token dsx-identity-keys dsx-identity-keys-mqtt-oauth)
-    expected_jwks=$(jq -c '{keys: [.keys[] | del(.d)]}' <<<"${jwks}")
     while ((SECONDS < deadline)); do
+        aggregate=$(external_curl -fsS --max-time 5 \
+            "${source_url}/.well-known/jwks.json" 2>/dev/null) || continue
+        expected_jwks=$(jq -ce --arg kid "${kid}" \
+            '{keys: [.keys[] | select(.kid == $kid)]} | select(.keys | length == 1)' \
+            <<<"${aggregate}") || continue
         if output=$(external_probe '^TestLiveMQTTRetainedReplay$' \
             "DSX_E2E_MQTT_BROKER=${MQTT_BROKER}" \
             "DSX_E2E_MQTT_TOKEN=${access_token}" \
@@ -311,22 +321,10 @@ assert_relying_party_subject_validation() {
     local valid_token="$1"
     external_probe '^TestLiveRelyingPartyRejectsMalformedSubject$' \
         "DSX_E2E_RELYING_PARTY_URL=${OPENBAO_URL}/v1/auth/jwt/cel/login" \
-        "DSX_E2E_SIGNING_JWKS=${K1_ORIGINAL_JWKS}" \
+        "DSX_E2E_SIGNING_KEYSET=${K1_ORIGINAL_KEYSET}" \
         "DSX_E2E_ACTIVE_KID=${K1_ORIGINAL_KID}" \
         "DSX_E2E_VALID_TOKEN=${valid_token}"
     log_success "OpenBao rejected a signed token outside the DSX subject grammar"
-}
-
-public_keyset() {
-    jq -c '{keys: [.keys[] | del(.d)]}' <<<"$1"
-}
-
-aggregate_keysets() {
-    local first second
-    first=$(public_keyset "$1")
-    second=$(public_keyset "$2")
-    jq -cn --argjson first "${first}" --argjson second "${second}" \
-        '{keys: (($first.keys + $second.keys) | sort_by(.kid))}'
 }
 
 verify_tokens_with_jwks() {
@@ -345,7 +343,7 @@ assert_full_aggregates() {
     local required="$1"
     shift
     local k1_jwks k2_jwks deadline=$((SECONDS + 60))
-    if ! jq -e '(.keys | map(.kid) | length) == (.keys | map(.kid) | unique | length)' \
+    if ! jq -e 'length == (unique | length)' \
         <<<"${required}" >/dev/null; then
         log_error "Required aggregate contains a duplicate kid"
         return 1
@@ -364,7 +362,7 @@ assert_full_aggregates() {
               ($k1 | valid) and
               ($k2 | valid) and
               (($k1.keys | sort_by(.kid)) == ($k2.keys | sort_by(.kid))) and
-              ($required.keys | all(. as $want | $k1.keys | any(. == $want)))
+              ($required | all(. as $kid | $k1.keys | any(.kid == $kid)))
             ' >/dev/null; then
             verify_tokens_with_jwks "${k1_jwks}" "$@"
             verify_tokens_with_jwks "${k2_jwks}" "$@"
@@ -387,14 +385,14 @@ main() {
     cd "${PROJECT_ROOT}"
     initialize_external_test_process
 
-    K1_ORIGINAL_JWKS=$(kubectl get secret "${SIGNING_SECRET}" -n "${IDENTITY_NAMESPACE}" \
-        --context "${K1_CONTEXT}" -o json | jq -er '.data["signing-jwks.json"]' | base64 -d)
-    K1_ORIGINAL_KID=$(kubectl get secret "${SIGNING_SECRET}" -n "${IDENTITY_NAMESPACE}" \
-        --context "${K1_CONTEXT}" -o json | jq -er '.data["active-kid"]' | base64 -d)
-    K2_ORIGINAL_JWKS=$(kubectl get secret "${SIGNING_SECRET}" -n "${IDENTITY_NAMESPACE}" \
-        --context "${K2_CONTEXT}" -o json | jq -er '.data["signing-jwks.json"]' | base64 -d)
-    K2_ORIGINAL_KID=$(kubectl get secret "${SIGNING_SECRET}" -n "${IDENTITY_NAMESPACE}" \
-        --context "${K2_CONTEXT}" -o json | jq -er '.data["active-kid"]' | base64 -d)
+    K1_ORIGINAL_KEYSET=$(kubectl get secret "${SIGNING_SECRET}" -n "${IDENTITY_NAMESPACE}" \
+        --context "${K1_CONTEXT}" -o json | jq -er '.data["keyset.json"]' | base64 -d)
+    K1_ORIGINAL_KID=$(kubectl get secret "${ACTIVE_KID_SECRET}" -n "${IDENTITY_NAMESPACE}" \
+        --context "${K1_CONTEXT}" -o json | jq -er '.data["active-kid.json"]' | base64 -d | jq -er '.active_kid')
+    K2_ORIGINAL_KEYSET=$(kubectl get secret "${SIGNING_SECRET}" -n "${IDENTITY_NAMESPACE}" \
+        --context "${K2_CONTEXT}" -o json | jq -er '.data["keyset.json"]' | base64 -d)
+    K2_ORIGINAL_KID=$(kubectl get secret "${ACTIVE_KID_SECRET}" -n "${IDENTITY_NAMESPACE}" \
+        --context "${K2_CONTEXT}" -o json | jq -er '.data["active-kid.json"]' | base64 -d | jq -er '.active_kid')
     if [[ "${K1_ORIGINAL_KID}" == "${K2_ORIGINAL_KID}" ]]; then
         log_error "k1 and k2 signing keysets reuse kid ${K1_ORIGINAL_KID}"
         return 1
@@ -446,10 +444,10 @@ main() {
     log_timing "local exchange and shard rejection" "${stage_started}"
 
     stage_started=${SECONDS}
-    expected=$(aggregate_keysets "${K1_ORIGINAL_JWKS}" "${K2_ORIGINAL_JWKS}")
+    expected=$(jq -cn --arg k1 "${K1_ORIGINAL_KID}" --arg k2 "${K2_ORIGINAL_KID}" '[$k1, $k2]')
     assert_mqtt_authorization
-    assert_retained_keys k1 "${K1_ORIGINAL_JWKS}"
-    assert_retained_keys k2 "${K2_ORIGINAL_JWKS}"
+    assert_retained_keys k1 "${K1_ORIGINAL_KID}"
+    assert_retained_keys k2 "${K2_ORIGINAL_KID}"
     assert_full_aggregates "${expected}" "${k1_token}" "${k2_token}" "${local_k1_token}" "${local_k2_token}"
     log_timing "MQTT authorization and aggregate JWKS" "${stage_started}"
 

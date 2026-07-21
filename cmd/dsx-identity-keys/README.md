@@ -65,13 +65,30 @@ do not replace a valid aggregate entry.
 
 The identity chart deploys two active replicas per shard through
 `charts/dsx-identity/templates/identity-keys-deployment.yaml`, with a unique MQTT
-client ID for each Pod. Both replicas load the same shard-local static private
-keyset. Only public keys are published, so private signing keys never leave the
-shard.
+client ID for each Pod. Both replicas load the same shard-local private
+keyset and active-kid Secret. Only public keys are published to the Event Bus.
 
-Rotation introduces a new globally unique `kid`. New replicas publish that key,
-while replaced replicas stop refreshing the previous key. The previous public
-key remains in aggregate JWKS responses until its publication lease expires.
+External secret automation requests
+`/v1/transit/export/signing-key/<name>?format=pem` and renders the exported
+`data.keys` values into the private keyset file:
+
+```json
+{"keys":["-----BEGIN EC PRIVATE KEY-----\n...\n-----END EC PRIVATE KEY-----\n"]}
+```
+
+DSX Identity Keys derives each `kid` from the SHA-256 public JWK thumbprint and
+accepts SEC 1 EC, PKCS#1 RSA, and PKCS#8 asymmetric private keys. The separate
+`active-kid.json` Secret entry selects one loaded key and the JOSE algorithm
+for the Transit key ring. Every loaded key must support that algorithm:
+
+```json
+{"active_kid":"<kid>","alg":"ES256"}
+```
+
+Rotation first adds and publishes the new key while the old kid remains active.
+Activation changes only the active-kid Secret. Removing an expired old key
+stops its lease refresh, after which it disappears from aggregate JWKS
+responses.
 
 ## HTTP API
 
@@ -100,8 +117,8 @@ do not expose parser or verifier details.
 | `--listen` | `:8080` | HTTP listen address |
 | `--socket` | Workload API default | Local SPIFFE Workload API socket URL |
 | `--jwks-url` | required | Absolute public JWKS URL advertised by discovery |
-| `--signing-jwks` | `/run/secrets/dsx-identity-keys/signing-jwks.json` | Private signing JWKS file |
-| `--active-kid` | `/run/secrets/dsx-identity-keys/active-kid` | File containing the active signing `kid` |
+| `--signing-keyset` | `/run/secrets/dsx-identity-keys/keyset.json` | JSON file containing private PEM keys |
+| `--active-kid` | `/run/secrets/dsx-identity-keys-active-kid/active-kid.json` | JSON file containing the active signing `kid` and algorithm |
 | `--shard-id` | required | Globally unique shard ID in the Event Bus topic space |
 | `--mqtt-broker` | required | MQTT 3.1.1 broker URL |
 | `--mqtt-client-id` | `dsx-identity-keys-<shard-id>` | Unique MQTT client ID |

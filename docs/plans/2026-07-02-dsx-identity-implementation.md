@@ -34,7 +34,7 @@ Locked contracts:
 
 - DSX Identity Keys issuer: `spiffe://ds9.dsx.nvid.id`.
 - Public identity service: `dsx`. Region: `ds9`. Partition: `nvid.id`.
-- DSX Identity Keys signing: shard-local static signing JWKS Secret plus required active `kid`.
+- DSX Identity Keys signing: shard-local private PEM `keyset.json` Secret rendered from a Transit signing-key export requested with `format=pem`, plus a separate `active-kid.json` Secret entry containing `{"active_kid":"<kid>","alg":"<JOSE algorithm>"}`.
 - `kid` generation: go-jose SHA-256 public-JWK thumbprint. Every retained key across all shards has a unique `kid`, including keys present during rotation overlap. Retired values are never reused.
 - Event Bus: NVIDIA `dsx-exchange` v2.6.0, deployed only in k1.
 - Event Bus authentication: OAuth2 client credentials with narrow `dsx-identity-keys.>` publish/subscribe permissions and no anonymous access.
@@ -115,10 +115,10 @@ Exit gate:
 `cmd/dsx-identity-keys` must:
 
 - Require issuer `spiffe://ds9.dsx.nvid.id`.
-- Load `signing-jwks.json` and `active-kid` from a mounted Secret.
-- Require the active key to contain private asymmetric signing material with an `alg` compatible with the key.
-- Allow non-active public keys so rotation overlap does not expose retired private material.
-- Require a non-empty, unique `kid` on every configured key.
+- Load private PEM keys from `keyset.json` and load the active kid and signing algorithm from `active-kid.json` in a separate mounted Secret.
+- Apply the configured signing algorithm to every private key and validate that it matches the key material.
+- Derive each `kid` from its public JWK thumbprint and require the configured active kid to identify exactly one private key.
+- Keep every non-active private key during rotation overlap so its public key remains published.
 - Use the active shard key for every tenant and resource handled by that DSX Identity Keys instance.
 - Project only public JWK fields.
 - Serve JWKS independently of the HTTP `Host` header.

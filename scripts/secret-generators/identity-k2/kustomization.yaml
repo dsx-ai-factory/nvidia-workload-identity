@@ -8,8 +8,10 @@ generatorOptions:
 secretGenerator:
   - name: dsx-identity-keys-signing-keyset
     files:
-      - signing-jwks.json=generated/signing-jwks.json
-      - active-kid=generated/active-kid
+      - keyset.json=generated/keyset.json
+  - name: dsx-identity-keys-active-kid
+    files:
+      - active-kid.json=generated/active-kid.json
   - name: dsx-identity-keys-mqtt-oauth
     files:
       - client-id=../event-bus/generated/oauth/client-id
