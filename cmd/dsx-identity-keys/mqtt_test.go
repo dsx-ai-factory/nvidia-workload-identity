@@ -443,7 +443,7 @@ func (*initialConnectionRetryHook) OnACLCheck(_ *mqttserver.Client, topic string
 	return strings.HasPrefix(topic, keyTopicPrefix)
 }
 
-func testMQTTOAuthConfig(t *testing.T) mqttOAuthConfig {
+func testMQTTOAuthConfig(t *testing.T) mqttAuthConfig {
 	t.Helper()
 	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -451,25 +451,22 @@ func testMQTTOAuthConfig(t *testing.T) mqttOAuthConfig {
 	}))
 	t.Cleanup(tokenServer.Close)
 	credentialsFile := writeMQTTOAuthCredentials(t, "exchange", "secret")
-	return mqttOAuthConfig{
-		tokenURL:        tokenServer.URL,
+	return mqttAuthConfig{
+		mode:            mqttAuthOAuth2,
 		credentialsFile: credentialsFile,
+		oauthTokenURL:   tokenServer.URL,
+		oauthScopes:     []string{"mqtt"},
+		oauthUsername:   "oauthtoken",
 	}
 }
 
 func writeMQTTOAuthCredentials(t *testing.T, clientID, clientSecret string) string {
 	t.Helper()
-	credentials, err := json.Marshal(mqttOAuthCredentials{
+	credentialsFile := filepath.Join(t.TempDir(), "credentials.json")
+	writeMQTTCredentials(t, credentialsFile, mqttCredentials{
 		ClientID:     clientID,
 		ClientSecret: clientSecret,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	credentialsFile := filepath.Join(t.TempDir(), "credentials.json")
-	if err := os.WriteFile(credentialsFile, credentials, 0o600); err != nil {
-		t.Fatal(err)
-	}
 	return credentialsFile
 }
 
@@ -486,7 +483,7 @@ func TestMQTTOAuthCredentialsProvider(t *testing.T) {
 		if !basic {
 			clientID, clientSecret = r.FormValue("client_id"), r.FormValue("client_secret")
 		}
-		if clientID != "exchange" || r.FormValue("grant_type") != "client_credentials" || r.FormValue("scope") != "mqtt" {
+		if clientID != "exchange" || r.FormValue("grant_type") != "client_credentials" || r.FormValue("scope") != "mqtt identity" {
 			t.Errorf("unexpected token request: id=%q secret=%q form=%v", clientID, clientSecret, r.Form)
 		}
 		credentials <- [2]string{clientID, clientSecret}
@@ -497,9 +494,12 @@ func TestMQTTOAuthCredentialsProvider(t *testing.T) {
 	t.Cleanup(tokenServer.Close)
 
 	credentialsFile := writeMQTTOAuthCredentials(t, "exchange", "secret")
-	provider, err := (mqttOAuthConfig{
-		tokenURL:        tokenServer.URL,
+	provider, err := (mqttAuthConfig{
+		mode:            mqttAuthOAuth2,
 		credentialsFile: credentialsFile,
+		oauthTokenURL:   tokenServer.URL,
+		oauthScopes:     []string{"mqtt", "identity"},
+		oauthUsername:   "jwt",
 	}).credentialsProvider(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -508,15 +508,85 @@ func TestMQTTOAuthCredentialsProvider(t *testing.T) {
 		t.Fatalf("initial token requests = %d, want 0", requests.Load())
 	}
 	username, password := provider()
-	if username != "oauthtoken" || password != "access-token-1" || <-credentials != [2]string{"exchange", "secret"} {
+	if username != "jwt" || password != "access-token-1" || <-credentials != [2]string{"exchange", "secret"} {
 		t.Fatalf("credentials = %q/%q", username, password)
 	}
 	if err := os.WriteFile(credentialsFile, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	username, password = provider()
-	if username != "oauthtoken" || password != "access-token-1" || requests.Load() != 1 {
+	if username != "jwt" || password != "access-token-1" || requests.Load() != 1 {
 		t.Fatalf("cached credentials = %q/%q, requests = %d", username, password, requests.Load())
+	}
+}
+
+func TestMQTTOAuthCredentialsProviderAllowsNoScopes(t *testing.T) {
+	t.Parallel()
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+		}
+		if _, present := r.Form["scope"]; present {
+			t.Errorf("unexpected scope request: %v", r.Form["scope"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"access_token":"test-token","token_type":"Bearer","expires_in":3600}`)
+	}))
+	t.Cleanup(tokenServer.Close)
+
+	provider, err := (mqttAuthConfig{
+		mode:            mqttAuthOAuth2,
+		credentialsFile: writeMQTTOAuthCredentials(t, "exchange", "secret"),
+		oauthTokenURL:   tokenServer.URL,
+		oauthUsername:   "oauthtoken",
+	}).credentialsProvider(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, password := provider(); password != "test-token" {
+		t.Fatalf("password = %q, want test-token", password)
+	}
+}
+
+func TestMQTTBasicCredentialsProviderReloadsFile(t *testing.T) {
+	t.Parallel()
+	credentialsFile := filepath.Join(t.TempDir(), "credentials.json")
+	writeMQTTCredentials(t, credentialsFile, mqttCredentials{Username: "first-user", Password: "first-password"})
+	provider, err := (mqttAuthConfig{
+		mode:            mqttAuthBasic,
+		credentialsFile: credentialsFile,
+	}).credentialsProvider(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if username, password := provider(); username != "first-user" || password != "first-password" {
+		t.Fatalf("credentials = %q/%q", username, password)
+	}
+	writeMQTTCredentials(t, credentialsFile, mqttCredentials{Username: "rotated-user", Password: "rotated-password"})
+	if username, password := provider(); username != "rotated-user" || password != "rotated-password" {
+		t.Fatalf("rotated credentials = %q/%q", username, password)
+	}
+}
+
+func writeMQTTCredentials(t *testing.T, path string, credentials mqttCredentials) {
+	t.Helper()
+	contents, err := json.Marshal(credentials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, contents, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMQTTAuthModes(t *testing.T) {
+	t.Parallel()
+	provider, err := (mqttAuthConfig{mode: mqttAuthAnonymous}).credentialsProvider(context.Background())
+	if err != nil || provider != nil {
+		t.Fatalf("anonymous provider = %v, error = %v", provider, err)
+	}
+	if _, err := (mqttAuthConfig{mode: "invalid"}).credentialsProvider(context.Background()); err == nil {
+		t.Fatal("invalid MQTT auth mode succeeded")
 	}
 }
 
@@ -535,24 +605,21 @@ func TestMQTTOAuthCredentialsProviderRefreshesExpiredToken(t *testing.T) {
 	t.Cleanup(tokenServer.Close)
 
 	credentialsFile := writeMQTTOAuthCredentials(t, "exchange", "secret")
-	provider, err := (mqttOAuthConfig{
-		tokenURL:        tokenServer.URL,
+	provider, err := (mqttAuthConfig{
+		mode:            mqttAuthOAuth2,
 		credentialsFile: credentialsFile,
+		oauthTokenURL:   tokenServer.URL,
+		oauthScopes:     []string{"mqtt"},
+		oauthUsername:   "oauthtoken",
 	}).credentialsProvider(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, first := provider()
-	rotatedCredentials, err := json.Marshal(mqttOAuthCredentials{
+	writeMQTTCredentials(t, credentialsFile, mqttCredentials{
 		ClientID:     "rotated-exchange",
 		ClientSecret: "rotated",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(credentialsFile, rotatedCredentials, 0o600); err != nil {
-		t.Fatal(err)
-	}
 	_, second := provider()
 	if first != "access-token-1" || second != "access-token-2" || <-credentials != [2]string{"exchange", "secret"} || <-credentials != [2]string{"rotated-exchange", "rotated"} || requests.Load() != 2 {
 		t.Fatalf("refreshed credentials = %q/%q, requests = %d", first, second, requests.Load())

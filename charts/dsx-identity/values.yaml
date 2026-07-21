@@ -129,11 +129,15 @@ identityKeys:
   activeKIDSecret: dsx-identity-keys-active-kid
   mqtt:
     brokerURL: ""
-    oauth2:
-      tokenURL: ""
-      # credentials.json must contain client_id and client_secret.
-      credentialsSecret: dsx-identity-keys-mqtt-oauth
+    auth:
+      # Supported modes: oauth2, basic, anonymous.
+      mode: anonymous
+      credentialsSecret: ""
       credentialsKey: credentials.json
+      oauth2:
+        tokenURL: ""
+        scopes: [mqtt]
+        username: oauthtoken
   resources:
     requests:
       cpu: 100m

@@ -22,8 +22,11 @@ identityKeys:
   shardID: k1
   mqtt:
     brokerURL: tcp://nats:1883
-    oauth2:
-      tokenURL: http://keycloak-service.dsx-identity.svc.cluster.local:8080/realms/event-bus/protocol/openid-connect/token
+    auth:
+      mode: oauth2
+      credentialsSecret: dsx-identity-keys-mqtt-oauth
+      oauth2:
+        tokenURL: http://keycloak-service.dsx-identity.svc.cluster.local:8080/realms/event-bus/protocol/openid-connect/token
 
 podTokenFetcher:
   # The k1 E2E workload declares its token fetcher explicitly so this shard
