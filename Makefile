@@ -3,7 +3,7 @@
 .PHONY: preflight local-registry
 .PHONY: help install clean test test-k2-identity test-cross-shard status
 .PHONY: k1-cluster k2-cluster
-.PHONY: validate test-go test-shell test-helm
+.PHONY: validate test-go test-shell test-chart test-skaffold chart-dependencies
 
 MISE ?= mise
 MISE_EXEC := $(MISE) exec --
@@ -21,7 +21,7 @@ help: ## Show this help message
 preflight:
 	@./scripts/preflight.sh
 
-validate: test-go test-shell test-helm ## Run local static validation
+validate: test-go test-shell test-chart test-skaffold ## Run local static validation
 
 test-go:
 	@$(MISE_EXEC) go test -race ./...
@@ -29,26 +29,23 @@ test-go:
 test-shell:
 	@find scripts -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
 
-test-helm:
-	@$(MISE_EXEC) ./scripts/prepare-chart-dependencies.sh
+test-chart: chart-dependencies
 	@$(MISE_EXEC) helm lint charts/dsx-identity $(IDENTITY_E2E_VALUES) -f scripts/k1-values.yaml
-	@$(MISE_EXEC) helm lint charts/dsx-identity $(IDENTITY_E2E_VALUES) -f scripts/k2-values.yaml
-	@$(MISE_EXEC) helm template dsx-identity charts/dsx-identity --namespace dsx-identity $(IDENTITY_E2E_VALUES) -f scripts/k1-values.yaml >/dev/null
-	@$(MISE_EXEC) helm template dsx-identity charts/dsx-identity --namespace dsx-identity $(IDENTITY_E2E_VALUES) -f scripts/k2-values.yaml >/dev/null
-	@$(MISE_EXEC) helm template dsx-identity charts/dsx-identity --namespace dsx-identity \
-		$(IDENTITY_E2E_VALUES) -f scripts/k2-values.yaml \
+	@$(MISE_EXEC) helm lint charts/nats-2.14.2.tgz -f scripts/k1/nats/values.yaml
+	@# Normal E2E values disable metrics, so lint the optional ServiceMonitor resources separately.
+	@$(MISE_EXEC) helm lint charts/dsx-identity $(IDENTITY_E2E_VALUES) -f scripts/k2-values.yaml \
 		--set observability.metrics.enabled=true \
 		--set observability.metrics.port=19464 \
-		--set observability.metrics.serviceMonitor.enabled=true >/dev/null
-	@$(MISE_EXEC) helm template dsx-imds-host-agent charts/dsx-identity/charts/spire-0.27.1.tgz \
-		--namespace dsx-identity -f scripts/dsx-imds-host-agent-values.yaml \
-		-f scripts/k1/dsx-imds-host-agent-values.yaml >/dev/null
-	@$(MISE_EXEC) helm template dsx-imds-host-agent charts/dsx-identity/charts/spire-0.27.1.tgz \
-		--namespace dsx-identity -f scripts/dsx-imds-host-agent-values.yaml \
-		-f scripts/k2/dsx-imds-host-agent-values.yaml >/dev/null
-	@$(MISE_EXEC) helm lint third-party/dsx-exchange/deploy/nats-event-bus -f scripts/k1/event-bus/values.yaml
-	@$(MISE_EXEC) helm template event-bus third-party/dsx-exchange/deploy/nats-event-bus -f scripts/k1/event-bus/values.yaml >/dev/null
+		--set observability.metrics.serviceMonitor.enabled=true
+
+test-skaffold:
+	@# Diagnose checks the full graph, while this render also resolves the prepared NATS chart path.
 	@$(MISE_EXEC) skaffold diagnose --yaml-only >/dev/null
+	@$(MISE_EXEC) skaffold render -f skaffold.yaml -m nats-k1 \
+		--offline --digest-source=tag >/dev/null
+
+chart-dependencies:
+	@$(MISE_EXEC) ./scripts/prepare-chart-dependencies.sh
 
 # ============================================================
 # Multi-cluster environment with independent SPIRE and DSX Identity Keys shards

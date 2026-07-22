@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
@@ -52,15 +53,19 @@ type TokenExchangeErrorResponse struct {
 	ErrorDescription string `json:"error_description,omitempty"`
 }
 
-type identityKeysServer struct {
-	keys      *signingKeyset
-	registry  *keyRegistry
-	jwtSource *workloadapi.JWTSource
-	jwksURL   string
-	keySync   *keySync
+type publicKeyRegistry interface {
+	keyset() jose.JSONWebKeySet
+	isReady() bool
 }
 
-func newIdentityKeysServer(ctx context.Context, keys *signingKeyset, registry *keyRegistry, socketPath, jwksURL string) (*identityKeysServer, error) {
+type identityKeysServer struct {
+	signer    *tokenSigner
+	registry  publicKeyRegistry
+	jwtSource *workloadapi.JWTSource
+	jwksURL   string
+}
+
+func newIdentityKeysServer(ctx context.Context, signer *tokenSigner, registry publicKeyRegistry, socketPath, jwksURL string) (*identityKeysServer, error) {
 	clientOptions := []workloadapi.ClientOption{
 		workloadapi.WithDialOptions(grpc.WithStatsHandler(otelgrpc.NewClientHandler())),
 	}
@@ -71,7 +76,7 @@ func newIdentityKeysServer(ctx context.Context, keys *signingKeyset, registry *k
 	if err != nil {
 		return nil, fmt.Errorf("create JWT source: %w", err)
 	}
-	return &identityKeysServer{keys: keys, registry: registry, jwtSource: jwts, jwksURL: jwksURL}, nil
+	return &identityKeysServer{signer: signer, registry: registry, jwtSource: jwts, jwksURL: jwksURL}, nil
 }
 
 func (s *identityKeysServer) Close() error {
@@ -85,7 +90,7 @@ func (s *identityKeysServer) resignJWT(originalClaims map[string]any, newSubject
 	newClaims["sub"] = newSubject.String()
 	newClaims["iss"] = identity.Issuer
 
-	token, err := jwt.Signed(s.keys.signer).Claims(newClaims).Serialize()
+	token, err := jwt.Signed(s.signer.signer).Claims(newClaims).Serialize()
 	if err != nil {
 		return "", fmt.Errorf("sign JWT: %w", err)
 	}
@@ -208,15 +213,9 @@ func (s *identityKeysServer) handleOIDCDiscovery(w http.ResponseWriter, _ *http.
 }
 
 func (s *identityKeysServer) handleReady(w http.ResponseWriter, _ *http.Request) {
-	if s.keySync != nil {
-		if !s.keySync.isConnectedAndSubscribed() {
-			http.Error(w, "MQTT is not connected and subscribed", http.StatusServiceUnavailable)
-			return
-		}
-		if !s.keySync.isCacheReady() {
-			http.Error(w, "public key cache is not ready", http.StatusServiceUnavailable)
-			return
-		}
+	if !s.registry.isReady() {
+		http.Error(w, "public key registry is not ready", http.StatusServiceUnavailable)
+		return
 	}
 	w.WriteHeader(http.StatusOK)
 }
@@ -270,20 +269,21 @@ func run() (runErr error) {
 	var logLevel slog.Level
 	flag.TextVar(&logLevel, "log-level", slog.LevelInfo, "log level (debug, info, warn, error)")
 	var (
-		listenAddr        = flag.String("listen", ":8080", "HTTP server listen address")
-		socketPath        = flag.String("socket", "", "SPIFFE Workload API socket path")
-		jwksURL           = flag.String("jwks-url", "", "public JWKS URL advertised through discovery")
-		signingKeyset     = flag.String("signing-keyset", "/run/secrets/dsx-identity-keys/keyset.json", "private signing keyset file")
-		activeKID         = flag.String("active-kid", "/run/secrets/dsx-identity-keys-active-kid/active-kid.json", "JSON file containing the active signing kid and algorithm")
-		shardID           = flag.String("shard-id", "", "stable DSX Identity Keys shard identifier")
-		mqttBroker        = flag.String("mqtt-broker", "", "MQTT 3.1.1 broker URL")
-		mqttClientID      = flag.String("mqtt-client-id", "", "MQTT client identifier (defaults to dsx-identity-keys-<shard-id>)")
-		publicKeyLeaseTTL = flag.Duration("public-key-lease-ttl", 10*time.Minute, "public key publication lease lifetime")
-		mqttAuthModeFlag  = flag.String("mqtt-auth-mode", "anonymous", "MQTT authentication mode: oauth2, basic, or anonymous")
-		mqttCredentials   = flag.String("mqtt-credentials-file", "", "JSON file containing MQTT credentials")
-		mqttTokenURL      = flag.String("mqtt-oauth-token-url", "", "OAuth2 client-credentials token endpoint for MQTT")
-		mqttScopes        = flag.String("mqtt-oauth-scopes", "mqtt", "comma-separated OAuth2 scopes for MQTT; empty requests no scopes")
-		mqttOAuthUsername = flag.String("mqtt-oauth-username", "oauthtoken", "MQTT username sent with the OAuth2 access token")
+		listenAddr      = flag.String("listen", ":8080", "HTTP server listen address")
+		socketPath      = flag.String("socket", "", "SPIFFE Workload API socket path")
+		jwksURL         = flag.String("jwks-url", "", "public JWKS URL advertised through discovery")
+		signingKeyset   = flag.String("signing-keyset", "/run/secrets/dsx-identity-keys/keyset.json", "private signing keyset file")
+		activeKID       = flag.String("active-kid", "/run/secrets/dsx-identity-keys-active-kid/active-kid.json", "JSON file containing the active signing kid and algorithm")
+		shardID         = flag.String("shard-id", "", "stable DSX Identity Keys shard identifier")
+		natsServer      = flag.String("nats-server", "", "NATS server URL")
+		natsClientName  = flag.String("nats-client-name", "", "NATS client name (defaults to dsx-identity-keys-<shard-id>)")
+		publicKeyTTL    = flag.Duration("public-key-ttl", 10*time.Minute, "public key NATS KV entry TTL")
+		natsKVBucket    = flag.String("nats-kv-bucket", defaultNATSKVBucket, "NATS KV bucket for public keys")
+		natsKVReplicas  = flag.Int("nats-kv-replicas", 1, "NATS KV stream replica count")
+		natsAuthMode    = flag.String("nats-auth-mode", natsAuthNone, "NATS authentication mode: none or oauth2")
+		natsCredentials = flag.String("nats-credentials-file", "", "JSON file containing OAuth2 client credentials")
+		natsIssuerURL   = flag.String("nats-oauth-issuer-url", "", "OAuth2 issuer for NATS token authentication")
+		natsScopes      = flag.String("nats-oauth-scopes", "nats", "comma-separated OAuth2 scopes for NATS; empty requests no scopes")
 	)
 	flag.Parse()
 
@@ -295,37 +295,38 @@ func run() (runErr error) {
 		runErr = errors.Join(runErr, sdk.Shutdown(context.Background()))
 	}()
 
-	if *mqttClientID == "" {
-		*mqttClientID = "dsx-identity-keys-" + *shardID
+	if *natsClientName == "" {
+		*natsClientName = "dsx-identity-keys-" + *shardID
 	}
 
-	keys, err := loadSigningKeyset(*signingKeyset, *activeKID)
+	signer, publicKeys, err := loadSigningKeys(*signingKeyset, *activeKID)
 	if err != nil {
 		return fmt.Errorf("load signing keyset: %w", err)
 	}
-	registry := newKeyRegistry()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	var scopes []string
-	if *mqttScopes != "" {
-		scopes = strings.Split(*mqttScopes, ",")
+	if *natsScopes != "" {
+		scopes = strings.Split(*natsScopes, ",")
 	}
-	mqttAuth := mqttAuthConfig{
-		mode:            *mqttAuthModeFlag,
-		credentialsFile: *mqttCredentials,
-		oauthTokenURL:   *mqttTokenURL,
+	natsAuth := natsAuthConfig{
+		mode:            *natsAuthMode,
+		credentialsFile: *natsCredentials,
+		oauthIssuerURL:  *natsIssuerURL,
 		oauthScopes:     scopes,
-		oauthUsername:   *mqttOAuthUsername,
 	}
-	syncer, err := startKeySync(ctx, *mqttBroker, *mqttClientID, *shardID, keys.public, *publicKeyLeaseTTL, registry, mqttAuth)
+	registry := newKeyRegistry(publicKeys)
+	synchronizer, err := newNATSKeySynchronizer(ctx, *natsServer, *natsClientName, *shardID, publicKeys, *publicKeyTTL, natsKVConfig{
+		bucket: *natsKVBucket, replicas: *natsKVReplicas,
+	}, registry, natsAuth)
 	if err != nil {
+		registry.Close()
 		return fmt.Errorf("start public key synchronization: %w", err)
 	}
-	registry.start()
-	defer registry.stop()
-	defer syncer.Close()
+	registryWithSync := &synchronizedKeyRegistry{keyRegistry: registry, natsKeySynchronizer: synchronizer}
+	defer registryWithSync.Close()
 
-	server, err := newIdentityKeysServer(ctx, keys, registry, *socketPath, *jwksURL)
+	server, err := newIdentityKeysServer(ctx, signer, registryWithSync, *socketPath, *jwksURL)
 	if err != nil {
 		return fmt.Errorf("create DSX Identity Keys server: %w", err)
 	}
@@ -334,8 +335,6 @@ func run() (runErr error) {
 			runErr = errors.Join(runErr, fmt.Errorf("close JWT source: %w", err))
 		}
 	}()
-	server.keySync = syncer
-
 	httpServer := &http.Server{
 		Addr: *listenAddr,
 		Handler: otelhttp.NewHandler(server.handler(), "dsx-identity-keys",
@@ -344,7 +343,7 @@ func run() (runErr error) {
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	slog.Info("Starting DSX Identity Keys", "listen_addr", *listenAddr, "issuer", identity.Issuer, "shard_id", *shardID, "active_kid", keys.activeKID)
+	slog.Info("Starting DSX Identity Keys", "listen_addr", *listenAddr, "issuer", identity.Issuer, "shard_id", *shardID, "active_kid", signer.keyID)
 	if err := serveHTTP(ctx, httpServer); err != nil {
 		return fmt.Errorf("serve HTTP: %w", err)
 	}

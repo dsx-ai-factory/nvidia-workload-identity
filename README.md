@@ -261,8 +261,8 @@ flowchart LR
 
   Local -->|"local SPIRE JWT-SVID"| IdentityKeys
   IdentityKeys -->|"DSX JWT"| Consumers
-  IdentityKeys <-->|"public signing keys"| Bus["External DSX Event Bus"]
-  Bus <-->|"public signing keys"| Peers["Peer shard DSX Identity Keys instances"]
+  IdentityKeys <-->|"NATS KV updates and watch replay"| Bus["External DSX Event Bus"]
+  Bus <-->|"NATS KV updates and watch replay"| Peers["Peer shard DSX Identity Keys instances"]
   RelyingParty["External relying party"] -->|"aggregate JWKS"| IdentityKeys
 ```
 
@@ -321,14 +321,16 @@ identityKeys:
   jwksURL: https://identity-keys.shard.example.com/.well-known/jwks.json
   signingKeysetSecret: dsx-identity-keys-signing-keyset
   activeKIDSecret: dsx-identity-keys-active-kid
-  mqtt:
-    brokerURL: tls://event-bus.example.com
+  nats:
+    serverURL: tls://event-bus.example.com:4222
+    kv:
+      bucket: DSX_IDENTITY_KEYS
+      replicas: 3
     auth:
       mode: oauth2
-      credentialsSecret: dsx-identity-keys-mqtt-oauth
+      credentialsSecret: dsx-identity-keys-nats-oauth
       credentialsKey: credentials.json
-      oauth2:
-        tokenURL: https://auth.example.com/oauth2/token
+      issuerURL: https://auth.example.com
 ```
 
 Each identity shard configures the `dsx_imds` server plugin in SPIRE and exposes
@@ -582,8 +584,9 @@ See the
 ## Local E2E
 
 The repository validates the architecture with two Kind clusters. k1 hosts a
-Common Services identity shard plus the external Event Bus, OAuth2 provider,
-and OpenBao relying party. k2 hosts a Data Hall identity shard, the Identity
+Common Services identity shard, one unauthenticated NATS server with in-memory
+JetStream for KV, and the
+OpenBao relying party. k2 hosts a Data Hall identity shard, the Identity
 Controller, OVN-Kubernetes layer-3 UDN, and a KubeVirt VM. The k1 and k2 names
 describe only this fixture and do not define a trust hierarchy. Local identity
 components use one replica and SPIRE uses its SQLite default.
@@ -714,6 +717,6 @@ make clean
 
 The E2E suite verifies operator-host IMDS through both `dsx_imds` plugin halves,
 dynamic standalone-host registration, DPU file delivery, Pod and VM identity
-delivery, shard isolation, Event Bus publication, aggregate JWKS behavior,
+delivery, shard isolation, NATS KV propagation, aggregate JWKS behavior,
 OpenBao authorization, restart recovery, and signing-key rotation. External
 DPU and standalone-host hardware is not modeled as Kubernetes Nodes.

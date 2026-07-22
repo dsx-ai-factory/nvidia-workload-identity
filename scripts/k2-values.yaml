@@ -20,13 +20,10 @@ spire:
       parentIDTemplate: 'spiffe://{{ .TrustDomain }}/spire/agent/{{ if eq .NodeMeta.Name "k2-control-plane" }}k8s_psat/{{ .ClusterName }}/{{ .NodeMeta.UID }}{{ else }}dsx_imds/tenant/$OPERATOR_TENANT/host/{{ .NodeMeta.Name }}{{ end }}'
 identityKeys:
   shardID: k2
-  mqtt:
-    brokerURL: tcp://gateway.sjc-1.nvidia.com:1883
+  nats:
+    serverURL: nats://gateway.sjc-1.nvidia.com:4222
     auth:
-      mode: oauth2
-      credentialsSecret: dsx-identity-keys-mqtt-oauth
-      oauth2:
-        tokenURL: http://gateway.sjc-1.nvidia.com:8080/realms/event-bus/protocol/openid-connect/token
+      mode: none
 
 podTokenFetcher:
   identityKeysURL: http://dsx-identity-keys.dsx-identity.svc.cluster.local:8080/v1/exchange

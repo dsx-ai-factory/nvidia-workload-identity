@@ -1,0 +1,23 @@
+natsBox:
+  enabled: false
+
+config:
+  cluster:
+    enabled: false
+    replicas: 1
+  jetstream:
+    enabled: true
+    memoryStore:
+      enabled: true
+      maxSize: 64Mi
+    fileStore:
+      enabled: false
+
+container:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi

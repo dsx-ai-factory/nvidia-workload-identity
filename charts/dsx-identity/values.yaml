@@ -120,24 +120,25 @@ identityKeys:
     port: 8080
     nodePort: null
   jwksURL: ""
-  # Must match the Event Bus retained-message maxAge and cover DSX JWT validity.
-  publicKeyLeaseTTL: 10m
-  # Globally unique across every DSX Identity Keys instance sharing this Event Bus fabric.
+  # Covers DSX JWT validity. Instances refresh each KV entry four times per TTL.
+  publicKeyTTL: 10m
+  # Globally unique across every DSX Identity Keys instance sharing this NATS KV bucket.
   shardID: ""
   # External secret automation owns both Secrets. This chart only mounts them.
   signingKeysetSecret: dsx-identity-keys-signing-keyset
   activeKIDSecret: dsx-identity-keys-active-kid
-  mqtt:
-    brokerURL: ""
+  nats:
+    serverURL: ""
+    kv:
+      bucket: DSX_IDENTITY_KEYS
+      replicas: 1
     auth:
-      # Supported modes: oauth2, basic, anonymous.
-      mode: anonymous
+      # Supported modes: none, oauth2.
+      mode: none
       credentialsSecret: ""
       credentialsKey: credentials.json
-      oauth2:
-        tokenURL: ""
-        scopes: [mqtt]
-        username: oauthtoken
+      issuerURL: ""
+      scopes: [nats]
   resources:
     requests:
       cpu: 100m

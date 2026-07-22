@@ -9,19 +9,16 @@ registration determines the tenant in the local subject, and DSX Identity Keys
 preserves it while validating the common identity grammar. It obtains local
 JWT verification bundles through the node-local SPIFFE Workload API.
 
-Each DSX Identity Keys instance publishes only its local public keys to the shared Event Bus and
-subscribes to all shard key publications. It retains one aggregate keyed by
-globally unique `kid`, and its JWKS endpoint serves every valid local and remote
-public key. Initial and later Event Bus connection failures leave DSX Identity Keys live
-but not ready while it reconnects. DSX Identity Keys instances in the same Event Bus topic space
-converge on the same aggregate, so relying parties can use the JWKS from any
-reachable DSX Identity Keys.
+Each DSX Identity Keys instance writes only its local public keys to one shared
+NATS KV bucket and watches the complete bucket. It retains one aggregate keyed
+by globally unique `kid`, and its JWKS endpoint serves every valid local and
+remote public key. Startup requires the Event Bus connection, KV bucket, and
+initial history. Later connection failures leave DSX Identity Keys live but not
+ready while it reconnects. Instances using the same bucket converge on the same
+aggregate, so relying parties can use the JWKS from any reachable DSX Identity
+Keys.
 
 ## Flat key distribution
-
-Every DSX Identity Keys instance publishes only its local public keys and consumes every valid
-publication in the Event Bus topic space. Signing keys remain local to their
-shard, while every DSX Identity Keys instance serves the same aggregate JWKS.
 
 ```mermaid
 flowchart TB
@@ -29,7 +26,7 @@ flowchart TB
   E1["DSX Identity Keys Deployment<br/>shard-a"]
   E2["DSX Identity Keys Deployment<br/>shard-b"]
   E3["DSX Identity Keys Deployment<br/>shard-c"]
-  BUS["External DSX Event Bus<br/>one retained key topic space"]
+  BUS["External DSX Event Bus<br/>NATS KV bucket"]
 
   RP -->|"one aggregate JWKS"| E2
   E1 <-->|"local keys out, all public keys in"| BUS
@@ -37,43 +34,40 @@ flowchart TB
   E3 <-->|"local keys out, all public keys in"| BUS
 ```
 
-The local E2E fixture uses two DSX Identity Keys instances in the same topic space:
+The local E2E fixture uses two DSX Identity Keys instances in the same subject space:
 
 ```mermaid
 flowchart LR
-    K1["k1 DSX Identity Keys Pod"] -->|"local public keys"| Bus["DSX Event Bus MQTT topic space"]
+    K1["k1 DSX Identity Keys Pod"] -->|"local public keys"| Bus["NATS KV bucket"]
     K2["k2 DSX Identity Keys Pod"] -->|"local public keys"| Bus
-    Bus -->|"all retained public keys"| K1
-    Bus -->|"all retained public keys"| K2
+    Bus -->|"initial replay and watched updates"| K1
+    Bus -->|"initial replay and watched updates"| K2
     K1 --> J1["k1 aggregate JWKS"]
     K2 --> J2["k2 aggregate JWKS"]
 ```
 
-Public keys use retained QoS 1 topics of the form
-`dsx-identity-keys/v1/pub-keys/shard/<shard-id>/kid/<kid>`. Publications carry a
-lease expiry and are refreshed every quarter of the configured lease lifetime,
-leaving three further publish opportunities before lease expiry. Each valid
-publication replaces the globally unique `kid` it addresses. MQTT connections
-use the configured OAuth2, basic, or anonymous authentication mode. Event Bus
-authorization remains external to DSX Identity Keys.
-
-Anonymous is the default and sends no MQTT credentials. OAuth2 mode reads one
+Public keys use NATS KV keys of the form
+`shard.<shard-id>.kid.<kid>`. Each value is one public JWK. The bucket keeps one
+revision per key and applies the configured TTL. Each instance refreshes its
+local entries every quarter of that TTL, leaving three further write
+opportunities before expiry. Each instance starts an updates-only watch before
+loading `History`, so concurrent writes queue while current values are loaded.
+If the watcher closes, its replacement uses the same ordering. Each valid entry
+replaces the globally unique `kid` it addresses. NATS connections use either no
+authentication or OAuth2 client credentials. OAuth2 mode reads a
 JSON credentials file containing non-empty `client_id` and `client_secret`
-fields. It rereads both values when the cached access token expires. OAuth
-scopes and the MQTT username paired with the access token are configurable; an
-empty scope list sends no scope parameter. Basic mode reads one JSON credentials
-file containing non-empty `username` and `password` fields and rereads it for
-each connection attempt. The Helm chart mounts no MQTT credentials Secret in
-anonymous mode.
-
-The retained JSON payload contains `published_at`, `lease_expires_at`, and one
-public `jwk`. The topic supplies the shard ID and `kid`, and the payload JWK
-must carry that same `kid`. Private, malformed, unsupported, and expired keys
-do not replace a valid aggregate entry.
+fields, discovers the token endpoint from the configured issuer, and rereads
+the credentials when the cached access token expires. OAuth scopes are
+configurable, and an empty scope list sends no scope parameter. The access
+token is sent through native NATS token authentication. Production DSX Exchange
+deployments place DSX Identity Keys clients in a dedicated NATS account, which
+provides the account boundary and JetStream capacity used by the KV bucket.
+Basic authentication is not supported. Private, malformed, unsupported, and
+mismatched keys do not replace a valid aggregate entry.
 
 The identity chart deploys two active replicas per shard through
-`charts/dsx-identity/templates/identity-keys-deployment.yaml`, with a unique MQTT
-client ID for each Pod. Both replicas load the same shard-local private
+`charts/dsx-identity/templates/identity-keys-deployment.yaml`. Both replicas
+load the same shard-local private
 keyset and active-kid Secret. Only public keys are published to the Event Bus.
 
 External secret automation requests
@@ -106,7 +100,7 @@ responses.
 | `GET /.well-known/jwks.json` | Aggregate JWKS for all valid public keys |
 | `GET /.well-known/openid-configuration` | Issuer, JWKS URL, and aggregate signing algorithms |
 | `GET /live` | Process liveness |
-| `GET /ready` | MQTT connection, subscription, and public-key cache readiness |
+| `GET /ready` | NATS connection, KV watch replay, and local-key cache readiness |
 
 The exchange endpoint is intentionally unauthenticated because the submitted
 local SPIRE JWT-SVID is the credential being exchanged.
@@ -127,15 +121,16 @@ do not expose parser or verifier details.
 | `--jwks-url` | required | Absolute public JWKS URL advertised by discovery |
 | `--signing-keyset` | `/run/secrets/dsx-identity-keys/keyset.json` | JSON file containing private PEM keys |
 | `--active-kid` | `/run/secrets/dsx-identity-keys-active-kid/active-kid.json` | JSON file containing the active signing `kid` and algorithm |
-| `--shard-id` | required | Globally unique shard ID in the Event Bus topic space |
-| `--mqtt-broker` | required | MQTT 3.1.1 broker URL |
-| `--mqtt-client-id` | `dsx-identity-keys-<shard-id>` | Unique MQTT client ID |
-| `--public-key-lease-ttl` | `10m` | Public key publication lease lifetime |
-| `--mqtt-auth-mode` | `anonymous` | MQTT authentication mode: `oauth2`, `basic`, or `anonymous` |
-| `--mqtt-credentials-file` | OAuth2/basic mode | JSON file containing the selected mode's credentials |
-| `--mqtt-oauth-token-url` | OAuth2 mode | OAuth2 token endpoint |
-| `--mqtt-oauth-scopes` | `mqtt` | Comma-separated scopes; empty requests none |
-| `--mqtt-oauth-username` | `oauthtoken` | MQTT username paired with the access token |
+| `--shard-id` | required | Globally unique shard ID in the Event Bus subject space |
+| `--nats-server` | required | NATS server URL |
+| `--nats-client-name` | `dsx-identity-keys-<shard-id>` | NATS connection name |
+| `--public-key-ttl` | `10m` | NATS KV entry TTL |
+| `--nats-kv-bucket` | `DSX_IDENTITY_KEYS` | Shared NATS KV bucket |
+| `--nats-kv-replicas` | `1` | KV bucket replica count |
+| `--nats-auth-mode` | `none` | NATS authentication mode: `none` or `oauth2` |
+| `--nats-credentials-file` | OAuth2 mode | JSON file containing OAuth2 client credentials |
+| `--nats-oauth-issuer-url` | OAuth2 mode | OAuth2 issuer whose discovery document advertises the token endpoint |
+| `--nats-oauth-scopes` | `nats` | Comma-separated scopes; empty requests none |
 | `--log-level` | `info` | JSON log level: `debug`, `info`, `warn`, or `error` |
 
 ## Testing
@@ -145,7 +140,8 @@ go test ./cmd/dsx-identity-keys
 ```
 
 The focused tests cover signing configuration, RFC 8693 behavior, flat `kid`
-aggregation, deterministic publication lease expiry, rotation overlap,
-MQTT retained synchronization, MQTT authentication, and discovery. Live MQTT
-and deployed aggregate checks are enabled by the `DSX_E2E_MQTT_*` and
+aggregation, deterministic KV expiry, rotation overlap, replay after restart,
+watched updates, and every supported authentication mode. Live NATS and
+deployed aggregate checks use the
+`DSX_E2E_NATS_*` and
 `DSX_E2E_VERIFY_*` environment variables used by the E2E scripts.

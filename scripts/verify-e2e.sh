@@ -11,8 +11,7 @@ K1_TRUST_DOMAIN="sjc-1.nvidia.com"
 K2_TRUST_DOMAIN="k2.sjc-1.nvidia.com"
 GATEWAY_HOST="gateway.sjc-1.nvidia.com"
 OPENBAO_URL="http://${GATEWAY_HOST}:8200"
-EVENT_BUS_OAUTH_URL="http://${GATEWAY_HOST}:8080/realms/event-bus/protocol/openid-connect/token"
-MQTT_BROKER="tcp://${GATEWAY_HOST}:1883"
+NATS_SERVER="nats://${GATEWAY_HOST}:4222"
 AUDIENCE="spiffe://ds9.dsx.nvid.id/openbao"
 ISSUER="spiffe://ds9.dsx.nvid.id"
 SIGNING_SECRET="dsx-identity-keys-signing-keyset"
@@ -73,52 +72,12 @@ initialize_external_test_process() {
     K2_IDENTITY_KEYS_URL="http://${k2_node_address}:${IDENTITY_KEYS_NODE_PORT}"
 }
 
-event_bus_access_token() {
-    local client_id="$1" secret_name="$2" credentials client_secret
-    credentials=$(kubectl get secret "${secret_name}" -n "${IDENTITY_NAMESPACE}" \
-        --context "${K1_CONTEXT}" -o json | jq -er '.data["credentials.json"]' | base64 -d)
-    client_secret=$(jq -er --arg client_id "${client_id}" \
-        'select(.client_id == $client_id) | .client_secret' <<<"${credentials}")
-    external_curl -fsS --retry 30 --retry-all-errors --retry-connrefused \
-        --retry-delay 1 --retry-max-time 30 --connect-timeout 1 --max-time 10 \
-        --data-urlencode grant_type=client_credentials \
-        --data-urlencode scope=mqtt \
-        --data-urlencode "client_id=${client_id}" \
-        --data-urlencode "client_secret=${client_secret}" \
-        "${EVENT_BUS_OAUTH_URL}" | jq -er '.access_token'
-}
-
-assert_mqtt_authorization() {
-    local access_token observer_token
-    access_token=$(event_bus_access_token dsx-identity-keys dsx-identity-keys-mqtt-oauth)
-    observer_token=$(event_bus_access_token event-bus-e2e-observer event-bus-e2e-observer-oauth)
-    external_probe '^TestLiveMQTTAuthorization$' \
-        "DSX_E2E_MQTT_BROKER=${MQTT_BROKER}" \
-        "DSX_E2E_MQTT_TOKEN=${access_token}" \
-        "DSX_E2E_MQTT_OBSERVER_TOKEN=${observer_token}"
-}
-
-assert_retained_keys() {
-    local shard_id="$1"
-    local kid="$2"
-    local source_url access_token aggregate expected_jwks output deadline=$((SECONDS + 60))
-    if [[ "${shard_id}" == "k1" ]]; then
-        source_url=${K1_IDENTITY_KEYS_URL}
-    else
-        source_url=${K2_IDENTITY_KEYS_URL}
-    fi
-    access_token=$(event_bus_access_token dsx-identity-keys dsx-identity-keys-mqtt-oauth)
+assert_nats_kv() {
+    local expected="$1" output deadline=$((SECONDS + 60))
     while ((SECONDS < deadline)); do
-        aggregate=$(external_curl -fsS --max-time 5 \
-            "${source_url}/.well-known/jwks.json" 2>/dev/null) || continue
-        expected_jwks=$(jq -ce --arg kid "${kid}" \
-            '{keys: [.keys[] | select(.kid == $kid)]} | select(.keys | length == 1)' \
-            <<<"${aggregate}") || continue
-        if output=$(external_probe '^TestLiveMQTTRetainedReplay$' \
-            "DSX_E2E_MQTT_BROKER=${MQTT_BROKER}" \
-            "DSX_E2E_MQTT_TOKEN=${access_token}" \
-            "DSX_E2E_MQTT_SHARD_ID=${shard_id}" \
-            "DSX_E2E_MQTT_EXPECTED_JWKS=${expected_jwks}" 2>&1); then
+        if output=$(external_probe '^TestLiveNATSKV$' \
+            "DSX_E2E_NATS_URL=${NATS_SERVER}" \
+            "DSX_E2E_NATS_EXPECTED_KIDS=${expected}" 2>&1); then
             printf '%s\n' "${output}"
             return 0
         fi
@@ -447,11 +406,9 @@ main() {
 
     stage_started=${SECONDS}
     expected=$(jq -cn --arg k1 "${K1_ORIGINAL_KID}" --arg k2 "${K2_ORIGINAL_KID}" '[$k1, $k2]')
-    assert_mqtt_authorization
-    assert_retained_keys k1 "${K1_ORIGINAL_KID}"
-    assert_retained_keys k2 "${K2_ORIGINAL_KID}"
+    assert_nats_kv "${expected}"
     assert_full_aggregates "${expected}" "${k1_token}" "${k2_token}" "${local_k1_token}" "${local_k2_token}"
-    log_timing "MQTT authorization and aggregate JWKS" "${stage_started}"
+    log_timing "NATS KV connectivity, entries, and aggregate JWKS" "${stage_started}"
 
     stage_started=${SECONDS}
     assert_relying_party_subject_validation "${k1_token}"

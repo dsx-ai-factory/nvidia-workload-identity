@@ -227,6 +227,9 @@ requires:
   - path: images.yaml
     configs:
       - images
+  - path: dependencies.yaml
+    configs:
+      - chart-dependencies
   - path: secrets.yaml
     configs:
       - identity-secrets-k2
@@ -235,8 +238,7 @@ requires:
       - kyverno-k2
   - path: k1.yaml
     configs:
-      - k1-gateway-resources
-      - event-bus-k1
+      - nats-route-k1
 deploy:
   kubeContext: kind-k2
   statusCheckDeadlineSeconds: 300

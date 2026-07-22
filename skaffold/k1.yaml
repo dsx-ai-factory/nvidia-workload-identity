@@ -182,52 +182,43 @@ deploy:
 apiVersion: skaffold/v4beta14
 kind: Config
 metadata:
-  name: keycloak-k1
+  name: nats-k1
 requires:
-  - path: secrets.yaml
-    configs:
-      - event-bus-secrets-k1
-  - configs:
-      - k1-gateway-resources
-manifests:
-  kustomize:
-    paths:
-      - ../scripts/k1/event-bus
-deploy:
-  kubeContext: kind-k1
-  statusCheckDeadlineSeconds: 180
-  tolerateFailuresUntilDeadline: true
-  kubectl: {}
----
-apiVersion: skaffold/v4beta14
-kind: Config
-metadata:
-  name: event-bus-k1
-requires:
+  # The dependency hook downloads the pinned chart before Skaffold renders this release.
   - path: dependencies.yaml
     configs:
       - chart-dependencies
-  - path: images.yaml
-    configs:
-      - images
-  - configs:
-      - keycloak-k1
 deploy:
   kubeContext: kind-k1
   statusCheckDeadlineSeconds: 300
   tolerateFailuresUntilDeadline: true
   helm:
     releases:
-      - name: event-bus
-        chartPath: ../third-party/dsx-exchange/deploy/nats-event-bus
+      - name: nats
+        chartPath: ../charts/nats-2.14.2.tgz
         namespace: dsx-identity
         createNamespace: true
+        # Rendering must not rebuild the prepared archive from remote repositories.
         skipBuildDependencies: true
         valuesFiles:
-          - ../scripts/k1/event-bus/values.yaml
-        setValueTemplates:
-          auth-callout.image.repository: "{{.IMAGE_REPO_dsx_identity_auth_callout}}"
-          auth-callout.image.tag: "{{.IMAGE_TAG_dsx_identity_auth_callout}}"
+          - ../scripts/k1/nats/values.yaml
+---
+apiVersion: skaffold/v4beta14
+kind: Config
+metadata:
+  name: nats-route-k1
+requires:
+  - configs:
+      - k1-gateway-resources
+      - nats-k1
+manifests:
+  rawYaml:
+    - ../scripts/k1/nats/route.yaml
+deploy:
+  kubeContext: kind-k1
+  statusCheckDeadlineSeconds: 120
+  tolerateFailuresUntilDeadline: true
+  kubectl: {}
 ---
 apiVersion: skaffold/v4beta14
 kind: Config
@@ -237,11 +228,14 @@ requires:
   - path: images.yaml
     configs:
       - images
+  - path: dependencies.yaml
+    configs:
+      - chart-dependencies
   - path: secrets.yaml
     configs:
       - identity-secrets-k1
   - configs:
-      - event-bus-k1
+      - nats-route-k1
       - kyverno-k1
       - spire-crds-k1
 deploy:

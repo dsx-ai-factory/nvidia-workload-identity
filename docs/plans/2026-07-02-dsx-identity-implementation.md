@@ -10,7 +10,7 @@
 
 k1 and k2 are independent identity shards. Each runs SPIRE and a local DSX Identity Keys instance. There is no SPIRE federation. Each DSX Identity Keys instance accepts JWT-SVIDs only from its co-located SPIRE installation.
 
-k1 also runs the single DSX Event Bus, its OAuth2 provider, and OpenBao. Both DSX Identity Keys instances use OAuth2 client credentials to publish retained leased public keys to that Event Bus and subscribe to every key publication. Both DSX Identity Keys instances serve the same flat aggregate JWKS.
+k1 also runs one unauthenticated NATS server with in-memory JetStream and OpenBao. Both DSX Identity Keys instances refresh their local public keys in one shared KV bucket and watch every entry. Both instances serve the same flat aggregate JWKS. Focused Go tests cover unauthenticated connections and OAuth2 client credentials with native NATS token auth.
 
 k2 runs the DSX Identity Controller, KubeVirt, the layer-3 tenant UDN, `dsx_imds`, and the DSX Identity Keys Proxy CSI path. KubeVirt metadata sidecars exchange their local SPIRE JWT-SVIDs through the proxy to k2 DSX Identity Keys.
 
@@ -35,9 +35,9 @@ Locked contracts:
 - DSX Identity Keys issuer: `spiffe://ds9.dsx.nvid.id`.
 - Public identity service: `dsx`. Region: `ds9`. Partition: `nvid.id`.
 - DSX Identity Keys signing: shard-local private PEM `keyset.json` Secret rendered from a Transit signing-key export requested with `format=pem`, plus a separate `active-kid.json` Secret entry containing `{"active_kid":"<kid>","alg":"<JOSE algorithm>"}`.
-- `kid` generation: go-jose SHA-256 public-JWK thumbprint. Every retained key across all shards has a unique `kid`, including keys present during rotation overlap. Retired values are never reused.
-- Event Bus: NVIDIA `dsx-exchange` v2.6.0, deployed only in k1.
-- Event Bus authentication: OAuth2 client credentials with narrow `dsx-identity-keys.>` publish/subscribe permissions and no anonymous access.
+- `kid` generation: go-jose SHA-256 public-JWK thumbprint. Every key across all shards has a unique `kid`, including keys present during rotation overlap. Retired values are never reused.
+- Local message bus: one unauthenticated NATS server with in-memory JetStream in k1.
+- Production Event Bus authentication: OAuth2 client credentials mapped to a dedicated DSX Identity Keys NATS account.
 - DPU source: unstructured `provisioning.dpu.nvidia.com/v1alpha1, Kind=DPU`. DPU ID: `metadata.name`.
 - DPU identity: first-class `/dpu/{dpu-id}` resource. In token-file delivery mode, configured Unix WorkloadAttestor selectors identify `dsx-token-fetcher`, the process that calls the Workload API. The protected token file is the capability consumed by the DPU process.
 - Host and VM source: one externally owned LaunchLayer source CR per resource. The E2E fixture stands in for that API.
@@ -134,52 +134,18 @@ Exit gate:
 - Invalid signing configuration prevents readiness.
 - Each DSX Identity Keys instance accepts a SPIRE JWT-SVID issued by its local SPIRE and rejects a SPIRE JWT-SVID issued by the other shard.
 
-## 2. Implement retained public-key propagation
+## 2. Implement NATS KV public-key propagation
 
-Publishing and aggregation run inside the DSX Identity Keys binary. Record the local
-contract in the component documentation and use the Event Bus MQTT endpoint:
+- [x] Replace the former Event Bus client with native NATS KV operations.
+- [x] Use `WatchAll` for initial replay and later key updates.
+- [x] Refresh only shard-local entries and let the bucket TTL remove retired keys.
+- [x] Use DSX Exchange OAuth issuer discovery and native NATS token auth in production.
+- [x] Support one unauthenticated local NATS instance without a local OAuth fixture.
+- [x] Cover replay, reconnect, rotation, same-shard replicas, TTL expiry, bucket
+  configuration, and every auth mode in focused Go tests.
 
-```text
-Topic:    dsx-identity-keys/v1/pub-keys/shard/{shard_id}/kid/{kid}
-QoS:      1
-Retained: true
-Payload:  { "published_at": <unix-seconds>, "lease_expires_at": <unix-seconds>, "jwk": <public RFC 7517 JWK> }
-```
-
-The topic supplies the shard ID and globally unique `kid`. The payload `kid`
-must match the topic. Private JWK fields, symmetric keys, unsupported
-algorithms, malformed publications, and expired leases are rejected.
-
-Each DSX Identity Keys instance:
-
-1. Loads its shard-local keyset.
-2. Obtains and refreshes an OAuth2 client-credentials token.
-3. Connects with MQTT username `oauthtoken`, the access token as password, and scope `mqtt`.
-4. Subscribes to `dsx-identity-keys/v1/pub-keys/shard/+/kid/+`.
-5. Publishes each local public key under its shard ID and `kid` with a lease.
-6. Stores accepted keys only by globally unique `kid`.
-7. Replaces one key atomically per valid publication.
-8. Serves the deterministic aggregate at `/.well-known/jwks.json`.
-
-Key handling:
-
-- Preserve every configured source `kid` unchanged.
-- Require `kid` uniqueness within each local signing keyset.
-- Keep the last valid key after any malformed or private publication.
-- Refresh local leases often enough for at least three more attempts before expiry.
-- Readiness requires a valid local keyset, an active subscription, completed cache priming, and active local leases.
-- Reconnection republishes local keys and consumes retained publications.
-- Rotation publishes the new key under its new `kid`. Retired keys disappear when their leases expire.
-
-Focused tests start an OAuth2-protected local broker and at least two DSX Identity Keys key-sync instances. They prove:
-
-- Both instances serve every published key.
-- Tokens from either shard verify with either aggregate.
-- A new instance reconstructs the aggregate from retained messages.
-- Malformed, private, and expired publications leave the aggregate unchanged.
-- Rotation exposes both unique keys during overlap and removes only the retired key afterward.
-- Lease expiry removes only the expired key.
-- Missing and incorrect OAuth2 credentials are rejected.
+The durable protocol and configuration contract is in
+[`cmd/dsx-identity-keys/README.md`](../../cmd/dsx-identity-keys/README.md).
 
 ## 3. Implement the DSX Identity Controller
 
@@ -338,28 +304,26 @@ Install one `charts/dsx-identity` release in each shard:
 
 Deploy external prerequisites separately:
 
-- One `dsx-exchange` Event Bus and OAuth2 provider release in k1.
+- One NATS server with in-memory JetStream in k1.
 - Kyverno runtime.
 - Cluster networking and Gateway infrastructure.
 - OpenBao and dedicated E2E workloads.
 
 Event Bus topology:
 
-- Deploy a single-node, memory-backed, OAuth2-authenticated Kind profile.
-- Use the pinned Keycloak 26.0.7 image and minimal realm fixture.
-- Store the DSX Identity Keys OAuth2 client credential in each identity namespace.
-- Use in-cluster MQTT and OAuth endpoints for k1 DSX Identity Keys.
-- Expose only the MQTT and OAuth endpoints that k2 DSX Identity Keys needs through explicit Gateway and DNS resources.
+- Deploy a single-node NATS Kind profile with no authentication and in-memory KV storage.
+- Use the in-cluster NATS endpoint for k1 DSX Identity Keys.
+- Expose only the NATS endpoint that k2 DSX Identity Keys needs through explicit Gateway and DNS resources.
 - Do not expose SPIRE bundle endpoints or configure SPIRE federation.
 - Configure shard IDs `k1` and `k2`.
 
 Exit gate:
 
-- k1 runs SPIRE, DSX Identity Keys, the Event Bus, OAuth2 provider, and OpenBao.
+- k1 runs SPIRE, DSX Identity Keys, NATS, and OpenBao.
 - k2 runs SPIRE, DSX Identity Keys, the controller, KubeVirt support, DSX Identity Keys Proxy CSI, and `dsx_imds`.
-- Both DSX Identity Keys instances obtain OAuth2 tokens and connect to the k1 Event Bus.
+- Both DSX Identity Keys instances connect without authentication to the k1 NATS server.
 - Each DSX Identity Keys instance accepts a SPIRE JWT-SVID issued by its local SPIRE and rejects a SPIRE JWT-SVID issued by the other shard.
-- Both DSX Identity Keys instances publish their retained local public keys and serve the complete aggregate JWKS.
+- Both DSX Identity Keys instances publish their local public keys and serve the complete aggregate JWKS.
 - k2 VM traffic reaches k2 DSX Identity Keys through the CSI socket.
 - The identity chart lints and renders with both shard value sets.
 - Repeated installation is idempotent.
@@ -382,15 +346,15 @@ The full E2E suite must prove functional behavior:
 - A real k2 workload obtains a local SPIRE JWT-SVID, exchanges it through k2 DSX Identity Keys, and authenticates to the same OpenBao.
 - A real k2 VM obtains its identity through metadata-service and DSX Identity Keys Proxy CSI to k2 DSX Identity Keys, then authenticates to OpenBao.
 - k1 DSX Identity Keys rejects a raw k2 SPIRE JWT-SVID and k2 DSX Identity Keys rejects a raw k1 SPIRE JWT-SVID.
-- Both DSX Identity Keys instances authenticate to the single k1 Event Bus with OAuth2 client credentials.
-- Both DSX Identity Keys instances publish retained public keys.
+- Both DSX Identity Keys instances connect to the single unauthenticated k1 NATS server.
+- Both DSX Identity Keys instances publish public keys through NATS KV.
 - Both aggregate JWKS endpoints contain every valid published key.
 - A token from either DSX Identity Keys instance verifies against either aggregate endpoint.
 - A k2 token receives exactly the expected OpenBao policies and secret access. Forbidden access fails.
 - A real wrong-audience SPIRE JWT-SVID exchanged by its local DSX Identity Keys is rejected by OpenBao.
-- Restarting both DSX Identity Keys instances reconstructs the full aggregate from retained Event Bus state without changing signing identities.
+- Restarting both DSX Identity Keys instances reconstructs the full aggregate through NATS KV replay without changing signing identities.
 - Rotating either shard exposes its old and new globally unique keys during overlap.
-- Focused Go tests advance publication lease time deterministically and remove only the retired key.
+- Focused Go tests exercise short KV TTLs deterministically and remove only the retired key.
 - The installation and complete E2E test succeed from a clean environment.
 
 E2E tests may not substitute source inspection, rendered-manifest inspection, fake metadata responders, test-only JWT signers, directly signed positive tokens, or guest boot markers for these observations.
