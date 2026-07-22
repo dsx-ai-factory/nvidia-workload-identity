@@ -52,13 +52,6 @@ build:
         buildArgs:
           <<: *corePluginBuildArgs
           BINARY: dsx-imds-node-attestor-agent
-    - image: dsx-identity/auth-callout
-      context: ../third-party/dsx-exchange/auth-callout
-      docker:
-        dockerfile: build/package/Dockerfile
-        buildArgs:
-          BUILDER_IMG: 127.0.0.1:5002/library/golang
-          FINAL_IMG: 127.0.0.1:5002/distroless/static-debian12
     - image: dsx-identity/dsx-imds-network-setup
       context: ..
       docker:

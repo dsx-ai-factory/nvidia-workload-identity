@@ -8,11 +8,11 @@ Baseline commit: `ba3ec13c58c532b4fa1eb91b84229310fdf27a48`
 
 The measured warm-cache E2E lifecycle takes 8m21.59s before validation and cleanup. A less-warm deployment took 12m08.12s by itself, making a full run roughly 14m30s. The dominant costs are deployment, especially KubeVirt and its network dependencies, followed by verification that restarts DSX Identity Keys four times and runs deterministic behavior against live infrastructure.
 
-The topology is large, but most third-party components are required by explicit DSX Identity integration contracts. Removing KubeVirt, OVN-Kubernetes, SPIRE, the OAuth2 Event Bus path, or OpenBao would make the suite faster by removing required coverage. That is not recommended.
+The measured topology included the former OAuth2 Event Bus fixture. The current local E2E replaces that fixture with one unauthenticated NATS server using in-memory KV and covers OAuth2 authentication in focused Go tests. The remaining large third-party components are required by explicit DSX Identity integration contracts.
 
 The first speedups should instead remove deployed-environment churn and duplicate assertions:
 
-1. Move DSX Identity Keys restart reconstruction, rotation, and lease expiry out of E2E. Existing focused tests already exercise those behaviors, including deterministic virtual-time expiry and retained replay into a restarted client.
+1. Move DSX Identity Keys restart reconstruction, rotation, and lease expiry out of E2E. Existing focused tests exercise those behaviors through NATS KV replay, watched updates, and deterministic TTL expiry.
 2. Stop creating, patching, and deleting extra DPU, host, and VM sources in E2E. Existing reconciler tests cover lifecycle behavior. Keep the deployed static-source and exact live SPIRE registration assertions.
 3. Remove the repeated VM IMDS negative protocol matrix and most OpenBao generic JWT rejection cases. Keep the real positive VM path and the project-specific malformed DSX subject rejection.
 4. Run the two remaining read-only verification scripts concurrently.
@@ -141,9 +141,9 @@ The external client Pod contains both the 218.7 MB netshoot container and the re
 | `scripts/k2/verify-identity.sh` | 17.66s in an isolated warm run | Yes | Runs first and alone. |
 | `scripts/verify-e2e.sh` | 98.73s in an isolated warm run | Yes | Runs second and alone. |
 | Complete clean-deploy `make test` | 110.63s | Yes | Fully serial. |
-| Live MQTT authorization | 2.01s | No | Within the serial cross-shard script. |
-| First live publication expiry | 9.41s | Publishes a temporary retained key | Within the serial cross-shard script. |
-| Second live publication expiry | 9.52s | Publishes a temporary retained key | Within the serial cross-shard script. |
+| Live Event Bus authorization | 2.01s | No | Within the serial cross-shard script. |
+| First live KV entry expiry | 9.41s | Writes a temporary key | Within the serial cross-shard script. |
+| Second live KV entry expiry | 9.52s | Writes a temporary key | Within the serial cross-shard script. |
 | DSX Identity Keys restart and rotation block | about 44s | Four rollouts and two signing-secret updates | Within the serial cross-shard script. |
 
 The two separately measured scripts sum to 116.39s. The 5.76s difference from the clean-deploy 110.63s run is ordinary readiness and cache variation.
@@ -152,11 +152,11 @@ The two separately measured scripts sum to 116.39s. The 5.76s difference from th
 
 The cross-shard script:
 
-- Restarts k1 DSX Identity Keys once to prove retained reconstruction.
-- Restarts k2 DSX Identity Keys once to prove retained reconstruction.
+- Restarts k1 DSX Identity Keys once to prove key reconstruction.
+- Restarts k2 DSX Identity Keys once to prove key reconstruction.
 - Replaces the k2 signing Secret and restarts k2 for rotation.
 - Restores the original k2 signing Secret and restarts k2 again.
-- Runs live publication lease expiry twice, each with a real 9.4s to 9.5s wait.
+- Runs live KV entry expiry twice, each with a real 9.4s to 9.5s wait.
 
 ReplicaSet timestamps place the whole restart, rotation, and repeated-assertion block between 01:52:47 and 01:53:31, about 44s. Individual replacement Pods became Ready in roughly 4s to 7s. These operations consume a large fraction of verification and introduce rollout and wall-clock sensitivity.
 
@@ -166,9 +166,9 @@ The k2 identity script also creates, patches, and deletes temporary DPU, host, a
 
 | E2E behavior | Existing focused coverage | Recommendation |
 | --- | --- | --- |
-| Retained key reconstruction after client restart | `TestMQTTSynchronizesRetainedPublicKeys` starts an in-process broker and multiple shards, disconnects and reconnects, then starts a new client and verifies retained reconstruction. | Remove deployed DSX Identity Keys restarts. |
-| Key rotation overlap and aggregate convergence | The same MQTT synchronization test exercises rotated keys across shards. | Remove deployed Secret replacement and rollouts. |
-| Publication lease expiry | `TestKeyRegistryBackgroundLeaseExpiry` uses `testing/synctest`. `TestKeySyncRefreshesThreeTimesBeforeLeaseExpiry` also uses virtual time. | Remove both 9.4s live expiry waits. |
+| Key reconstruction after client restart | `TestNATSKVSynchronizesAndReconstructs` starts an in-process NATS server and multiple shards, then starts a new client and verifies KV replay. | Remove deployed DSX Identity Keys restarts. |
+| Key rotation overlap and aggregate convergence | The same NATS KV synchronization test exercises rotated keys across shards. | Remove deployed Secret replacement and rollouts. |
+| KV entry expiry | `TestNATSKVRefreshesAndWatchesRemoval` checks bucket TTL configuration, same-shard refresh, and watched removal. `TestRegistryExpiresKeysAtTheirKVDeadline` checks missed-marker expiry with a deterministic clock. | Remove both 9.4s live expiry waits. |
 | Controller create, drift, update, invalid source, delete, and conflict recovery | `internal/identitycontroller/reconciler_test.go` covers DPU and LaunchLayer lifecycle cases. | Keep only static live registration shape and delivery assertions in E2E. |
 | IMDS missing metadata header, forwarded headers, session endpoint, Accept handling, and both paths | `cmd/metadata-service/metadata_test.go` contains the protocol and validation matrix. | Keep the real VM positive JSON path. Move the negative matrix out of E2E. |
 | OpenBao wrong issuer, expired, not-yet-valid, and unknown key rejection | These are normal OpenBao and JWT verifier behaviors. | Do not retest third-party generic behavior. |
@@ -189,10 +189,9 @@ The k2 VM script prints the complete JSON response, including the bearer token. 
 | OVN-Kubernetes and Multus | Required layer-3 UDN and KubeVirt metadata-network path. | Yes. |
 | KubeVirt | Required real VM identity and metadata delivery path. | Yes. |
 | Kyverno | DSX Identity owns chart policies for injection and registration protection. | Yes, for project-owned policy behavior. Do not test Kyverno internals. |
-| NATS Event Bus | Required OAuth2-authenticated MQTT publication and retained key propagation path. | Yes. |
-| Keycloak | Supplies the required OAuth2 client-credentials boundary for the Event Bus. | Yes. Do not test generic OAuth behavior beyond the DSX connection. |
+| NATS KV | Required public-key storage and watch path. | Yes, as one unauthenticated server with in-memory storage. |
 | OpenBao | Required relying-party integration with DSX CEL subject and policy mapping. | Yes, for one exact real-token positive path and the DSX grammar boundary. |
-| Envoy Gateway and MetalLB | Provide the external gateway route used by the cross-cluster OAuth, MQTT, and OpenBao contracts. | Yes while those external routes are the selected local contract. |
+| Envoy Gateway and MetalLB | Provide the external gateway route used by the cross-cluster NATS and OpenBao contracts. | Yes while those external routes are the selected local contract. |
 | netshoot | Supplies SSH from the tenant network fixture. It is not itself under test. | Replace if the existing repository probe image can provide SSH with less cold-cache cost. |
 
 The current topology mostly tests required integrations, not arbitrary third-party software. The overtesting is concentrated in generic OpenBao rejection behavior and repeated protocol matrices, not in the presence of the infrastructure itself.
@@ -290,7 +289,7 @@ The improved E2E must still prove:
 - A real k1 Pod obtains a k1 SPIRE JWT-SVID and exchanges it through k1 DSX Identity Keys.
 - A real k2 Pod obtains a k2 SPIRE JWT-SVID and exchanges it through k2 DSX Identity Keys.
 - Each DSX Identity Keys instance rejects the other shard's SPIRE JWT-SVID.
-- OAuth2-authenticated MQTT connectivity works and retained publications from both DSX Identity Keys instances converge into both aggregate JWKS endpoints.
+- Unauthenticated NATS connectivity works and KV entries from both DSX Identity Keys shards converge into both aggregate JWKS endpoints.
 - Either aggregate verifies tokens from both shards.
 - Static controller-managed DPU, worker-host, virt-launcher Pod, and VM entries have exact subjects, parents, selectors, hints, and tenant sources.
 - The real DPU token fetcher produces a protected DSX token file without exposing the Workload API socket to its consumer.

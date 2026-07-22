@@ -20,6 +20,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -47,20 +48,20 @@ func TestStaticSigningKeysetAndClaims(t *testing.T) {
 	previous := testJWKForAlgorithm(t, "", jose.ES384, false)
 	activeKID := signingKID(t, active)
 	keysetPath, kidPath := writeSigningFiles(t, []jose.JSONWebKey{active, previous}, activeKID)
-	keys, err := loadSigningKeyset(keysetPath, kidPath)
+	signer, publicKeys, err := loadSigningKeys(keysetPath, kidPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if keys.activeKID != activeKID || len(keys.public) != 2 {
-		t.Fatalf("loaded keyset = kid %q, %d public keys", keys.activeKID, len(keys.public))
+	if signer.keyID != activeKID || len(publicKeys) != 2 {
+		t.Fatalf("loaded signing keys = kid %q, %d public keys", signer.keyID, len(publicKeys))
 	}
-	for _, key := range keys.public {
+	for _, key := range publicKeys {
 		if !key.IsPublic() {
 			t.Fatalf("published kid %q contains private material", key.KeyID)
 		}
 	}
 
-	server := &identityKeysServer{keys: keys}
+	server := &identityKeysServer{signer: signer}
 	original := map[string]any{
 		"iss":    "spiffe://k2.internal",
 		"sub":    "spiffe://k2.internal/original",
@@ -119,11 +120,11 @@ func TestStaticSigningKeysetAndClaims(t *testing.T) {
 		t.Fatalf("second tenant claims = %#v", otherClaims)
 	}
 
-	reloaded, err := loadSigningKeyset(keysetPath, kidPath)
+	_, reloadedPublicKeys, err := loadSigningKeys(keysetPath, kidPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(keys.public) != len(reloaded.public) || !verifyJWKPresent(reloaded.public, keys.public[0]) {
+	if len(publicKeys) != len(reloadedPublicKeys) || !verifyJWKPresent(reloadedPublicKeys, publicKeys[0]) {
 		t.Fatal("reloading the mounted keyset changed its public keys")
 	}
 }
@@ -165,20 +166,20 @@ func TestRejectInvalidSigningConfiguration(t *testing.T) {
 
 	t.Run("empty keyset", func(t *testing.T) {
 		keysetPath, kidPath := writeSigningFiles(t, nil, "active")
-		if _, err := loadSigningKeyset(keysetPath, kidPath); err == nil {
+		if _, _, err := loadSigningKeys(keysetPath, kidPath); err == nil {
 			t.Fatal("empty keyset was accepted")
 		}
 	})
 	t.Run("duplicate kid", func(t *testing.T) {
 		key := testJWK(t, "", false)
 		keysetPath, kidPath := writeSigningFiles(t, []jose.JSONWebKey{key, key}, signingKID(t, key))
-		if _, err := loadSigningKeyset(keysetPath, kidPath); err == nil {
+		if _, _, err := loadSigningKeys(keysetPath, kidPath); err == nil {
 			t.Fatal("duplicate kid was accepted")
 		}
 	})
 	t.Run("unknown active kid", func(t *testing.T) {
 		keysetPath, kidPath := writeSigningFiles(t, []jose.JSONWebKey{testJWK(t, "", false)}, "missing")
-		if _, err := loadSigningKeyset(keysetPath, kidPath); err == nil {
+		if _, _, err := loadSigningKeys(keysetPath, kidPath); err == nil {
 			t.Fatal("unknown active kid was accepted")
 		}
 	})
@@ -188,7 +189,7 @@ func TestRejectInvalidSigningConfiguration(t *testing.T) {
 		if err := os.WriteFile(kidPath, []byte(`{"active_kid":"`+signingKID(t, key)+`","alg":"RS256"}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := loadSigningKeyset(keysetPath, kidPath); err == nil {
+		if _, _, err := loadSigningKeys(keysetPath, kidPath); err == nil {
 			t.Fatal("algorithm incompatible with its key was accepted")
 		}
 	})
@@ -199,7 +200,7 @@ func TestRejectInvalidSigningConfiguration(t *testing.T) {
 			t.Fatal(err)
 		}
 		keysetPath := writeRawSigningFile(t, privateKeyset{Keys: []string{string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))}})
-		if _, err := loadSigningKeyset(keysetPath, writeActiveKeysetFile(t, signingKID(t, key), jose.ES256)); err == nil {
+		if _, _, err := loadSigningKeys(keysetPath, writeActiveKeysetFile(t, signingKID(t, key), jose.ES256)); err == nil {
 			t.Fatal("public key was accepted")
 		}
 	})
@@ -208,7 +209,7 @@ func TestRejectInvalidSigningConfiguration(t *testing.T) {
 		if err := os.WriteFile(keysetPath, []byte(`{"keys":[`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := loadSigningKeyset(keysetPath, kidPath); err == nil {
+		if _, _, err := loadSigningKeys(keysetPath, kidPath); err == nil {
 			t.Fatal("malformed keyset was accepted")
 		}
 	})
@@ -218,7 +219,7 @@ func TestRejectInvalidSigningConfiguration(t *testing.T) {
 		if err := os.WriteFile(kidPath, []byte(`{"active_kid":`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := loadSigningKeyset(keysetPath, kidPath); err == nil {
+		if _, _, err := loadSigningKeys(keysetPath, kidPath); err == nil {
 			t.Fatal("malformed active kid document was accepted")
 		}
 	})
@@ -229,53 +230,61 @@ func TestRejectInvalidSigningConfiguration(t *testing.T) {
 		if err := os.WriteFile(kidPath, []byte(kid), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := loadSigningKeyset(keysetPath, kidPath); err == nil {
+		if _, _, err := loadSigningKeys(keysetPath, kidPath); err == nil {
 			t.Fatal("plain active kid was accepted")
 		}
 	})
 	t.Run("missing files", func(t *testing.T) {
 		dir := t.TempDir()
-		if _, err := loadSigningKeyset(filepath.Join(dir, "missing-keyset"), filepath.Join(dir, "missing-kid")); err == nil {
+		if _, _, err := loadSigningKeys(filepath.Join(dir, "missing-keyset"), filepath.Join(dir, "missing-kid")); err == nil {
 			t.Fatal("missing signing files were accepted")
 		}
 	})
 }
 
-func TestRegistryValidatesPublications(t *testing.T) {
+func TestRegistryValidatesKeys(t *testing.T) {
 	t.Parallel()
 
-	registry := newKeyRegistry()
+	registry := newTestKeyRegistry(t, nil)
 	first := testJWK(t, "first-kid", true)
 	second := testJWKForAlgorithm(t, "second-kid", jose.ES384, true)
-	if err := registerTestKey(registry, first, time.Hour); err != nil {
-		t.Fatal(err)
+	registerTestKey(t, registry, first)
+	registerTestKey(t, registry, second)
+	if got := registry.keyset().Keys; len(got) != 2 || !verifyJWKPresent(got, first) || !verifyJWKPresent(got, second) {
+		t.Fatalf("remote keys = %#v, want %s and %s", got, first.KeyID, second.KeyID)
 	}
-	if err := registerTestKey(registry, second, time.Hour); err != nil {
-		t.Fatal(err)
-	}
-	if got := registry.keyset().Keys; len(got) != 2 || got[0].KeyID != first.KeyID || got[1].KeyID != second.KeyID {
-		t.Fatalf("aggregate key order = %v, want [%s %s]", keyIDs(got), first.KeyID, second.KeyID)
-	}
-	private := testJWK(t, "private", false)
-	if err := replaceTestPayload(registry, private.KeyID, rawPublishedKey(t, private, time.Hour)); err == nil {
-		t.Fatal("private key was accepted")
-	}
-	if err := replaceTestPayload(registry, second.KeyID, []byte(`{"jwk":`)); err == nil {
-		t.Fatal("malformed publication was accepted")
-	}
-	if err := replaceTestPayload(registry, second.KeyID, rawPublishedKey(t, second, -time.Second)); err == nil {
-		t.Fatal("publication with an expired lease was accepted")
+	if err := registry.replaceRemote("wrong-kid", second, time.Now().Add(time.Hour)); err == nil {
+		t.Fatal("mismatched key ID was accepted")
 	}
 	if got := registry.keyset().Keys; len(got) != 2 ||
 		!verifyJWKPresent(got, first) || !verifyJWKPresent(got, second) {
-		t.Fatalf("invalid publication changed aggregate: %#v", got)
+		t.Fatalf("invalid key changed aggregate: %#v", got)
 	}
+}
+
+func TestRegistryExpiresKeysAtTheirKVDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		registry := newTestKeyRegistry(t, nil)
+		key := testJWK(t, "expiring-kid", true)
+		if err := registry.replaceRemote(key.KeyID, key, time.Now().Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		if len(registry.keyset().Keys) != 1 {
+			t.Fatal("unexpired key was not available")
+		}
+		time.Sleep(time.Minute + time.Nanosecond)
+		synctest.Wait()
+		if registry.remote.Len() != 0 {
+			t.Fatal("background expiry did not remove the key")
+		}
+		if len(registry.keyset().Keys) != 0 {
+			t.Fatal("expired key remained available")
+		}
+	})
 }
 
 func TestAggregatesVerifyFlatKidsAndRotationOverlap(t *testing.T) {
 	t.Parallel()
-	now := time.Now()
-
 	type shard struct {
 		id    string
 		key   jose.JSONWebKey
@@ -290,19 +299,10 @@ func TestAggregatesVerifyFlatKidsAndRotationOverlap(t *testing.T) {
 		key := testJWKForAlgorithm(t, id+"-kid", algorithm, false)
 		shards = append(shards, shard{id: id, key: key, token: signTestToken(t, key)})
 	}
-	registries := []*keyRegistry{newKeyRegistry(), newKeyRegistry(), newKeyRegistry()}
+	registries := []*keyRegistry{newTestKeyRegistry(t, nil), newTestKeyRegistry(t, nil), newTestKeyRegistry(t, nil)}
 	for _, registry := range registries {
 		for _, shard := range shards {
-			leaseExpiresAt := now.Add(2 * time.Hour)
-			if shard.id == "shard-b" {
-				leaseExpiresAt = now.Add(time.Hour)
-			}
-			if err := registry.replace(shard.key.KeyID, publishedKey{
-				key:            shard.key.Public(),
-				leaseExpiresAt: leaseExpiresAt,
-			}); err != nil {
-				t.Fatal(err)
-			}
+			registerTestKey(t, registry, shard.key.Public())
 		}
 	}
 	for i, registry := range registries {
@@ -320,12 +320,7 @@ func TestAggregatesVerifyFlatKidsAndRotationOverlap(t *testing.T) {
 	newKey := testJWK(t, rotated.id+"-rotated-kid", false)
 	newToken := signTestToken(t, newKey)
 	for i, registry := range registries {
-		if err := registry.replace(newKey.KeyID, publishedKey{
-			key:            newKey.Public(),
-			leaseExpiresAt: now.Add(2 * time.Hour),
-		}); err != nil {
-			t.Fatal(err)
-		}
+		registerTestKey(t, registry, newKey.Public())
 		if len(registry.keyset().Keys) != len(shards)+1 || !verifyTestToken(registry.keyset(), newToken) {
 			t.Fatalf("aggregate %d did not preserve both rotation keys", i)
 		}
@@ -355,15 +350,12 @@ func verifyJWKPresent(keys []jose.JSONWebKey, want jose.JSONWebKey) bool {
 func TestJWKSAndDiscoveryAreConfiguredNotHostScoped(t *testing.T) {
 	t.Parallel()
 
-	registry := newKeyRegistry()
-	if err := registerTestKey(registry, testJWK(t, "one", true), time.Hour); err != nil {
-		t.Fatal(err)
-	}
-	if err := registerTestKey(registry, testJWKForAlgorithm(t, "two", jose.ES384, true), time.Hour); err != nil {
-		t.Fatal(err)
-	}
+	local := testJWK(t, "local", true)
+	registry := newTestKeyRegistry(t, []jose.JSONWebKey{local})
+	registerTestKey(t, registry, testJWK(t, "one", true))
+	registerTestKey(t, registry, testJWKForAlgorithm(t, "two", jose.ES384, true))
 	server := &identityKeysServer{
-		registry: registry,
+		registry: readyKeyRegistry{keyRegistry: registry},
 		jwksURL:  "https://exchange.example/.well-known/jwks.json",
 	}
 
@@ -400,7 +392,24 @@ func TestJWKSAndDiscoveryAreConfiguredNotHostScoped(t *testing.T) {
 	if got := jwksResponse.Header().Get("Cache-Control"); got != discoveryCacheControl {
 		t.Fatalf("JWKS Cache-Control = %q", got)
 	}
+	var keyset jose.JSONWebKeySet
+	if err := json.NewDecoder(jwksResponse.Body).Decode(&keyset); err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(keyset.Keys))
+	for _, key := range keyset.Keys {
+		got = append(got, key.KeyID)
+	}
+	if !reflect.DeepEqual(got, []string{"local", "one", "two"}) {
+		t.Fatalf("aggregate key IDs = %v", got)
+	}
 }
+
+type readyKeyRegistry struct {
+	*keyRegistry
+}
+
+func (readyKeyRegistry) isReady() bool { return true }
 
 func TestTokenExchangeRequestContract(t *testing.T) {
 	t.Parallel()
@@ -632,56 +641,18 @@ func signingKID(t *testing.T, key jose.JSONWebKey) string {
 	return base64.RawURLEncoding.EncodeToString(thumbprint)
 }
 
-func addJWKField(t *testing.T, payload []byte, name string, value any) []byte {
+func registerTestKey(t *testing.T, registry *keyRegistry, key jose.JSONWebKey) {
 	t.Helper()
-	var raw struct {
-		JWK map[string]any `json:"jwk"`
-	}
-	if err := json.Unmarshal(payload, &raw); err != nil {
+	if err := registry.replaceRemote(key.KeyID, key, time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	raw.JWK[name] = value
-	updated, err := json.Marshal(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return updated
 }
 
-func testPublishedKey(t *testing.T, key jose.JSONWebKey, leaseDuration time.Duration) []byte {
+func newTestKeyRegistry(t *testing.T, local []jose.JSONWebKey) *keyRegistry {
 	t.Helper()
-	publishedAt := time.Now()
-	payload, err := marshalPublicKey(key, publishedAt, publishedAt.Add(leaseDuration))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return payload
-}
-
-func rawPublishedKey(t *testing.T, key jose.JSONWebKey, leaseDuration time.Duration) []byte {
-	t.Helper()
-	publishedAt := time.Now()
-	payload, err := json.Marshal(publicKeyPublication{
-		PublishedAt:    publishedAt.Unix(),
-		LeaseExpiresAt: publishedAt.Add(leaseDuration).Unix(),
-		JWK:            key,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return payload
-}
-
-func replaceTestPayload(registry *keyRegistry, keyID string, payload []byte) error {
-	publication, err := decodePublishedKey(payload)
-	if err != nil {
-		return err
-	}
-	return registry.replace(keyID, publication)
-}
-
-func registerTestKey(registry *keyRegistry, key jose.JSONWebKey, leaseDuration time.Duration) error {
-	return registry.replace(key.KeyID, publishedKey{key: key, leaseExpiresAt: time.Now().Add(leaseDuration)})
+	registry := newKeyRegistry(local)
+	t.Cleanup(registry.Close)
+	return registry
 }
 
 func signTestToken(t *testing.T, key jose.JSONWebKey) string {

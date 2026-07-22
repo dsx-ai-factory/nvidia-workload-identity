@@ -2,16 +2,16 @@
 {{- $clusterName := required "global.spire.clusterName is required" .Values.global.spire.clusterName -}}
 {{- if .Values.identityKeys.enabled }}
 {{- $imageTag := .Values.identityKeys.image.tag | default .Values.global.imageTag | default .Chart.Version -}}
-{{- $mqttAuth := .Values.identityKeys.mqtt.auth -}}
-{{- $mqttAuthMode := required "identityKeys.mqtt.auth.mode is required" $mqttAuth.mode -}}
-{{- if not (has $mqttAuthMode (list "oauth2" "basic" "anonymous")) -}}
-{{- fail "identityKeys.mqtt.auth.mode must be oauth2, basic, or anonymous" -}}
+{{- $natsAuth := .Values.identityKeys.nats.auth -}}
+{{- $natsAuthMode := required "identityKeys.nats.auth.mode is required" $natsAuth.mode -}}
+{{- if not (has $natsAuthMode (list "none" "oauth2")) -}}
+{{- fail "identityKeys.nats.auth.mode must be none or oauth2" -}}
 {{- end -}}
-{{- $mqttCredentialsSecret := "" -}}
-{{- $mqttCredentialsKey := "" -}}
-{{- if ne $mqttAuthMode "anonymous" -}}
-{{- $mqttCredentialsSecret = required "identityKeys.mqtt.auth.credentialsSecret is required" $mqttAuth.credentialsSecret -}}
-{{- $mqttCredentialsKey = required "identityKeys.mqtt.auth.credentialsKey is required" $mqttAuth.credentialsKey -}}
+{{- $natsCredentialsSecret := "" -}}
+{{- $natsCredentialsKey := "" -}}
+{{- if eq $natsAuthMode "oauth2" -}}
+{{- $natsCredentialsSecret = required "identityKeys.nats.auth.credentialsSecret is required for oauth2" $natsAuth.credentialsSecret -}}
+{{- $natsCredentialsKey = required "identityKeys.nats.auth.credentialsKey is required for oauth2" $natsAuth.credentialsKey -}}
 {{- end -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -88,18 +88,16 @@ spec:
             - --signing-keyset=/run/secrets/dsx-identity-keys/keyset.json
             - --active-kid=/run/secrets/dsx-identity-keys-active-kid/active-kid.json
             - --shard-id={{ required "identityKeys.shardID is required" .Values.identityKeys.shardID }}
-            - --mqtt-broker={{ required "identityKeys.mqtt.brokerURL is required" .Values.identityKeys.mqtt.brokerURL }}
-            # Pod name keeps every active replica on a separate MQTT session.
-            - --mqtt-client-id=dsx-identity-keys-$(POD_NAME)
-            - --public-key-lease-ttl={{ .Values.identityKeys.publicKeyLeaseTTL }}
-            - --mqtt-auth-mode={{ $mqttAuthMode }}
-            {{- if ne $mqttAuthMode "anonymous" }}
-            - --mqtt-credentials-file=/run/secrets/dsx-identity-keys-mqtt/credentials.json
-            {{- end }}
-            {{- if eq $mqttAuthMode "oauth2" }}
-            - --mqtt-oauth-token-url={{ required "identityKeys.mqtt.auth.oauth2.tokenURL is required" $mqttAuth.oauth2.tokenURL }}
-            - --mqtt-oauth-scopes={{ join "," $mqttAuth.oauth2.scopes }}
-            - --mqtt-oauth-username={{ required "identityKeys.mqtt.auth.oauth2.username is required" $mqttAuth.oauth2.username }}
+            - --nats-server={{ required "identityKeys.nats.serverURL is required" .Values.identityKeys.nats.serverURL }}
+            - --nats-client-name=dsx-identity-keys-$(POD_NAME)
+            - --public-key-ttl={{ .Values.identityKeys.publicKeyTTL }}
+            - --nats-kv-bucket={{ .Values.identityKeys.nats.kv.bucket }}
+            - --nats-kv-replicas={{ .Values.identityKeys.nats.kv.replicas }}
+            - --nats-auth-mode={{ $natsAuthMode }}
+            {{- if eq $natsAuthMode "oauth2" }}
+            - --nats-credentials-file=/run/secrets/dsx-identity-keys-nats/credentials.json
+            - --nats-oauth-issuer-url={{ required "identityKeys.nats.auth.issuerURL is required" $natsAuth.issuerURL }}
+            - --nats-oauth-scopes={{ join "," $natsAuth.scopes }}
             {{- end }}
             - --log-level={{ .Values.observability.logLevel }}
           securityContext:
@@ -119,9 +117,9 @@ spec:
             - name: active-kid
               mountPath: /run/secrets/dsx-identity-keys-active-kid
               readOnly: true
-            {{- if ne $mqttAuthMode "anonymous" }}
-            - name: mqtt-auth
-              mountPath: /run/secrets/dsx-identity-keys-mqtt
+            {{- if eq $natsAuthMode "oauth2" }}
+            - name: nats-auth
+              mountPath: /run/secrets/dsx-identity-keys-nats
               readOnly: true
             {{- end }}
           # DSX Identity Keys owns its Pod ports, including the metrics listener.
@@ -169,13 +167,13 @@ spec:
             items:
               - key: active-kid.json
                 path: active-kid.json
-        {{- if ne $mqttAuthMode "anonymous" }}
-        - name: mqtt-auth
+        {{- if eq $natsAuthMode "oauth2" }}
+        - name: nats-auth
           secret:
-            secretName: {{ $mqttCredentialsSecret }}
+            secretName: {{ $natsCredentialsSecret }}
             defaultMode: 0440
             items:
-              - key: {{ $mqttCredentialsKey }}
+              - key: {{ $natsCredentialsKey }}
                 path: credentials.json
         {{- end }}
 ---

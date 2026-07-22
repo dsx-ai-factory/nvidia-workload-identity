@@ -16,7 +16,7 @@
 - Centralize shared parsing and validation contracts. Do not copy equivalent URL validation between components.
 - Let owning clients parse configured dependency URLs. The URL scheme selects the transport. Do not add plaintext override flags or shared URL-policy helpers.
 - Add compatibility code only when a released contract requires it.
-- Add concise comments where intent is not obvious. Explain why Go code needs an ordering, ownership rule, security check, or workaround. Do not narrate self-explanatory syntax.
+- Add concise comments for every non-obvious behavior. Explain why code or configuration needs an ordering, ownership rule, security check, workaround, or unusual setting. Do not narrate self-explanatory syntax.
 - Keep documentation factual and concise, without marketing language or decorative tone. Keep README topology and request-flow diagrams current.
 - Plans record work and verification, not architecture. Record each intentional design decision in the closest durable README, diagram, configuration comment, or code comment.
 - Keep one primary explanation for each decision. Link to it when needed instead of repeating it, and do not turn design documentation into walls of text.
@@ -56,13 +56,14 @@
 - Every DPU and every Kubernetes Pod is operator-owned. The only tenant-owned resources are standalone NICo-managed bare-metal hosts and KubeVirt VMs, both declared by LaunchLayer. There are no tenant-owned Pods, Kubernetes workers, or DPUs.
 - KubeVirt VMs run on operator-owned bare-metal workers. The virt-launcher Pod is an operator Pod, while the VM identity uses the tenant supplied dynamically by its LaunchLayer source CR.
 - Every identity shard configures its own internal SPIRE trust domain and cluster name.
-- DSX Identity Keys public-key propagation is flat. Every DSX Identity Keys instance in one Event Bus topic space uses a globally unique shard ID, publishes only its local public keys at `dsx-identity-keys/v1/pub-keys/shard/<shard-id>/kid/<kid>`, subscribes to `dsx-identity-keys/v1/pub-keys/shard/+/kid/+`, retains all valid public keys by globally unique `kid`, and serves the aggregate JWKS.
+- DSX Identity Keys public-key propagation is flat. Every instance in one Event Bus account uses a globally unique shard ID, stores only its local public keys in one shared NATS KV bucket at `shard.<shard-id>.kid.<kid>`, watches the complete bucket, retains all valid public keys by globally unique `kid`, and serves the aggregate JWKS.
 - Do not add bundle endpoints, federated trust, federation CA synchronization, or federation-only routes and certificates.
 - Each DSX Identity Keys instance accepts only SPIRE JWT-SVIDs issued by its local SPIRE and rejects SPIRE JWT-SVIDs issued by every nonlocal shard.
-- The DSX Event Bus and OAuth2 provider are external to the identity chart. Local E2E deploys one instance in k1. Data Hall shards do not deploy either component.
-- Every DSX Identity Keys instance uses OAuth2 client credentials for Event Bus MQTT with only `dsx-identity-keys.>` publish/subscribe access. Anonymous broker access is disabled.
-- Run two active DSX Identity Keys replicas per shard with unique per-Pod MQTT client IDs. Rolling updates and Pod disruption must keep one replica available.
-- Expose only the MQTT and OAuth token endpoints required by DSX Identity Keys instances placed outside the Event Bus cluster.
+- The DSX Event Bus and OAuth2 provider are external to the identity chart. Data Hall shards do not deploy either component. Local E2E uses one unauthenticated NATS server with in-memory JetStream for KV and does not deploy DSX Exchange or an OAuth2 provider.
+- DSX Identity Keys supports unauthenticated NATS and OAuth2 client credentials using the DSX Exchange native NATS token-auth login shape. OAuth mode discovers the token endpoint from the configured issuer and passes the access token through `nats.TokenHandler`. It does not support basic authentication. Production DSX Exchange deployments place DSX Identity Keys in a dedicated NATS account, whose account boundary provides isolation.
+- DSX Identity Keys uses the NATS KV library. Every instance starts an updates-only watch before loading `History`, so concurrent updates queue while current values reconstruct the aggregate. If the watcher closes, its replacement follows the same watch-before-history order. Each instance republishes only its local keys every quarter of the bucket TTL. KV expiry removes keys after every replica for their shard stops refreshing them.
+- Run two active DSX Identity Keys replicas per shard. Rolling updates and Pod disruption must keep one replica available.
+- Expose only the NATS client endpoint required by local DSX Identity Keys instances in the other E2E cluster.
 - Kyverno is external. Its DSX identity policies belong in the identity chart. The Kyverno runtime does not.
 - Relying parties use the aggregate JWKS from any reachable DSX Identity Keys instance. Repository validation deploys OpenBao in k1 only for convenience.
 - Cross-shard trust exists only through exchanged DSX tokens and propagated public keys.
@@ -112,11 +113,11 @@ spiffe://<operator-tenant>.ds9.dsx.nvid.id/host/<id>/pod/<uuid>
 - The same configured operator tenant covers operator DPUs, operator Pods, and operator bare-metal hosts. Enforce that ownership when SPIRE registrations are created. A standalone tenant-facing host subject instead carries the dynamic tenant ID supplied by its LaunchLayer source CR. Kubernetes Pod subjects use the host resource type and Kubernetes node name.
 - DSX Identity Keys is tenant-agnostic. It must not receive, configure, distinguish, authorize, or otherwise depend on the operator tenant or any individual tenant. It verifies locally issued SPIRE JWT-SVIDs, validates the common subject grammar, preserves the tenant already present in the subject, and changes only the subject and issuer encoding before signing the DSX JWT.
 - Each shard loads a private signing-keyset Secret containing `keyset.json` and a separate active-keyset Secret containing `active-kid.json` as `{"active_kid":"<kid>","alg":"<JOSE algorithm>"}`. Every tenant in that shard uses them. External secret automation requests the Transit signing-key export with `format=pem` and renders its versioned private keys into the keyset array. DSX Identity Keys derives each `kid` from its public JWK thumbprint.
-- Publish each public JWK at `dsx-identity-keys/v1/pub-keys/shard/<shard-id>/kid/<kid>` and store the aggregate only by globally unique `kid`. Refresh each lease often enough for at least three further publish attempts before expiry.
-- Every `kid` is globally unique and never reused. Derive local IDs from the go-jose SHA-256 public JWK thumbprint and preserve IDs received in valid remote publications.
+- Store each public JWK at `shard.<shard-id>.kid.<kid>` in the shared NATS KV bucket and store the aggregate only by globally unique `kid`. Refresh each entry often enough for at least three further writes before the bucket TTL expires it.
+- Every `kid` is globally unique and never reused. Derive local IDs from the go-jose SHA-256 public JWK thumbprint and preserve IDs received in valid remote KV entries.
 - Apply the active keyset's configured signing algorithm to every local key and validate that it matches the key material. Discovery must advertise the algorithms present in the aggregate JWKS.
-- Validate `kid` uniqueness within each local signing keyset. Retained publications replace the globally unique `kid` they address.
-- Rotation adds the new Transit version to the keyset while the old kid remains active, waits for public-key propagation, then changes the active-kid Secret. After old JWTs expire, advancing the Transit minimum valid version removes the old key, and its publication lease expires.
+- Validate `kid` uniqueness within each local signing keyset. Accepted KV entries replace the globally unique `kid` they address.
+- Rotation adds the new Transit version to the keyset while the old kid remains active, waits for public-key propagation, then changes the active-kid Secret. After old JWTs expire, advancing the Transit minimum valid version removes the old key, and its KV entry expires.
 
 ## Controller and metadata
 
@@ -203,7 +204,7 @@ spiffe://<operator-tenant>.ds9.dsx.nvid.id/host/<id>/pod/<uuid>
 - Stable fixtures may represent external DPU and bare-metal boundaries. Local E2E need not emulate DPU hardware, a bare-metal operating system, physical link-local interception, or NICo or Carbide internals.
 - Keep fixture-only registrations separate from controller-managed registrations. Never accept a fixture parent or subject as evidence for the deployed association or identity shape.
 - Local E2E may expose the real DSX IMDS directly as the external intercept and passthrough boundary. Keep the deployed flow documented first, and do not claim that the fixture proves physical integration.
-- Focused tests cover multiple flat DSX Identity Keys shards, rotation overlap, retained-state
+- Focused tests cover multiple flat DSX Identity Keys shards, rotation overlap, NATS KV replay and watch
   reconstruction after restart, and complete aggregates at multiple DSX Identity Keys instances without
   expanding the local E2E topology.
 - E2E must prove:
@@ -214,10 +215,10 @@ spiffe://<operator-tenant>.ds9.dsx.nvid.id/host/<id>/pod/<uuid>
   - operator worker-host IMDS returns the configured operator tenant and exact node ID.
   - the virt-launcher Pod's operator entry and dynamically tenant-supplied VM entry have the same operator-tenant host-agent parent. Real Pod token delivery and VM metadata delivery prove issuance through that agent.
   - mutual rejection of the other shard's SPIRE JWT-SVIDs.
-  - OAuth2-authenticated Event Bus MQTT connectivity and retained publication from both DSX Identity Keys instances.
+  - unauthenticated NATS connectivity and KV entries from both DSX Identity Keys instances.
   - both aggregate JWKS endpoints contain every valid published `kid` and verify either shard's token.
   - real k2 token login to the external OpenBao validation deployment with exact policies and access.
-- Focused tests must prove globally unique key rotation and publication lease expiry
+- Focused tests must prove globally unique key rotation and KV entry expiry
   deterministically without waiting for wall-clock time.
 - CI-required validation and E2E jobs must not be manual or allowed to fail.
 - Run `make validate` and the full E2E lifecycle after code or configuration changes. Use repository-pinned tool and dependency versions.

@@ -1,0 +1,14 @@
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: TCPRoute
+metadata:
+  name: nats-client
+  namespace: dsx-identity
+spec:
+  parentRefs:
+    - name: k1-gateway
+      namespace: envoy-gateway-system
+      sectionName: nats
+  rules:
+    - backendRefs:
+        - name: nats
+          port: 4222

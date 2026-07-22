@@ -20,13 +20,10 @@ spire:
       parentIDTemplate: 'spiffe://{{ .TrustDomain }}/spire/agent/{{ if eq .NodeMeta.Name "k1-control-plane" }}k8s_psat/{{ .ClusterName }}/{{ .NodeMeta.UID }}{{ else }}dsx_imds/tenant/$OPERATOR_TENANT/host/{{ .NodeMeta.Name }}{{ end }}'
 identityKeys:
   shardID: k1
-  mqtt:
-    brokerURL: tcp://nats:1883
+  nats:
+    serverURL: nats://nats:4222
     auth:
-      mode: oauth2
-      credentialsSecret: dsx-identity-keys-mqtt-oauth
-      oauth2:
-        tokenURL: http://keycloak-service.dsx-identity.svc.cluster.local:8080/realms/event-bus/protocol/openid-connect/token
+      mode: none
 
 podTokenFetcher:
   # The k1 E2E workload declares its token fetcher explicitly so this shard

@@ -45,7 +45,7 @@ configuration comments, and `AGENTS.md`.
 - [x] Install each identity chart once and use its normal DSX Identity Keys deployment.
 - [x] Confine the local `k8s_psat` agent and DSX Identity Keys Pod to the Phase 0 seed
   node while worker Pods use the emulated `dsx_imds` host agent.
-- [x] Keep the Event Bus, OAuth2 provider, Kyverno runtime, KubeVirt, OpenBao,
+- [x] Keep NATS KV, Kyverno runtime, KubeVirt, OpenBao,
   and local clients outside the identity chart.
 - [x] Pass SPIRE deployment and datastore choices through to the official chart.
 - [x] Separate Helm deployments from raw fixture application and remove
@@ -56,7 +56,7 @@ configuration comments, and `AGENTS.md`.
 - [x] Assert live SPIRE subjects, parents, selectors, hints, and tenant sources.
 - [x] Prove real Pod, DPU token-file, worker-host IMDS, and KubeVirt VM delivery.
 - [x] Prove local SPIRE issuer rejection, aggregate JWKS verification, OpenBao
-  policy selection, retained-state reconstruction, key rotation, and lease
+  policy selection, NATS KV replay and watch reconstruction, key rotation, and lease
   expiry.
 - [x] Keep the deployed architecture and the local emulation boundary separate
   in the README diagrams and prose.
