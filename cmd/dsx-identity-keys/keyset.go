@@ -6,13 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rsa"
-	"crypto/x509"
-
-	// Register SHA-256 for go-jose's crypto.Hash-based JWK thumbprints.
-	_ "crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
-	"encoding/pem"
 	"fmt"
 	"maps"
 	"os"
@@ -22,6 +16,8 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/jellydator/ttlcache/v3"
+
+	"dsx-identity/internal/signingkey"
 )
 
 type signingKeyset struct {
@@ -102,48 +98,19 @@ func loadSigningKeyset(keysetPath, activeKIDPath string) (*signingKeyset, error)
 }
 
 func parsePrivateSigningKey(encoded string, algorithm jose.SignatureAlgorithm) (jose.JSONWebKey, error) {
-	block, rest := pem.Decode([]byte(encoded))
-	if block == nil {
-		return jose.JSONWebKey{}, fmt.Errorf("decode PEM")
-	}
-	if len(rest) != 0 {
-		return jose.JSONWebKey{}, fmt.Errorf("PEM contains trailing data")
-	}
-	var key any
-	var err error
-	switch block.Type {
-	case "EC PRIVATE KEY":
-		key, err = x509.ParseECPrivateKey(block.Bytes)
-	case "RSA PRIVATE KEY":
-		key, err = x509.ParsePKCS1PrivateKey(block.Bytes)
-	case "PRIVATE KEY":
-		key, err = x509.ParsePKCS8PrivateKey(block.Bytes)
-	default:
-		return jose.JSONWebKey{}, fmt.Errorf("unsupported PEM block type %q", block.Type)
-	}
+	key, err := signingkey.ParsePrivatePEM(encoded)
 	if err != nil {
-		return jose.JSONWebKey{}, fmt.Errorf("parse %s: %w", block.Type, err)
-	}
-	if !slices.Contains(supportedSignatureAlgorithms(key), algorithm) {
-		return jose.JSONWebKey{}, fmt.Errorf("algorithm %q is incompatible with private key type %T", algorithm, key)
-	}
-	private := jose.JSONWebKey{Key: key}
-	public := private.Public()
-	thumbprint, err := public.Thumbprint(crypto.SHA256)
-	if err != nil {
-		return jose.JSONWebKey{}, fmt.Errorf("compute public JWK thumbprint: %w", err)
-	}
-	kid := base64.RawURLEncoding.EncodeToString(thumbprint)
-	jwk := jose.JSONWebKey{
-		Key:       key,
-		KeyID:     kid,
-		Algorithm: string(algorithm),
-		Use:       "sig",
-	}
-	if _, err := validateSigningKey(&jwk, false); err != nil {
 		return jose.JSONWebKey{}, err
 	}
-	return jwk, nil
+	if !slices.Contains(supportedSignatureAlgorithms(key.Key), algorithm) {
+		return jose.JSONWebKey{}, fmt.Errorf("algorithm %q is incompatible with private key type %T", algorithm, key.Key)
+	}
+	key.Algorithm = string(algorithm)
+	key.Use = "sig"
+	if _, err := validateSigningKey(&key, false); err != nil {
+		return jose.JSONWebKey{}, err
+	}
+	return key, nil
 }
 
 func validateSigningKey(key *jose.JSONWebKey, publicOnly bool) (jose.SignatureAlgorithm, error) {

@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/elliptic"
 	_ "crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"testing"
 
@@ -49,5 +51,80 @@ func TestGenerateKeyset(t *testing.T) {
 	}
 	if other.ActiveKID == result.ActiveKID {
 		t.Fatal("independently generated keys reused a kid")
+	}
+}
+
+func TestAddKey(t *testing.T) {
+	t.Parallel()
+
+	initial, err := generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, err := json.Marshal(initial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := add(bytes.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Keys) != 2 || result.Keys[0] != initial.Keys[0] {
+		t.Fatalf("added keyset = %#v, want original key followed by a new key", result)
+	}
+	if result.ActiveKID != initial.ActiveKID || result.Algorithm != jose.ES256 {
+		t.Fatalf("added keyset = %#v, want original active ES256 key", result)
+	}
+	ids, err := thumbprints(result.Keys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 2 || ids[0] != initial.ActiveKID || ids[0] == ids[1] {
+		t.Fatalf("thumbprints = %v, want original and new unique kids", ids)
+	}
+}
+
+func TestRejectInvalidAddInput(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]string{
+		"empty":              `{}`,
+		"malformed":          `{"keys":[`,
+		"unsupported alg":    `{"active_kid":"kid","alg":"RS256","keys":["key"]}`,
+		"missing active kid": `{"active_kid":"missing","alg":"ES256","keys":[]}`,
+	}
+	for name, input := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := add(bytes.NewBufferString(input)); err == nil {
+				t.Fatal("invalid keyset was accepted")
+			}
+		})
+	}
+}
+
+func TestCommands(t *testing.T) {
+	t.Parallel()
+
+	initial, err := generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, err := json.Marshal(initial)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, command := range []string{"generate", "add", "thumbprints"} {
+		result, err := execute(command, bytes.NewReader(input))
+		if err != nil {
+			t.Fatalf("%s: %v", command, err)
+		}
+		if result == nil {
+			t.Fatalf("%s returned no result", command)
+		}
+	}
+	if _, err := execute("invalid", bytes.NewReader(input)); err == nil {
+		t.Fatal("unknown command was accepted")
 	}
 }
