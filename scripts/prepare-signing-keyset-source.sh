@@ -26,7 +26,7 @@ write_existing() {
 
 generate_sources() {
     local generated
-    generated=$(cd "${SCRIPT_DIR}/.." && go run ./cmd/generate-signing-keyset)
+    generated=$(cd "${SCRIPT_DIR}/.." && go run ./cmd/generate-signing-keyset generate)
     jq -jc '{keys}' <<<"${generated}" >"${TEMP_DIR}/keyset.json"
     jq -jc '{active_kid, alg}' <<<"${generated}" >"${TEMP_DIR}/active-kid.json"
     log_info "Generated the DSX Identity Keys signing keyset source for ${CONTEXT}"
