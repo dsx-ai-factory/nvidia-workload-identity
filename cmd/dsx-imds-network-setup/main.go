@@ -18,6 +18,8 @@ import (
 	"github.com/google/nftables/binaryutil"
 	"github.com/google/nftables/expr"
 	"github.com/vishvananda/netlink"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 	"golang.org/x/sys/unix"
 
 	"dsx-identity/internal/telemetry"
@@ -82,7 +84,14 @@ func (podNetworkSetup) Setup(ctx context.Context) error {
 }
 
 func run(ctx context.Context, setup networkSetup) error {
-	if err := setup.Setup(ctx); err != nil {
+	setupCtx, span := otel.Tracer("dsx-imds-network-setup").Start(ctx, "configure-pod-network")
+	err := setup.Setup(setupCtx)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "network setup failed")
+	}
+	span.End()
+	if err != nil {
 		if ctx.Err() != nil {
 			return nil
 		}

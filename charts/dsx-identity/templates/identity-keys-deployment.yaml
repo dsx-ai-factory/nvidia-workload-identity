@@ -56,7 +56,7 @@ spec:
         runAsUser: 1000
         seccompProfile:
           type: RuntimeDefault
-      {{- with .Values.identityKeys.imagePullSecrets }}
+      {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}

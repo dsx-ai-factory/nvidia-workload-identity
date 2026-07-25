@@ -4,6 +4,11 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 type fakeNetworkSetup struct {
@@ -54,5 +59,34 @@ func TestRunTreatsCancellationDuringSetupAsShutdown(t *testing.T) {
 
 	if err := run(ctx, fakeNetworkSetup{err: context.Canceled}); err != nil {
 		t.Fatalf("run error = %v, want nil", err)
+	}
+}
+
+func TestRunTracesNetworkSetup(t *testing.T) {
+	previousProvider := otel.GetTracerProvider()
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		otel.SetTracerProvider(previousProvider)
+		if err := provider.Shutdown(context.Background()); err != nil {
+			t.Errorf("shut down trace provider: %v", err)
+		}
+	})
+
+	want := errors.New("setup failed")
+	if err := run(context.Background(), fakeNetworkSetup{err: want}); !errors.Is(err, want) {
+		t.Fatalf("run error = %v, want %v", err, want)
+	}
+
+	spans := recorder.Ended()
+	if len(spans) != 1 {
+		t.Fatalf("ended spans = %d, want 1", len(spans))
+	}
+	if got := spans[0].Name(); got != "configure-pod-network" {
+		t.Errorf("span name = %q, want configure-pod-network", got)
+	}
+	if got := spans[0].Status().Code; got != codes.Error {
+		t.Errorf("span status = %v, want error", got)
 	}
 }

@@ -18,6 +18,8 @@
 - Add compatibility code only when a released contract requires it.
 - Add concise comments for every non-obvious behavior. Explain why code or configuration needs an ordering, ownership rule, security check, workaround, or unusual setting. Do not narrate self-explanatory syntax.
 - Keep documentation factual and concise, without marketing language or decorative tone. Keep README topology and request-flow diagrams current.
+- Do not speculate about or prescribe future design work. State only current
+  behavior and confirmed gaps.
 - Plans record work and verification, not architecture. Record each intentional design decision in the closest durable README, diagram, configuration comment, or code comment.
 - Keep one primary explanation for each decision. Link to it when needed instead of repeating it, and do not turn design documentation into walls of text.
 - Do not use em dashes, en dashes, curly quotes, or semicolons in prose or comments. Use plain punctuation.
@@ -192,6 +194,13 @@ spiffe://<operator-tenant>.ds9.dsx.nvid.id/host/<id>/pod/<uuid>
   unless the project requirement depends on the deployed integration.
 - Do not validate third-party behavior beyond the exact project contract that uses it.
 - Tests assert observed runtime behavior only. Do not inspect YAML, templates, scripts, source, or rendered manifests as an E2E proxy.
+- Never add meta-tests that grep, parse, or inspect source code, templates,
+  rendered manifests, YAML, configuration, or scripts to assert application
+  behavior or wiring. Prove the contract through executable unit tests,
+  integration tests, or observed runtime output.
+- Static linters, schema validation, and deployment render checks may validate
+  syntax and deployability only. Do not treat them as evidence that runtime
+  behavior works.
 - Tests must be deterministic. Do not accept rerun-dependent results.
 - Do not assert Pod or controller counts, readiness, rollout status, or log content as proxies for behavior. Use the client, service, identity, and policy contracts under test.
 - Do not use application or identity fixture containers as generic test runners. Run external-client checks from the test process. Execute a probe in a fixture only when its container-local interface is the contract under test.

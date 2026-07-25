@@ -8,6 +8,9 @@ global:
     clusterName: ""
     jwtIssuer: ""
 
+# Registry credentials shared by chart-owned DSX images.
+imagePullSecrets: []
+
 spire:
   enabled: true
   spire-server:
@@ -28,6 +31,10 @@ spire:
       instrumentation.opentelemetry.io/inject-sdk: dsx-obs/default-instrumentation
       instrumentation.opentelemetry.io/container-names: spire-server
       sidecar.opentelemetry.io/inject: dsx-obs/default-sidecar
+    # SPIRE 1.13 provides native Prometheus metrics but no tracing support.
+    telemetry:
+      prometheus:
+        enabled: true
     controllerManager:
       expandEnv: true
       # The official SPIRE chart owns this Pod field. Set it to the same value
@@ -64,6 +71,11 @@ spire:
   # Every worker uses its externally provisioned dsx_imds host agent.
   spire-agent:
     enabled: false
+    # Local fixtures that enable the bundled agent retain SPIRE's native
+    # Prometheus producer. Production host and DPU agents are external.
+    telemetry:
+      prometheus:
+        enabled: true
   spiffe-oidc-discovery-provider:
     enabled: false
   spiffe-csi-driver:
@@ -89,8 +101,12 @@ observability:
   # One level configures every chart-owned first-party Go process.
   logLevel: info
   # Standard OTel environment settings shared by first-party applications.
-  # The DSX Operator injection supplies its resource and endpoint settings.
-  env: {}
+  # IPv4 loopback avoids the unsupported IPv6 localhost resolved by the SDK.
+  env:
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://127.0.0.1:4318
+    OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+    OTEL_LOGS_EXPORTER: none
+    OTEL_TRACES_EXPORTER: otlp
   # Additional annotations are merged with SDK injection annotations.
   podAnnotations: {}
   metrics:
@@ -111,7 +127,6 @@ identityKeys:
     repository: nvcr.io/0837451325059433/components-dev/dsx-identity-keys
     tag: ""
     pullPolicy: IfNotPresent
-  imagePullSecrets: []
   nodeSelector: {}
   tolerations: []
   replicas: 2
