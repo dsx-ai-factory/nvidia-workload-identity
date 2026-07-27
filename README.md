@@ -606,9 +606,20 @@ link-local metadata traffic.
 ## Observability
 
 First-party Go processes emit JSON logs to stdout or stderr. Chart-owned metric
-endpoints support Prometheus discovery. Injected processes export traces
-through the SDK and sidecar collector installed by the DSX observability stack.
-Structured allow, deny, and dependency events never include credentials.
+endpoints support Prometheus discovery. First-party processes export traces
+through their SDK and the sidecar collector installed by the DSX observability
+stack. Structured allow, deny, and dependency events never include
+credentials.
+
+SPIRE server, controller-manager, and the optional local SPIRE agent expose
+their native Prometheus metrics through chart-owned monitors. SPIRE 1.13.2
+does not produce traces. SPIFFE CSI Driver, CSI node-driver-registrar, and
+the `socat` proxy expose no native application telemetry. Their health checks,
+container logs, and platform container metrics remain available.
+
+The DSX sidecar collector configuration has a trace pipeline and no metrics
+pipeline. `dsx-token-fetcher`, `metadata-service`, and
+`dsx-imds-network-setup` export traces and do not expose application metrics.
 
 ```yaml
 observability:

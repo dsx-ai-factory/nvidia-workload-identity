@@ -1,3 +1,83 @@
+{{/*
+SPIRE server and controller-manager share one Pod and expose separate native
+Prometheus listeners. The upstream chart does not expose those listeners on a
+Service, so this Service makes both producers discoverable without copying the
+upstream StatefulSet.
+*/}}
+{{- if and .Values.spire.enabled .Values.observability.metrics.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-spire-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dsx-identity.labels" (dict "root" . "name" "spire-metrics") | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: server
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: spire-server
+      port: 9988
+      targetPort: prom
+    - name: controller-manager
+      port: 8082
+      targetPort: prom-cm
+---
+{{- if .Values.observability.metrics.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Release.Name }}-spire
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dsx-identity.labels" (dict "root" . "name" "spire-metrics") | nindent 4 }}
+    {{- with .Values.observability.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "dsx-identity.selectorLabels" (dict "root" . "name" "spire-metrics") | nindent 6 }}
+  endpoints:
+    - port: spire-server
+      path: /metrics
+      interval: {{ .Values.observability.metrics.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.observability.metrics.serviceMonitor.scrapeTimeout }}
+    - port: controller-manager
+      path: /metrics
+      interval: {{ .Values.observability.metrics.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.observability.metrics.serviceMonitor.scrapeTimeout }}
+---
+{{- end }}
+{{- end }}
+{{/*
+The optional bundled SPIRE agent is a local fixture. Its native exporter runs
+once per DaemonSet Pod, so PodMonitor discovery preserves each node target.
+*/}}
+{{- if and .Values.spire.enabled (index .Values.spire "spire-agent").enabled .Values.observability.metrics.enabled .Values.observability.metrics.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ .Release.Name }}-spire-agent
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dsx-identity.labels" (dict "root" . "name" "spire-agent-metrics") | nindent 4 }}
+    {{- with .Values.observability.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  podMetricsEndpoints:
+    - port: prom
+      path: /metrics
+      interval: {{ .Values.observability.metrics.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.observability.metrics.serviceMonitor.scrapeTimeout }}
+---
+{{- end }}
 {{- if and .Values.identityController.enabled .Values.observability.metrics.enabled }}
 {{- $controllerName := include "dsx-identity.identityControllerFullname" . }}
 apiVersion: v1

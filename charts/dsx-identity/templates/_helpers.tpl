@@ -76,10 +76,7 @@ the Service. Injected processes do not open metrics listeners in shared Pods.
 {{- $root := .root -}}
 {{- $defaults := dict -}}
 {{- $_ := set $defaults "OTEL_SERVICE_NAME" .serviceName -}}
-{{- $_ := set $defaults "OTEL_TRACES_EXPORTER" "otlp" -}}
 {{- $_ := set $defaults "OTEL_METRICS_EXPORTER" .metricsExporter -}}
-{{- $_ := set $defaults "OTEL_LOGS_EXPORTER" "none" -}}
-{{- $_ := set $defaults "OTEL_EXPORTER_OTLP_PROTOCOL" "grpc" -}}
 {{- /* Standard OTel settings override defaults before chart-owned metrics. */ -}}
 {{- $environment := mergeOverwrite $defaults (deepCopy $root.Values.observability.env) -}}
 {{- if eq .metricsExporter "prometheus" -}}
