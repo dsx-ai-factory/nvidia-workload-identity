@@ -250,6 +250,82 @@ Kubernetes node. A KubeVirt VM runs in an operator-owned virt-launcher Pod, so
 the Pod keeps its operator identity while its metadata sidecar selects the
 dynamically tenant-supplied VM SVID from the same operator host Workload API.
 
+### Static entry parentage
+
+The repository produces four static entry forms. The DSX Identity Controller
+owns the DPU, standalone host, and VM `ClusterStaticEntry` objects. The official
+SPIRE controller-manager derives each Pod `ClusterStaticEntry` from the
+chart-owned `ClusterSPIFFEID` template and the matched Kubernetes Pod.
+
+This diagram shows registration data only. Hexagons are input objects,
+stadiums are parent agent IDs, and rectangles are actual
+`ClusterStaticEntry` objects. Parent agent IDs are established separately
+through node attestation. They are not registration entries.
+
+```mermaid
+%%{init: {"flowchart": {"defaultRenderer": "elk"}, "elk": {"nodePlacementStrategy": "SIMPLE"}}}%%
+flowchart TB
+
+  subgraph DPUParented["Entries parented to a dsx_dpu agent ID"]
+    direction LR
+
+    subgraph DPULane["DPU"]
+      direction TB
+      DPUCR{{"INPUT CR<br/>kind: DPU<br/>id: metadata.name"}}
+      DPUParent(["PARENT AGENT ID<br/>type: dsx_dpu<br/>spiffe://{td}/spire/agent/dsx_dpu/{metadata.name}"])
+      DPUEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: DSX Identity Controller<br/>subject: /tenant/{operator}/service/dsx/dpu/{metadata.name}<br/>hint: dsx-dpu<br/>selectors: DPU token-fetcher Unix selectors"]
+      DPUCR -->|"derives subject"| DPUEntry
+      DPUParent -->|"spec.parentID"| DPUEntry
+    end
+
+    subgraph HostLane["Standalone tenant-facing bare-metal host"]
+      direction TB
+      HostSource{{"INPUT CR<br/>kind: LaunchLayerSourceFixture<br/>spec.type: host"}}
+      HostParent(["PARENT AGENT ID<br/>type: dsx_dpu<br/>spiffe://{td}/spire/agent/dsx_dpu/{spec.parentID}"])
+      HostEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: DSX Identity Controller<br/>subject: /tenant/{spec.tenantID}/service/dsx/host/{spec.resourceID}[/role/{spec.role}]<br/>hint: dsx-imds<br/>selectors: DPU metadata runtime selectors"]
+      HostSource -->|"derives subject"| HostEntry
+      HostParent -->|"spec.parentID"| HostEntry
+    end
+  end
+
+  subgraph HostParented["Entries parented to an operator worker dsx_imds agent ID"]
+    direction LR
+
+    subgraph PodLane["Operator Kubernetes Pod"]
+      direction TB
+      PodTemplate{{"INPUT TEMPLATE CR<br/>kind: ClusterSPIFFEID<br/>owner: identity chart"}}
+      PodObject{{"MATCHED OBJECT<br/>kind: Pod<br/>label: service=dsx"}}
+      PodParent(["PARENT AGENT ID<br/>type: dsx_imds<br/>spiffe://{td}/spire/agent/dsx_imds/tenant/{operator}/host/{Pod spec.nodeName}"])
+      PodEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: SPIRE controller-manager<br/>subject: /tenant/{operator}/service/dsx/host/{Pod spec.nodeName}/pod/{Pod metadata.uid}[/role/{role}]<br/>hint: dsx-pod<br/>selectors: matched Kubernetes Pod"]
+      PodTemplate -->|"supplies templates"| PodEntry
+      PodObject -->|"supplies metadata"| PodEntry
+      PodParent -->|"parentIDTemplate"| PodEntry
+    end
+
+    subgraph VMLane["Tenant-owned KubeVirt VM"]
+      direction TB
+      VMSource{{"INPUT CR<br/>kind: LaunchLayerSourceFixture<br/>spec.type: vm"}}
+      VMParent(["PARENT AGENT ID<br/>type: dsx_imds<br/>spiffe://{td}/spire/agent/dsx_imds/tenant/{operator}/host/{spec.parentID}"])
+      VMEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: DSX Identity Controller<br/>subject: /tenant/{spec.tenantID}/service/dsx/vm/{spec.resourceID}[/role/{spec.role}]<br/>hint: dsx-imds-vm<br/>selectors: holder namespace, service account, and optional Pod UID"]
+      VMSource -->|"derives subject"| VMEntry
+      VMParent -->|"spec.parentID"| VMEntry
+    end
+  end
+```
+
+The external DPU and NICo integration must provision a SPIRE registration for
+the operator worker host beneath the paired DPU's `dsx_dpu` agent. The
+registration selectors allow DPU-hosted DSX IMDS to obtain the host SPIRE
+JWT-SVID and exchange it for the DSX JWT returned through link-local IMDS. The
+worker uses that DSX JWT to attest its local SPIRE agent through `dsx_imds`.
+Because the repository has no worker-to-DPU mapping, it does not own this
+bootstrap registration and the registration is outside this diagram.
+
+For a standalone host, the LaunchLayer source supplies the host-to-DPU
+relationship, so the DSX Identity Controller creates the equivalent host
+entry. No current host-process static entry is defined beneath the resulting
+`dsx_imds` agent.
+
 Local consumers exchange local SPIRE JWT-SVIDs with their shard's DSX Identity Keys for
 DSX JWTs. DSX Identity Keys instances share only public signing keys across shards.
 
