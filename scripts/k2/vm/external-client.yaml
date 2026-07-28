@@ -57,7 +57,7 @@ spec:
   volumes:
     - name: ssh-key
       secret:
-        secretName: e2e-ubuntu-vm-e2e-ssh
+        secretName: e2e-debian-vm-e2e-ssh
         defaultMode: 0400
         items:
           - key: id_ed25519

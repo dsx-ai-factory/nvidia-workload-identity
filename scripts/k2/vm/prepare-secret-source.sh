@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 CONTEXT=kind-k2
 NAMESPACE=tenant-tenant1
-SECRET=e2e-ubuntu-vm-e2e-ssh
+SECRET=e2e-debian-vm-e2e-ssh
 OUTPUT_DIR="${SCRIPT_DIR}/generated"
 TEMP_DIR=""
 
@@ -38,7 +38,7 @@ write_cloud_init() {
 #cloud-config
 ssh_pwauth: false
 users:
-  - name: ubuntu
+  - name: debian
     sudo: ALL=(ALL) NOPASSWD:ALL
     lock_passwd: true
     shell: /bin/bash
@@ -66,7 +66,7 @@ main() {
     if kubectl get secret "${SECRET}" -n "${NAMESPACE}" --context "${CONTEXT}" >/dev/null 2>&1; then
         read_existing
     else
-        if kubectl get vm e2e-ubuntu-vm -n "${NAMESPACE}" --context "${CONTEXT}" >/dev/null 2>&1; then
+        if kubectl get vm e2e-debian-vm -n "${NAMESPACE}" --context "${CONTEXT}" >/dev/null 2>&1; then
             log_error "The VM exists without its SSH Secret. Refusing to replace its credentials"
             return 1
         fi
