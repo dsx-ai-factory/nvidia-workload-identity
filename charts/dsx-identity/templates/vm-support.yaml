@@ -2,23 +2,20 @@
 {{- $imageTag := .Values.global.imageTag | default .Chart.Version -}}
 {{- $identityKeysTarget := required "vmSupport.identityKeysProxy.target is required" .Values.vmSupport.identityKeysProxy.target -}}
 apiVersion: v1
-kind: Namespace
-metadata:
-  name: {{ .Values.vmSupport.identityKeysProxyNamespace }}
-  labels:
-    app.kubernetes.io/name: dsx-identity-keys-proxy-system
----
-apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: dsx-identity-keys-proxy-csi
-  namespace: {{ .Values.vmSupport.identityKeysProxyNamespace }}
+  namespace: {{ .Release.Namespace }}
+{{- with .Values.imagePullSecrets }}
+imagePullSecrets:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: dsx-identity-keys-proxy-csi
-  namespace: {{ .Values.vmSupport.identityKeysProxyNamespace }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "dsx-identity.labels" (dict "root" . "name" "dsx-identity-keys-proxy-csi") | nindent 4 }}
 spec:

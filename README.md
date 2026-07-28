@@ -478,6 +478,9 @@ identityController:
     - <selector for DPU-hosted metadata-service>
 ```
 
+`imagePullSecrets` applies to chart-owned and Kyverno-injected DSX images.
+Each matched consumer namespace must contain Secrets with the same names.
+
 Path and SHA-256 selectors require `discover_workload_path = true` in the
 external DPU agent's Unix WorkloadAttestor configuration. The fetcher runs
 under the dedicated UID, and the executable is root-owned and immutable.

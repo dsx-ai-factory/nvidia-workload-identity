@@ -33,6 +33,10 @@ spec:
       mutate:
         patchStrategicMerge:
           spec:
+            {{- with .Values.imagePullSecrets }}
+            imagePullSecrets:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
             containers:
               - name: dsx-imds-network-setup
                 image: "{{ .Values.vmSupport.imdsNetworkSetup.image.repository }}:{{ .Values.vmSupport.imdsNetworkSetup.image.tag | default $imageTag }}"

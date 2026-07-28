@@ -8,7 +8,8 @@ global:
     clusterName: ""
     jwtIssuer: ""
 
-# Registry credentials shared by chart-owned DSX images.
+# Registry credentials for chart-owned and injected DSX images. Each matched
+# consumer namespace must contain Secrets with these names.
 imagePullSecrets: []
 
 spire:
@@ -191,7 +192,6 @@ podTokenFetcher:
 
 vmSupport:
   enabled: false
-  identityKeysProxyNamespace: dsx-identity-keys-proxy-system
   tolerations: []
   identityKeysProxy:
     target: ""
