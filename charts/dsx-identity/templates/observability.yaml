@@ -152,7 +152,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: dsx-identity-keys-proxy-csi
-  namespace: {{ .Values.vmSupport.identityKeysProxyNamespace }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "dsx-identity.labels" (dict "root" . "name" "dsx-identity-keys-proxy-csi") | nindent 4 }}
 spec:
@@ -169,7 +169,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: dsx-identity-keys-proxy-csi
-  namespace: {{ .Values.vmSupport.identityKeysProxyNamespace }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "dsx-identity.labels" (dict "root" . "name" "dsx-identity-keys-proxy-csi") | nindent 4 }}
     {{- with .Values.observability.metrics.serviceMonitor.labels }}

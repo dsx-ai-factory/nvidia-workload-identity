@@ -31,6 +31,10 @@ spec:
       mutate:
         patchStrategicMerge:
           spec:
+            {{- with .Values.imagePullSecrets }}
+            imagePullSecrets:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
             # Only the exchanged token is shared with application containers.
             containers:
               - (name): "*"
