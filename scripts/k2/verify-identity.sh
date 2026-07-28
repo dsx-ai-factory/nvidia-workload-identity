@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CLUSTER_NAME="k2"
 CONTEXT="kind-${CLUSTER_NAME}"
-VM_NAME="${VM_NAME:-e2e-ubuntu-vm}"
+VM_NAME="${VM_NAME:-e2e-debian-vm}"
 VM_TENANT="${VM_TENANT:-tenant1}"
 NAMESPACE="tenant-${VM_TENANT}"
 TEST_AUDIENCE="spiffe://ds9.dsx.nvid.id/openbao"
@@ -220,9 +220,10 @@ ssh_vm() {
         -o StrictHostKeyChecking=no \
         -o UserKnownHostsFile=/dev/null \
         -o GlobalKnownHostsFile=/dev/null \
+        -o LogLevel=ERROR \
         -o ConnectionAttempts=180 \
         -o ConnectTimeout=180 \
-        "ubuntu@${vm_ip}" "${command}"
+        "debian@${vm_ip}" "${command}"
 }
 
 verify_openbao_access() {
@@ -369,7 +370,7 @@ verify_virt_launcher_associations() {
         ("spiffe://" + .[0].parent_id.trust_domain + .[0].parent_id.path) == $parent and
         .[0].hint == "dsx-imds-vm" and
         ([.[0].selectors[] | .type + ":" + .value] | sort) ==
-          (["k8s:ns:tenant-tenant1", "k8s:sa:e2e-ubuntu-vm"] | sort)
+          (["k8s:ns:tenant-tenant1", "k8s:sa:e2e-debian-vm"] | sort)
     ' <<<"${vm_entries}" >/dev/null; then
         log_error "VM entry has the wrong operator-host parent, hint, or holder selectors"
         jq . <<<"${vm_entries}" >&2
@@ -383,10 +384,15 @@ verify_metadata_access() {
     log_test "Requesting DSX IMDS v1 from an external tenant-network client..."
 
     local vm_ip response command
+    local ssh_started
     command="curl -fsS --max-time 10 -G -H 'Metadata: true' -H 'Accept: application/json' 'http://${IMDS_IP}/latest/meta-data/identity' --data-urlencode 'aud=${TEST_AUDIENCE}'"
-    kubectl wait --for=jsonpath='{.status.interfaces[?(@.name=="default")].ipAddress}' \
-        "vmi/${VM_NAME}" -n "${NAMESPACE}" --context "${CONTEXT}" --timeout=300s >/dev/null || return 1
-    verify_virt_launcher_associations || return 1
+    run_timed "VM VMI address" kubectl wait \
+        --for=jsonpath='{.status.interfaces[?(@.name=="default")].ipAddress}' \
+        "vmi/${VM_NAME}" -n "${NAMESPACE}" --context "${CONTEXT}" \
+        --timeout=300s || return 1
+    run_timed "VM registration associations" \
+        verify_virt_launcher_associations || return 1
+
     vm_ip=$(kubectl get vmi "${VM_NAME}" -n "${NAMESPACE}" \
         --context "${CONTEXT}" -o json | jq -r '
           [.status.interfaces[]? |
@@ -394,12 +400,15 @@ verify_metadata_access() {
            ((.ipAddresses // [])[]?, .ipAddress?) |
            select(type == "string" and test("^[0-9]+(\\.[0-9]+){3}$"))][0] // empty
         ') || return 1
-    if [[ -n "${vm_ip}" ]] && response=$(ssh_vm "${vm_ip}" "${command}" 2>/dev/null); then
+    ssh_started=${SECONDS}
+    if [[ -n "${vm_ip}" ]] && response=$(ssh_vm "${vm_ip}" "${command}"); then
+        log_timing "VM SSH and metadata" "${ssh_started}"
         response="${response//$'\r'/}"
         parse_jwt_response "${response}" || return 1
-        verify_openbao_access || return 1
+        run_timed "VM OpenBao authentication" verify_openbao_access || return 1
         return 0
     fi
+    log_timing "VM SSH and metadata" "${ssh_started}"
 
     log_error "External client could not retrieve a DSX IMDS response from the VM"
     if [[ -n "${vm_ip}" ]]; then

@@ -10,11 +10,11 @@ resources:
 generatorOptions:
   disableNameSuffixHash: true
 secretGenerator:
-  - name: e2e-ubuntu-vm-e2e-ssh
+  - name: e2e-debian-vm-e2e-ssh
     files:
       - id_ed25519=generated/id_ed25519
       - id_ed25519.pub=generated/id_ed25519.pub
-  - name: e2e-ubuntu-vm-cloud-init
+  - name: e2e-debian-vm-cloud-init
     files:
       - userdata=generated/userdata
       - networkdata=networkdata

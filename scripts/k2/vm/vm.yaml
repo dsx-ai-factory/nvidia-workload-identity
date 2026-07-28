@@ -3,38 +3,38 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: e2e-ubuntu-vm
+  name: e2e-debian-vm
 automountServiceAccountToken: false
 ---
 apiVersion: e2e.dsx-identity.nvidia.com/v1alpha1
 kind: LaunchLayerSourceFixture
 metadata:
-  name: e2e-vm-source-e2e-ubuntu-vm
+  name: e2e-vm-source-e2e-debian-vm
 spec:
   type: vm
   tenantID: tenant-2
-  resourceID: e2e-ubuntu-vm
+  resourceID: e2e-debian-vm
   role: database
   # This parent must match the VM nodeSelector and its dsx_imds host agent.
   parentID: k2-worker
   holder:
     namespace: tenant-tenant1
-    serviceAccount: e2e-ubuntu-vm
+    serviceAccount: e2e-debian-vm
 ---
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
 metadata:
-  name: e2e-ubuntu-vm
+  name: e2e-debian-vm
   labels:
     app: e2e-vm
-    kubevirt.io/vm: e2e-ubuntu-vm
+    kubevirt.io/vm: e2e-debian-vm
     tenant: tenant1
 spec:
   runStrategy: Always
   template:
     metadata:
       labels:
-        kubevirt.io/domain: e2e-ubuntu-vm
+        kubevirt.io/domain: e2e-debian-vm
         app: e2e-vm
         tenant: tenant1
         spiffe.nvidia.com/service: dsx
@@ -77,15 +77,15 @@ spec:
             default: true
       volumes:
         - containerDisk:
-            image: quay.io/containerdisks/ubuntu:24.04
+            image: quay.io/containerdisks/debian:13
             imagePullPolicy: IfNotPresent
           name: rootdisk
         - cloudInitNoCloud:
             secretRef:
-              name: e2e-ubuntu-vm-cloud-init
+              name: e2e-debian-vm-cloud-init
             networkDataSecretRef:
-              name: e2e-ubuntu-vm-cloud-init
+              name: e2e-debian-vm-cloud-init
           name: cloudinit
         - name: vm-service-account
           serviceAccount:
-            serviceAccountName: e2e-ubuntu-vm
+            serviceAccountName: e2e-debian-vm
