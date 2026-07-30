@@ -227,6 +227,13 @@ docker-build:dsx-imds-node-attestor-server:
     DOCKERFILE_PATH: Dockerfile.plugin
     EXTRA_BUILD_ARGS: "--build-arg BINARY=dsx-imds-node-attestor-server"
 
+docker-build:dsx-dpu-node-attestor-server:
+  extends: [.container-build]
+  variables:
+    DOCKER_IMAGE_NAME: dsx-dpu-node-attestor-server
+    DOCKERFILE_PATH: Dockerfile.plugin
+    EXTRA_BUILD_ARGS: "--build-arg BINARY=dsx-dpu-node-attestor-server"
+
 docker-build:dsx-imds-node-attestor-agent:
   extends: [.container-build]
   variables:
@@ -303,6 +310,16 @@ pulse-scan:dsx-imds-node-attestor-server:
     - compute-next-release-version
   variables:
     DOCKER_IMAGE_NAME: dsx-imds-node-attestor-server
+
+pulse-scan:dsx-dpu-node-attestor-server:
+  extends:
+    - .pulse-scan:container
+  needs:
+    - job: docker-build:dsx-dpu-node-attestor-server
+      artifacts: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-dpu-node-attestor-server
 
 pulse-scan:dsx-imds-node-attestor-agent:
   extends:
@@ -397,6 +414,18 @@ docker-push-ngc:dsx-imds-node-attestor-server:
     - compute-next-release-version
   variables:
     DOCKER_IMAGE_NAME: dsx-imds-node-attestor-server
+
+docker-push-ngc:dsx-dpu-node-attestor-server:
+  extends:
+    - .docker-publish
+  needs:
+    - job: docker-build:dsx-dpu-node-attestor-server
+      artifacts: true
+    - job: pulse-scan:dsx-dpu-node-attestor-server
+      optional: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-dpu-node-attestor-server
 
 docker-push-ngc:dsx-imds-node-attestor-agent:
   extends:
