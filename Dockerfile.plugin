@@ -20,6 +20,7 @@ FROM ${TOOLS_IMG} AS tools
 # this image essentially exists as a file holder.
 # it is used to copy the plugins into a shared volume as an init container.
 FROM scratch
-COPY --from=tools /bin/busybox /bin/cp
-COPY --from=builder /out/plugin /plugin
+COPY --from=tools --chown=1000:1000 /bin/busybox /bin/cp
+COPY --from=builder --chown=1000:1000 /out/plugin /plugin
+USER 1000:1000
 ENTRYPOINT ["/bin/cp", "-a", "/plugin"]
