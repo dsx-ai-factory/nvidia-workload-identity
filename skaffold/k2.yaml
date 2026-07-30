@@ -288,6 +288,7 @@ deploy:
           identityController.image.repository: "{{.IMAGE_REPO_dsx_identity_dsx_identity_controller}}"
           identityController.image.tag: "{{.IMAGE_TAG_dsx_identity_dsx_identity_controller}}"
           "spire.spire-server.initContainers[0].image": "{{.IMAGE_FULLY_QUALIFIED_dsx_identity_dsx_imds_node_attestor_server}}"
+          "spire.spire-server.initContainers[1].image": "{{.IMAGE_FULLY_QUALIFIED_dsx_identity_dsx_dpu_node_attestor_server}}"
 ---
 apiVersion: skaffold/v4beta14
 kind: Config
