@@ -45,6 +45,13 @@ build:
             BUILDER_IMG: 127.0.0.1:5002/library/golang:1.26.4
             TOOLS_IMG: 127.0.0.1:5002/library/busybox:1.37.0-musl
           BINARY: dsx-imds-node-attestor-server
+    - image: dsx-identity/dsx-dpu-node-attestor-server
+      context: ..
+      docker:
+        dockerfile: Dockerfile.plugin
+        buildArgs:
+          <<: *corePluginBuildArgs
+          BINARY: dsx-dpu-node-attestor-server
     - image: dsx-identity/dsx-imds-node-attestor-agent
       context: ..
       docker:

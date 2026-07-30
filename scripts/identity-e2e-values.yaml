@@ -42,13 +42,34 @@ spire:
             cpu: 100m
             memory: 64Mi
         volumeMounts:
-          - name: dsx-imds-server-plugin
+          - name: spire-server-plugins
+            mountPath: /plugins
+      - name: install-dsx-dpu-node-attestor-server
+        image: dsx-identity/dsx-dpu-node-attestor-server:0.1.0
+        imagePullPolicy: IfNotPresent
+        args:
+          - /plugins/dsx-dpu-node-attestor-server
+        securityContext:
+          runAsUser: 0
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+        volumeMounts:
+          - name: spire-server-plugins
             mountPath: /plugins
     extraVolumes:
-      - name: dsx-imds-server-plugin
+      - name: spire-server-plugins
         emptyDir: {}
     extraVolumeMounts:
-      - name: dsx-imds-server-plugin
+      - name: spire-server-plugins
         mountPath: /opt/spire/plugins
         readOnly: true
     customPlugins:
@@ -58,6 +79,10 @@ spire:
           plugin_checksum: ""
           plugin_data:
             jwks_url: http://dsx-identity-keys.dsx-identity.svc.cluster.local:8080/.well-known/jwks.json
+        dpu_hw:
+          plugin_cmd: /opt/spire/plugins/dsx-dpu-node-attestor-server
+          plugin_checksum: ""
+          plugin_data: {}
     controllerManager:
       extraEnv:
         - name: OPERATOR_TENANT

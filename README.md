@@ -16,6 +16,7 @@ Component commands and runtime configuration:
 - [DSX IMDS Network Setup](cmd/dsx-imds-network-setup/README.md)
 - [`dsx_imds` NodeAttestor agent plugin](cmd/dsx-imds-node-attestor-agent/README.md)
 - [`dsx_imds` NodeAttestor server plugin](cmd/dsx-imds-node-attestor-server/README.md)
+- [`dpu_hw` NodeAttestor server plugin](cmd/dsx-dpu-node-attestor-server/README.md)
 - [DSX Token Fetcher](cmd/dsx-token-fetcher/README.md)
 - [DSX Identity Keys Proxy CSI Driver](cmd/dsx-identity-keys-proxy-csi/README.md)
 - [Generate Signing Keyset](cmd/generate-signing-keyset/README.md)
