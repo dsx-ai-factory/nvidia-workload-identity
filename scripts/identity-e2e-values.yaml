@@ -11,62 +11,16 @@ observability:
 
 spire:
   spire-server:
+    image:
+      registry: ""
+      repository: dsx-identity/dsx-spire-server
+      tag: 0.1.0
     persistence:
       size: 256Mi
     defaultX509SvidTTL: "5m"
     extraEnv:
       - name: OTEL_SDK_DISABLED
         value: "true"
-    initContainers:
-      - name: install-dsx-imds-node-attestor-server
-        image: dsx-identity/dsx-imds-node-attestor-server:0.1.0
-        imagePullPolicy: IfNotPresent
-        args:
-          - /plugins/dsx-imds-node-attestor-server
-        securityContext:
-          runAsUser: 0
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-          capabilities:
-            drop: ["ALL"]
-        resources:
-          requests:
-            cpu: 10m
-            memory: 16Mi
-          limits:
-            cpu: 100m
-            memory: 64Mi
-        volumeMounts:
-          - name: spire-server-plugins
-            mountPath: /plugins
-      - name: install-dsx-dpu-node-attestor-server
-        image: dsx-identity/dsx-dpu-node-attestor-server:0.1.0
-        imagePullPolicy: IfNotPresent
-        args:
-          - /plugins/dsx-dpu-node-attestor-server
-        securityContext:
-          runAsUser: 0
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-          capabilities:
-            drop: ["ALL"]
-        resources:
-          requests:
-            cpu: 10m
-            memory: 16Mi
-          limits:
-            cpu: 100m
-            memory: 64Mi
-        volumeMounts:
-          - name: spire-server-plugins
-            mountPath: /plugins
-    extraVolumes:
-      - name: spire-server-plugins
-        emptyDir: {}
-    extraVolumeMounts:
-      - name: spire-server-plugins
-        mountPath: /opt/spire/plugins
-        readOnly: true
     customPlugins:
       nodeAttestor:
         dsx_imds:

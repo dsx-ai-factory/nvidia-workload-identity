@@ -45,9 +45,10 @@ plugin_data {
 
 All three fields are required. `jwks_url` may name any reachable DSX Identity Keys instance's
 flat aggregate JWKS. The standard OIDC remote key set caches keys and refreshes
-when it encounters an unknown `kid`. The local E2E configuration stages the
-plugin in `scripts/identity-e2e-values.yaml` and supplies each shard's plugin
-data in its shard values file.
+when it encounters an unknown `kid`. `Dockerfile.spire` embeds the plugin in
+the DSX SPIRE server image. The local E2E configuration selects that image in
+`scripts/identity-e2e-values.yaml` and supplies each shard's plugin data in its
+shard values file.
 
 ## Testing
 

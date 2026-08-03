@@ -8,6 +8,10 @@ spire-server:
 
 spire-agent:
   fullnameOverride: dsx-imds-host-agent
+  image:
+    registry: ""
+    repository: dsx-identity/dsx-spire-agent
+    tag: 0.1.0
   extraEnvVars:
     - name: OTEL_SDK_DISABLED
       value: "true"
@@ -25,35 +29,6 @@ spire-agent:
         plugin_checksum: ""
         plugin_data:
           endpoint: http://e2e-operator-host-imds.dsx-identity.svc.cluster.local:18080
-  initContainers:
-    - name: install-dsx-imds-node-attestor-agent
-      image: dsx-identity/dsx-imds-node-attestor-agent:0.1.0
-      imagePullPolicy: IfNotPresent
-      args:
-        - /plugins/dsx-imds-node-attestor-agent
-      securityContext:
-        runAsUser: 0
-        allowPrivilegeEscalation: false
-        readOnlyRootFilesystem: true
-        capabilities:
-          drop: ["ALL"]
-      resources:
-        requests:
-          cpu: 10m
-          memory: 16Mi
-        limits:
-          cpu: 100m
-          memory: 64Mi
-      volumeMounts:
-        - name: dsx-imds-agent-plugin
-          mountPath: /plugins
-  extraVolumes:
-    - name: dsx-imds-agent-plugin
-      emptyDir: {}
-  extraVolumeMounts:
-    - name: dsx-imds-agent-plugin
-      mountPath: /opt/spire/plugins
-      readOnly: true
   resources:
     requests:
       cpu: 100m

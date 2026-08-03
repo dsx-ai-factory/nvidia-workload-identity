@@ -72,6 +72,7 @@ commitlint:
       fi
       export HELM_CHART_VERSION
       yq -i '.appVersion = strenv(HELM_CHART_VERSION)' charts/dsx-identity/Chart.yaml
+      yq -i '.spire."spire-server".image.tag = strenv(HELM_CHART_VERSION)' charts/dsx-identity/values.yaml
 
 .helm-package-rule:
   rules:
@@ -220,26 +221,19 @@ docker-build:dsx-identity-controller:
     DOCKER_IMAGE_NAME: dsx-identity-controller
     EXTRA_BUILD_ARGS: "--target dsx-identity-controller --build-arg BINARY=dsx-identity-controller"
 
-docker-build:dsx-imds-node-attestor-server:
+docker-build:dsx-spire-server:
   extends: [.container-build]
   variables:
-    DOCKER_IMAGE_NAME: dsx-imds-node-attestor-server
-    DOCKERFILE_PATH: Dockerfile.plugin
-    EXTRA_BUILD_ARGS: "--build-arg BINARY=dsx-imds-node-attestor-server"
+    DOCKER_IMAGE_NAME: dsx-spire-server
+    DOCKERFILE_PATH: Dockerfile.spire
+    EXTRA_BUILD_ARGS: "--target dsx-spire-server"
 
-docker-build:dsx-dpu-node-attestor-server:
+docker-build:dsx-spire-agent:
   extends: [.container-build]
   variables:
-    DOCKER_IMAGE_NAME: dsx-dpu-node-attestor-server
-    DOCKERFILE_PATH: Dockerfile.plugin
-    EXTRA_BUILD_ARGS: "--build-arg BINARY=dsx-dpu-node-attestor-server"
-
-docker-build:dsx-imds-node-attestor-agent:
-  extends: [.container-build]
-  variables:
-    DOCKER_IMAGE_NAME: dsx-imds-node-attestor-agent
-    DOCKERFILE_PATH: Dockerfile.plugin
-    EXTRA_BUILD_ARGS: "--build-arg BINARY=dsx-imds-node-attestor-agent"
+    DOCKER_IMAGE_NAME: dsx-spire-agent
+    DOCKERFILE_PATH: Dockerfile.spire
+    EXTRA_BUILD_ARGS: "--target dsx-spire-agent"
 
 pulse-scan:dsx-token-fetcher:
   extends:
@@ -301,35 +295,25 @@ pulse-scan:dsx-identity-controller:
   variables:
     DOCKER_IMAGE_NAME: dsx-identity-controller
 
-pulse-scan:dsx-imds-node-attestor-server:
+pulse-scan:dsx-spire-server:
   extends:
     - .pulse-scan:container
   needs:
-    - job: docker-build:dsx-imds-node-attestor-server
+    - job: docker-build:dsx-spire-server
       artifacts: true
     - compute-next-release-version
   variables:
-    DOCKER_IMAGE_NAME: dsx-imds-node-attestor-server
+    DOCKER_IMAGE_NAME: dsx-spire-server
 
-pulse-scan:dsx-dpu-node-attestor-server:
+pulse-scan:dsx-spire-agent:
   extends:
     - .pulse-scan:container
   needs:
-    - job: docker-build:dsx-dpu-node-attestor-server
+    - job: docker-build:dsx-spire-agent
       artifacts: true
     - compute-next-release-version
   variables:
-    DOCKER_IMAGE_NAME: dsx-dpu-node-attestor-server
-
-pulse-scan:dsx-imds-node-attestor-agent:
-  extends:
-    - .pulse-scan:container
-  needs:
-    - job: docker-build:dsx-imds-node-attestor-agent
-      artifacts: true
-    - compute-next-release-version
-  variables:
-    DOCKER_IMAGE_NAME: dsx-imds-node-attestor-agent
+    DOCKER_IMAGE_NAME: dsx-spire-agent
 
 docker-push-ngc:dsx-token-fetcher:
   extends:
@@ -403,41 +387,29 @@ docker-push-ngc:dsx-identity-controller:
   variables:
     DOCKER_IMAGE_NAME: dsx-identity-controller
 
-docker-push-ngc:dsx-imds-node-attestor-server:
+docker-push-ngc:dsx-spire-server:
   extends:
     - .docker-publish
   needs:
-    - job: docker-build:dsx-imds-node-attestor-server
+    - job: docker-build:dsx-spire-server
       artifacts: true
-    - job: pulse-scan:dsx-imds-node-attestor-server
+    - job: pulse-scan:dsx-spire-server
       optional: true
     - compute-next-release-version
   variables:
-    DOCKER_IMAGE_NAME: dsx-imds-node-attestor-server
+    DOCKER_IMAGE_NAME: dsx-spire-server
 
-docker-push-ngc:dsx-dpu-node-attestor-server:
+docker-push-ngc:dsx-spire-agent:
   extends:
     - .docker-publish
   needs:
-    - job: docker-build:dsx-dpu-node-attestor-server
+    - job: docker-build:dsx-spire-agent
       artifacts: true
-    - job: pulse-scan:dsx-dpu-node-attestor-server
+    - job: pulse-scan:dsx-spire-agent
       optional: true
     - compute-next-release-version
   variables:
-    DOCKER_IMAGE_NAME: dsx-dpu-node-attestor-server
-
-docker-push-ngc:dsx-imds-node-attestor-agent:
-  extends:
-    - .docker-publish
-  needs:
-    - job: docker-build:dsx-imds-node-attestor-agent
-      artifacts: true
-    - job: pulse-scan:dsx-imds-node-attestor-agent
-      optional: true
-    - compute-next-release-version
-  variables:
-    DOCKER_IMAGE_NAME: dsx-imds-node-attestor-agent
+    DOCKER_IMAGE_NAME: dsx-spire-agent
 
 semantic-release:
   extends:

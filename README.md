@@ -420,21 +420,10 @@ spire:
   spire-agent:
     enabled: false
   spire-server:
-    initContainers:
-      - name: install-dsx-imds-node-attestor-server
-        image: nvcr.io/0837451325059433/components-dev/dsx-imds-node-attestor-server:<chart-version>
-        args:
-          - /plugins/dsx-imds-node-attestor-server
-        volumeMounts:
-          - name: dsx-imds-server-plugin
-            mountPath: /plugins
-    extraVolumes:
-      - name: dsx-imds-server-plugin
-        emptyDir: {}
-    extraVolumeMounts:
-      - name: dsx-imds-server-plugin
-        mountPath: /opt/spire/plugins
-        readOnly: true
+    image:
+      registry: nvcr.io
+      repository: 0837451325059433/components-dev/dsx-spire-server
+      tag: <chart-version>
     customPlugins:
       nodeAttestor:
         dsx_imds:
@@ -451,9 +440,12 @@ spire:
 ```
 
 The host agent and its `dsx_imds` agent plugin are provisioned with the host,
-outside the identity chart. An ordinary in-cluster agent is disabled by
-default. If a separate node class needs one, enable and constrain it so it
-cannot share a node with the host agent.
+outside the identity chart. The matching
+`nvcr.io/0837451325059433/components-dev/dsx-spire-agent:<chart-version>`
+image embeds that plugin at `/opt/spire/plugins/dsx-imds-node-attestor-agent`.
+An ordinary in-cluster agent is disabled by default. If a separate node class
+needs one, enable and constrain it so it cannot share a node with the host
+agent.
 
 Identity shards that reconcile DPU or LaunchLayer sources enable the controller.
 Data Hall capacity shards also enable the VM identity path. The two DPU
