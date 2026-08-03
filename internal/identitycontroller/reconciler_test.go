@@ -93,6 +93,7 @@ func TestDPUReconcileCreatesBaseIdentityAndCleansUp(t *testing.T) {
 	dpu.SetGroupVersionKind(DPUGVK)
 	dpu.SetName("dpu-1")
 	dpu.SetUID(types.UID("f6e44986-13f5-4778-8424-1f0514a0f20c"))
+	setSourceSpecField(t, dpu, "serialNumber", "52TF43G001G")
 	c := &applyClient{Client: fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(dpu).Build()}
 	r := &DPUReconciler{Client: c, Config: testConfig, Recorder: record.NewFakeRecorder(4)}
 	request := ctrl.Request{NamespacedName: types.NamespacedName{Name: dpu.GetName()}}
@@ -114,7 +115,7 @@ func TestDPUReconcileCreatesBaseIdentityAndCleansUp(t *testing.T) {
 	entry := getEntry(t, c, childName(dpu))
 	assertEntry(t, entry,
 		"spiffe://k2.sjc-1.nvidia.com/tenant/operator-1/service/dsx/dpu/dpu-1",
-		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dsx_dpu/dpu-1",
+		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dpu_hw/52tf43g001g",
 		"dsx-dpu",
 		[]string{"unix:uid:1000", "unix:path:/usr/local/bin/dsx-token-fetcher"},
 	)
@@ -140,7 +141,7 @@ func TestDPUReconcileCreatesBaseIdentityAndCleansUp(t *testing.T) {
 	entry = getEntry(t, c, childName(dpu))
 	assertEntry(t, entry,
 		"spiffe://k2.sjc-1.nvidia.com/tenant/operator-1/service/dsx/dpu/dpu-1",
-		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dsx_dpu/dpu-1",
+		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dpu_hw/52tf43g001g",
 		"dsx-dpu",
 		[]string{"unix:uid:1000", "unix:path:/usr/local/bin/dsx-token-fetcher"},
 	)
@@ -164,6 +165,35 @@ func TestDPUReconcileCreatesBaseIdentityAndCleansUp(t *testing.T) {
 	deletedDPU.SetGroupVersionKind(DPUGVK)
 	if err := c.Get(ctx, request.NamespacedName, deletedDPU); !apierrors.IsNotFound(err) {
 		t.Fatalf("DPU source was not deleted: %v", err)
+	}
+}
+
+func TestDPUDesiredEntryRequiresValidSerial(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name   string
+		serial any
+		want   string
+	}{
+		{name: "missing", want: "spec.serialNumber is required"},
+		{name: "wrong type", serial: int64(1), want: "spec.serialNumber"},
+		{name: "invalid", serial: "invalid serial", want: "invalid character"},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			dpu := &unstructured.Unstructured{}
+			dpu.SetGroupVersionKind(DPUGVK)
+			dpu.SetName("dpu-1")
+			if test.serial != nil {
+				setSourceSpecField(t, dpu, "serialNumber", test.serial)
+			}
+			_, err := (&DPUReconciler{Config: testConfig}).desiredEntry(dpu)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("desiredEntry() error = %v, want containing %q", err, test.want)
+			}
+		})
 	}
 }
 

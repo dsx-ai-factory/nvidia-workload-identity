@@ -1,0 +1,7 @@
+apiVersion: provisioning.dpu.nvidia.com/v1alpha1
+kind: DPU
+metadata:
+  name: e2e-controller-dpu
+  namespace: dsx-identity
+spec:
+  serialNumber: DPF-SERIAL-001

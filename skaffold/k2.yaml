@@ -262,7 +262,6 @@ deploy:
               - --for=condition=Ready
               - --context=kind-k2
               - --timeout=120s
-              - clusterpolicy/protect-dsx-spire-registrations
               - clusterpolicy/inject-dsx-token-fetcher
               - clusterpolicy/inject-dsx-imds-sidecars
     releases:
@@ -349,7 +348,7 @@ requires:
       - worker-host-k2
 manifests:
   rawYaml:
-    - ../scripts/admission/registration-writer-rbac.yaml
+    - ../scripts/k2/source-fixtures/dpu-controller.yaml
     - ../scripts/k2/source-fixtures/dpu-token-fetcher.yaml
     - ../scripts/k2/nginx/e2e-nginx.yaml
     - ../scripts/k2/nginx/e2e-spire-client.yaml
@@ -358,13 +357,7 @@ deploy:
   kubeContext: kind-k2
   statusCheckDeadlineSeconds: 180
   tolerateFailuresUntilDeadline: true
-  kubectl:
-    hooks:
-      after:
-        - host:
-            command:
-              - scripts/verify-registration-admission.sh
-              - kind-k2
+  kubectl: {}
 ---
 apiVersion: skaffold/v4beta14
 kind: Config

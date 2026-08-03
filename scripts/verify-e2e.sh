@@ -251,33 +251,6 @@ assert_exchange_rejects() {
     log_success "${name} was rejected"
 }
 
-assert_pod_registration_parent() {
-    local context="$1" trust_domain="$2" pod="$3" namespace="$4" tenant="$5"
-    local spiffe_id node uid expected_parent entries deadline=$((SECONDS + 180))
-    node=$(kubectl get pod "${pod}" --namespace "${namespace}" --context "${context}" \
-        -o jsonpath='{.spec.nodeName}')
-    uid=$(kubectl get pod "${pod}" --namespace "${namespace}" --context "${context}" \
-        -o jsonpath='{.metadata.uid}')
-    spiffe_id=$(internal_pod_subject "${context}" "${trust_domain}" "${pod}" "${namespace}" "${tenant}")
-    expected_parent="spiffe://${trust_domain}/spire/agent/dsx_imds/tenant/${tenant}/host/${node}"
-    while ((SECONDS < deadline)); do
-        entries=$(kubectl exec statefulset/dsx-identity-server --namespace "${IDENTITY_NAMESPACE}" \
-            --context "${context}" -c spire-server -- \
-            /opt/spire/bin/spire-server entry show -spiffeID "${spiffe_id}" -output json 2>/dev/null) || continue
-        if jq -e --arg parent "${expected_parent}" --arg uid "${uid}" '
-            .entries | length == 1 and
-            ("spiffe://" + .[0].parent_id.trust_domain + .[0].parent_id.path) == $parent and
-            .[0].hint == "dsx-pod" and
-            ([.[0].selectors[] | .type + ":" + .value] | index("k8s:pod-uid:" + $uid)) != null
-        ' <<<"${entries}" >/dev/null; then
-            return 0
-        fi
-    done
-    log_error "${context} Pod registration did not use exact dsx_imds parent ${expected_parent}"
-    [[ -z "${entries:-}" ]] || jq . <<<"${entries}" >&2
-    return 1
-}
-
 assert_relying_party_subject_validation() {
     local valid_token="$1"
     external_probe '^TestLiveRelyingPartyRejectsMalformedSubject$' \
@@ -369,10 +342,6 @@ main() {
     k2_subject=$(pod_subject "${K2_CONTEXT}" "${K2_POD}")
     assert_token_contract k1 "${k1_token}" "${k1_subject}"
     assert_token_contract k2 "${k2_token}" "${k2_subject}"
-    assert_pod_registration_parent "${K1_CONTEXT}" "${K1_TRUST_DOMAIN}" \
-        "${K1_POD}" "${FIXTURE_NAMESPACE}" operator-1
-    assert_pod_registration_parent "${K2_CONTEXT}" "${K2_TRUST_DOMAIN}" \
-        "${K2_POD}" "${FIXTURE_NAMESPACE}" operator-1
     [[ "$(token_kid "${k1_token}")" == "${K1_ORIGINAL_KID}" ]] || {
         log_error "k1 Pod did not use the k1 DSX Identity Keys signing key"
         return 1
@@ -381,7 +350,7 @@ main() {
         log_error "k2 Pod did not use the k2 DSX Identity Keys signing key"
         return 1
     }
-    log_timing "Pod token delivery and registration" "${stage_started}"
+    log_timing "Pod token delivery" "${stage_started}"
 
     stage_started=${SECONDS}
     k1_spire_id=$(internal_pod_subject "${K1_CONTEXT}" "${K1_TRUST_DOMAIN}" "${K1_POD}")

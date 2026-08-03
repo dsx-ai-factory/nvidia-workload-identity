@@ -4,7 +4,6 @@ namespace: tenant-tenant1
 resources:
   - namespace.yaml
   - tenant-udn.yaml
-  - e2e-controller-sources.yaml
   - external-client.yaml
   - vm.yaml
 generatorOptions:

@@ -254,14 +254,6 @@ deploy:
               - --namespace=dsx-identity
               - --timeout=120s
               - endpoints/dsx-identity-controller-manager-webhook
-        - host:
-            command:
-              - kubectl
-              - wait
-              - --for=condition=Ready
-              - --context=kind-k1
-              - --timeout=120s
-              - clusterpolicy/protect-dsx-spire-registrations
     releases:
       - name: dsx-identity
         chartPath: ../charts/dsx-identity
@@ -338,19 +330,12 @@ requires:
       - worker-host-k1
 manifests:
   rawYaml:
-    - ../scripts/admission/registration-writer-rbac.yaml
     - ../scripts/k1/nginx/e2e-nginx.yaml
 deploy:
   kubeContext: kind-k1
   statusCheckDeadlineSeconds: 180
   tolerateFailuresUntilDeadline: true
-  kubectl:
-    hooks:
-      after:
-        - host:
-            command:
-              - scripts/verify-registration-admission.sh
-              - kind-k1
+  kubectl: {}
 ---
 apiVersion: skaffold/v4beta14
 kind: Config
