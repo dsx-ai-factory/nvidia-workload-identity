@@ -15,6 +15,13 @@ imagePullSecrets: []
 spire:
   enabled: true
   spire-server:
+    # This image extends the pinned upstream SPIRE server image with both DSX
+    # server plugins. Keep its tag aligned with the DSX Identity chart version.
+    image:
+      registry: nvcr.io
+      repository: 0837451325059433/components-dev/dsx-spire-server
+      pullPolicy: IfNotPresent
+      tag: 0.1.0
     resources:
       requests:
         cpu: 250m
@@ -23,9 +30,9 @@ spire:
         cpu: 500m
         memory: 1Gi
     defaultJwtSvidTTL: 5m
-    # Configure the dsx_imds server plugin with the official SPIRE chart's
-    # initContainers, volumes, and customPlugins values. See the values example
-    # in the README for the complete external-plugin contract.
+    # Configure the embedded plugins with the official SPIRE chart's
+    # customPlugins values. See the values example in the README for the
+    # complete external-plugin contract.
     # External plugin subprocesses inherit the documented DSX OTel injection
     # from the SPIRE server container.
     podAnnotations:

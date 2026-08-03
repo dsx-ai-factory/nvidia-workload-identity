@@ -268,8 +268,9 @@ deploy:
           identityKeys.image.tag: "{{.IMAGE_TAG_dsx_identity_dsx_identity_keys}}"
           podTokenFetcher.image.repository: "{{.IMAGE_REPO_dsx_identity_dsx_token_fetcher}}"
           podTokenFetcher.image.tag: "{{.IMAGE_TAG_dsx_identity_dsx_token_fetcher}}"
-          "spire.spire-server.initContainers[0].image": "{{.IMAGE_FULLY_QUALIFIED_dsx_identity_dsx_imds_node_attestor_server}}"
-          "spire.spire-server.initContainers[1].image": "{{.IMAGE_FULLY_QUALIFIED_dsx_identity_dsx_dpu_node_attestor_server}}"
+          spire.spire-server.image.registry: ""
+          spire.spire-server.image.repository: "{{.IMAGE_REPO_dsx_identity_dsx_spire_server}}"
+          spire.spire-server.image.tag: "{{.IMAGE_TAG_dsx_identity_dsx_spire_server}}"
 ---
 apiVersion: skaffold/v4beta14
 kind: Config
@@ -316,7 +317,9 @@ deploy:
           - ../scripts/dsx-imds-host-agent-values.yaml
           - ../scripts/k1/dsx-imds-host-agent-values.yaml
         setValueTemplates:
-          "spire-agent.initContainers[0].image": "{{.IMAGE_FULLY_QUALIFIED_dsx_identity_dsx_imds_node_attestor_agent}}"
+          spire-agent.image.registry: ""
+          spire-agent.image.repository: "{{.IMAGE_REPO_dsx_identity_dsx_spire_agent}}"
+          spire-agent.image.tag: "{{.IMAGE_TAG_dsx_identity_dsx_spire_agent}}"
 ---
 apiVersion: skaffold/v4beta14
 kind: Config

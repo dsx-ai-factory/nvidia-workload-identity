@@ -79,7 +79,8 @@ plugin_data {
 
 `endpoint` defaults to `http://169.254.169.254`. `audience` is required. The
 HTTP client connects directly, ignores ambient proxy settings, and rejects
-redirects. The local E2E fixture stages the plugin through
+redirects. `Dockerfile.spire` embeds the plugin in the DSX SPIRE agent image.
+The local E2E fixture selects that image through
 `scripts/dsx-imds-host-agent-values.yaml` plus its shard override.
 
 ## Testing

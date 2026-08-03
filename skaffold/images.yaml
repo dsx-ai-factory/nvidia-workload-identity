@@ -36,29 +36,23 @@ build:
         buildArgs:
           <<: *coreBuildArgs
           BINARY: metadata-service
-    - image: dsx-identity/dsx-imds-node-attestor-server
+    - image: dsx-identity/dsx-spire-server
       context: ..
       docker:
-        dockerfile: Dockerfile.plugin
+        dockerfile: Dockerfile.spire
+        target: dsx-spire-server
         buildArgs:
-          <<: &corePluginBuildArgs
+          <<: &spireBuildArgs
             BUILDER_IMG: 127.0.0.1:5002/library/golang:1.26.4
-            TOOLS_IMG: 127.0.0.1:5002/library/busybox:1.37.0-musl
-          BINARY: dsx-imds-node-attestor-server
-    - image: dsx-identity/dsx-dpu-node-attestor-server
+            SPIRE_SERVER_IMG: 127.0.0.1:5002/spiffe/spire-server:1.13.2
+            SPIRE_AGENT_IMG: 127.0.0.1:5002/spiffe/spire-agent:1.13.2
+    - image: dsx-identity/dsx-spire-agent
       context: ..
       docker:
-        dockerfile: Dockerfile.plugin
+        dockerfile: Dockerfile.spire
+        target: dsx-spire-agent
         buildArgs:
-          <<: *corePluginBuildArgs
-          BINARY: dsx-dpu-node-attestor-server
-    - image: dsx-identity/dsx-imds-node-attestor-agent
-      context: ..
-      docker:
-        dockerfile: Dockerfile.plugin
-        buildArgs:
-          <<: *corePluginBuildArgs
-          BINARY: dsx-imds-node-attestor-agent
+          <<: *spireBuildArgs
     - image: dsx-identity/dsx-imds-network-setup
       context: ..
       docker:
