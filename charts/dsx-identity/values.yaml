@@ -88,16 +88,6 @@ spire:
         cpu: 200m
         memory: 256Mi
 
-admission:
-  enabled: true
-  # Subjects that deploy chart-owned SPIRE registration resources.
-  deploymentSubjects: []
-  # - kind: Group
-  #   name: identity-deployers
-  # - kind: ServiceAccount
-  #   name: identity-deployer
-  #   namespace: identity-system
-
 observability:
   # One level configures every chart-owned first-party Go process.
   logLevel: info

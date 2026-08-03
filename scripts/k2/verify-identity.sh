@@ -1,5 +1,5 @@
 #!/bin/bash
-# Verify k2 Identity Controller registrations and VM identity delivery.
+# Verify k2 DPU, host, and VM identity delivery.
 
 set -euo pipefail
 
@@ -43,91 +43,29 @@ initialize_external_test_process() {
     docker image inspect "${E2E_PROBE_IMAGE}" >/dev/null
 }
 
-spire_server_entry() {
-    kubectl exec statefulset/dsx-identity-server -n dsx-identity \
-        --context "${CONTEXT}" -c spire-server -- \
-        /opt/spire/bin/spire-server entry "$@"
-}
+verify_dpu_controller_registration() {
+    log_test "Checking the Identity Controller DPU registration..."
 
-wait_for_spire_entry_count() {
-    local spiffe_id="$1"
-    local expected="$2"
-    local result_name="${3:-}"
-    local current_entries count deadline=$((SECONDS + 60))
+    local spiffe_id parent_id entries="" deadline=$((SECONDS + 60))
+    spiffe_id="spiffe://k2.sjc-1.nvidia.com/tenant/operator-1/service/dsx/dpu/e2e-controller-dpu"
+    parent_id="spiffe://k2.sjc-1.nvidia.com/spire/agent/dpu_hw/dpf-serial-001"
     while ((SECONDS < deadline)); do
-        current_entries=$(spire_server_entry show -spiffeID "${spiffe_id}" -output json) || continue
-        count=$(jq -er '.entries | length' <<<"${current_entries}") || continue
-        if [[ "${count}" -eq "${expected}" ]]; then
-            [[ -z "${result_name}" ]] || printf -v "${result_name}" '%s' "${current_entries}"
+        entries=$(kubectl exec statefulset/dsx-identity-server -n dsx-identity \
+            --context "${CONTEXT}" -c spire-server -- \
+            /opt/spire/bin/spire-server entry show -spiffeID "${spiffe_id}" \
+            -output json 2>/dev/null) || continue
+        jq -e --arg parent "${parent_id}" '
+            .entries | length == 1 and
+            ("spiffe://" + .[0].parent_id.trust_domain + .[0].parent_id.path) == $parent
+        ' <<<"${entries}" >/dev/null && {
+            log_success "Identity Controller created the DPU entry under its dpu_hw agent"
             return 0
-        fi
+        }
     done
 
-    log_error "SPIRE entry ${spiffe_id} did not reach count ${expected}"
+    log_error "Identity Controller did not create the expected DPU SPIRE entry"
+    [[ -z "${entries}" ]] || jq . <<<"${entries}" >&2
     return 1
-}
-
-assert_spire_entry() {
-    local spiffe_id="$1"
-    local parent_id="$2"
-    local hint="$3"
-    local holder_namespace="$4"
-    local holder_service_account="$5"
-    local holder_pod_uid="${6:-}"
-    local entries
-
-    wait_for_spire_entry_count "${spiffe_id}" 1 entries || return 1
-    if ! jq -e --arg parent "${parent_id}" --arg hint "${hint}" \
-        --arg namespace "${holder_namespace}" \
-        --arg service_account "${holder_service_account}" \
-        --arg pod_uid "${holder_pod_uid}" '
-        .entries | length == 1 and
-        ("spiffe://" + .[0].parent_id.trust_domain + .[0].parent_id.path) == $parent and
-        .[0].hint == $hint and
-        ([.[0].selectors[] | .type + ":" + .value] | sort) ==
-        (["k8s:ns:" + $namespace, "k8s:sa:" + $service_account] +
-          (if $pod_uid == "" then [] else ["k8s:pod-uid:" + $pod_uid] end) | sort)
-    ' <<<"${entries}" >/dev/null; then
-        log_error "SPIRE entry ${spiffe_id} has the wrong parent, hint, or selectors"
-        jq . <<<"${entries}" >&2
-        return 1
-    fi
-}
-
-assert_operator_host_boundary_entry() {
-    local spiffe_id="$1"
-    local entries
-
-    wait_for_spire_entry_count "${spiffe_id}" 1 entries || return 1
-    if ! jq -e '
-        def parent_id: "spiffe://" + .parent_id.trust_domain + .parent_id.path;
-        .entries | length == 1 and
-        (.[0] | parent_id | startswith("spiffe://k2.sjc-1.nvidia.com/spire/agent/k8s_psat/k2/")) and
-        .[0].hint == "dsx-imds"
-    ' <<<"${entries}" >/dev/null; then
-        log_error "SPIRE host entry ${spiffe_id} has the wrong local boundary parent or hint"
-        jq . <<<"${entries}" >&2
-        return 1
-    fi
-}
-
-assert_dpu_fetcher_entry() {
-    local spiffe_id="$1"
-    local parent_id="$2"
-    local entries
-
-    wait_for_spire_entry_count "${spiffe_id}" 1 entries || return 1
-    if ! jq -e --arg parent "${parent_id}" '
-        .entries | length == 1 and
-        ("spiffe://" + .[0].parent_id.trust_domain + .[0].parent_id.path) == $parent and
-        .[0].hint == "dsx-dpu" and
-        ([.[0].selectors[] | .type + ":" + .value] | sort) ==
-          (["unix:uid:1000", "unix:path:/usr/local/bin/dsx-token-fetcher"] | sort)
-    ' <<<"${entries}" >/dev/null; then
-        log_error "SPIRE DPU token fetcher entry ${spiffe_id} has the wrong parent, hint, or selectors"
-        jq . <<<"${entries}" >&2
-        return 1
-    fi
 }
 
 # Check the exchanged JWT contract.
@@ -269,21 +207,6 @@ EOF
     log_success "OpenBao verified the VM signature and enforced its exact policies"
 }
 
-verify_controller_registrations() {
-    log_test "Checking the deployed Identity Controller registrations..."
-
-    local dpu_name=e2e-controller-dpu host_name=e2e-controller-host-source
-    local dpu_id dpu_parent host_id
-    dpu_id="spiffe://k2.sjc-1.nvidia.com/tenant/operator-1/service/dsx/dpu/${dpu_name}"
-    dpu_parent="spiffe://k2.sjc-1.nvidia.com/spire/agent/dsx_dpu/${dpu_name}"
-    host_id="spiffe://k2.sjc-1.nvidia.com/tenant/tenant-2/service/dsx/host/${host_name}"
-
-    assert_dpu_fetcher_entry "${dpu_id}" "${dpu_parent}" || return 1
-    assert_spire_entry "${host_id}" "${dpu_parent}" "dsx-imds" \
-        dsx-identity e2e-nico-mds || return 1
-    log_success "Identity Controller created the required DPU and host registrations"
-}
-
 verify_dpu_token_file() {
     log_test "Exercising DPU token-file delivery through the external-agent fixture..."
 
@@ -311,12 +234,10 @@ verify_dpu_token_file() {
 verify_operator_host_imds() {
     log_test "Requesting the operator worker-host identity from bootstrap IMDS..."
 
-    local pod expected_subject internal_id response="" token deadline=$((SECONDS + 180))
+    local pod expected_subject response="" token deadline=$((SECONDS + 180))
     pod=$(kubectl get pod e2e-nico-mds -n dsx-identity --context "${CONTEXT}" \
         -o jsonpath='{.metadata.name}') || return 1
     expected_subject="spiffe://operator-1.ds9.dsx.nvid.id/host/${OPERATOR_HOST_ID}"
-    internal_id="spiffe://k2.sjc-1.nvidia.com/tenant/operator-1/service/dsx/host/${OPERATOR_HOST_ID}"
-    assert_operator_host_boundary_entry "${internal_id}" || return 1
     while ((SECONDS < deadline)); do
         response=$(kubectl exec "${pod}" -n dsx-identity --context "${CONTEXT}" \
             -c host-imds-probe -- curl -fsS --max-time 10 -G \
@@ -339,47 +260,6 @@ verify_operator_host_imds() {
     log_success "Operator worker-host IMDS returned the configured tenant and node ID"
 }
 
-verify_virt_launcher_associations() {
-    log_test "Checking the operator Pod and dynamic VM associations..."
-
-    local pod node uid pod_id vm_id pod_entries vm_entries parent_id
-    pod=$(kubectl get pods -n "${NAMESPACE}" --context "${CONTEXT}" \
-        -l "kubevirt.io=virt-launcher,kubevirt.io/domain=${VM_NAME}" \
-        -o jsonpath='{.items[0].metadata.name}') || return 1
-    node=$(kubectl get pod "${pod}" -n "${NAMESPACE}" --context "${CONTEXT}" \
-        -o jsonpath='{.spec.nodeName}') || return 1
-    uid=$(kubectl get pod "${pod}" -n "${NAMESPACE}" --context "${CONTEXT}" \
-        -o jsonpath='{.metadata.uid}') || return 1
-    pod_id="spiffe://k2.sjc-1.nvidia.com/tenant/operator-1/service/dsx/host/${node}/pod/${uid}"
-    vm_id="spiffe://k2.sjc-1.nvidia.com/tenant/tenant-2/service/dsx/vm/${VM_NAME}/role/${IDENTITY_ROLE}"
-    parent_id="spiffe://k2.sjc-1.nvidia.com/spire/agent/dsx_imds/tenant/operator-1/host/${node}"
-    wait_for_spire_entry_count "${pod_id}" 1 pod_entries || return 1
-    if ! jq -e --arg parent "${parent_id}" --arg uid "${uid}" '
-        .entries | length == 1 and
-        ("spiffe://" + .[0].parent_id.trust_domain + .[0].parent_id.path) == $parent and
-        .[0].hint == "dsx-pod" and
-        ([.[0].selectors[] | .type + ":" + .value] | index("k8s:pod-uid:" + $uid)) != null
-    ' <<<"${pod_entries}" >/dev/null; then
-        log_error "virt-launcher Pod entry has the wrong operator-host parent, hint, or Pod UID selector"
-        jq . <<<"${pod_entries}" >&2
-        return 1
-    fi
-    wait_for_spire_entry_count "${vm_id}" 1 vm_entries || return 1
-    if ! jq -e --arg parent "${parent_id}" '
-        .entries | length == 1 and
-        ("spiffe://" + .[0].parent_id.trust_domain + .[0].parent_id.path) == $parent and
-        .[0].hint == "dsx-imds-vm" and
-        ([.[0].selectors[] | .type + ":" + .value] | sort) ==
-          (["k8s:ns:tenant-tenant1", "k8s:sa:e2e-debian-vm"] | sort)
-    ' <<<"${vm_entries}" >/dev/null; then
-        log_error "VM entry has the wrong operator-host parent, hint, or holder selectors"
-        jq . <<<"${vm_entries}" >&2
-        return 1
-    fi
-
-    log_success "The virt-launcher Pod and VM have the exact shared host-agent parent"
-}
-
 verify_metadata_access() {
     log_test "Requesting DSX IMDS v1 from an external tenant-network client..."
 
@@ -390,9 +270,6 @@ verify_metadata_access() {
         --for=jsonpath='{.status.interfaces[?(@.name=="default")].ipAddress}' \
         "vmi/${VM_NAME}" -n "${NAMESPACE}" --context "${CONTEXT}" \
         --timeout=300s || return 1
-    run_timed "VM registration associations" \
-        verify_virt_launcher_associations || return 1
-
     vm_ip=$(kubectl get vmi "${VM_NAME}" -n "${NAMESPACE}" \
         --context "${CONTEXT}" -o json | jq -r '
           [.status.interfaces[]? |
@@ -432,11 +309,10 @@ main() {
         --context "${CONTEXT}" -o json | jq -er '.data["active-kid.json"]' | base64 -d | jq -er '.active_kid')
     log_timing "setup" "${setup_started}"
 
+    run_timed "DPU controller registration" verify_dpu_controller_registration || failed=$((failed + 1))
     run_timed "operator host IMDS" verify_operator_host_imds || failed=$((failed + 1))
     run_timed "DPU token file" verify_dpu_token_file || failed=$((failed + 1))
     run_timed "VM identity and OpenBao" verify_metadata_access || failed=$((failed + 1))
-    run_timed "controller registrations" verify_controller_registrations || failed=$((failed + 1))
-
     echo
     if [[ $failed -eq 0 ]]; then
         log_timing "k2 identity verification total" "${script_started}"

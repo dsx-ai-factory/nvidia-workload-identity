@@ -14,6 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 
+	dpuidentity "dsx-identity/internal/dpu"
 	"dsx-identity/internal/identity"
 )
 
@@ -26,8 +27,9 @@ var DPUGVK = schema.GroupVersionKind{
 
 // DPUReconciler maps each read-only DPU source to one entry. metadata.name is
 // the DPU resource ID and OperatorTenant is its tenant. The parent agent is
-// /spire/agent/dsx_dpu/<dpu-name>, the hint is dsx-dpu, and configured Unix
-// selectors identify the token fetcher that calls the Workload API.
+// /spire/agent/dpu_hw/<serial>, matching the DPF-provisioned NodeAttestor.
+// Configured Unix selectors identify the token fetcher that calls the Workload
+// API.
 type DPUReconciler struct {
 	client.Client
 	Config   Config
@@ -61,7 +63,18 @@ func (r *DPUReconciler) desiredEntry(dpu *unstructured.Unstructured) (*spirev1al
 	if err != nil {
 		return nil, err
 	}
-	parentID, err := spiffeid.FromSegments(td, "spire", "agent", "dsx_dpu", dpu.GetName())
+	rawSerial, found, err := unstructured.NestedString(dpu.Object, "spec", "serialNumber")
+	if err != nil {
+		return nil, fmt.Errorf("DPU spec.serialNumber: %w", err)
+	}
+	if !found {
+		return nil, fmt.Errorf("DPU spec.serialNumber is required")
+	}
+	serial, err := dpuidentity.NormalizeSerial(rawSerial)
+	if err != nil {
+		return nil, fmt.Errorf("DPU spec.serialNumber: %w", err)
+	}
+	parentID, err := spiffeid.FromSegments(td, "spire", "agent", dpuidentity.PluginName, serial)
 	if err != nil {
 		return nil, fmt.Errorf("DPU parent ID: %w", err)
 	}

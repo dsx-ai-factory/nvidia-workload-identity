@@ -77,6 +77,13 @@
   as proxies for behavior.
 - Never add meta-tests that grep, parse, or inspect repository artifacts to assert
   application behavior or wiring.
+- Keep Kubernetes test resources in manifest files. Never embed YAML resources in
+  test scripts.
+- Deploy test resources through Skaffold, Helm, or Kustomize. Do not manually apply,
+  create, or patch them with `kubectl` from test scripts.
+- Do not inspect source manifests or rendered resource specifications as proxies for
+  behavior. Live resources created by a running controller are behavior and may be
+  asserted directly.
 - Static linting, schema checks, and rendering may validate syntax and deployability
   only.
 - Keep tests deterministic. Synchronize on observable conditions with bounded

@@ -24,7 +24,7 @@ The official controller-manager registers each Kubernetes Pod beneath its
 worker's `dsx_imds`-attested agent. Its registration uses the configured
 operator tenant, Kubernetes node name, and Pod UID, and the Kubernetes
 WorkloadAttestor serves it. The base DPU registration is instead parented to
-the external `dsx_dpu`-attested agent.
+the external `dpu_hw`-attested agent identified by the DPU serial number.
 
 ```mermaid
 flowchart LR

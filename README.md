@@ -50,7 +50,7 @@ flowchart TB
 
     Sources --> Controller
     Controller -->|"derived SPIRE entries"| SPIRE
-    DPU -->|"dsx_dpu node attestation"| SPIRE
+    DPU -->|"dpu_hw node attestation"| SPIRE
     DPU -->|"Workload API parent"| DPUFetcher
     DPUFetcher -->|"atomic token write"| DPUToken
     DPUToken -->|"capability read"| DPUProcess
@@ -86,7 +86,7 @@ flowchart TB
     CSDPUDSX["exchanged DSX JWTs<br/>DPU token file: operator tenant<br/>host node attestation: operator tenant"]
     CSDPUFetcher["dsx-token-fetcher process<br/>actual Workload API caller"]
     CSDPUIMDS["paired DPU link-local intercept<br/>NICo or Carbide IMDS passthrough<br/>DSX IMDS (metadata-service)"]
-    CSDPUAgent["external DPU SPIRE agent process<br/>Unix WorkloadAttestor<br/>dsx_dpu NodeAttestor client plugin"]
+    CSDPUAgent["external DPU SPIRE agent process<br/>Unix WorkloadAttestor<br/>dpu_hw NodeAttestor client plugin"]
     CSHardware["DPU serial number and SPDM"]
   end
 
@@ -105,7 +105,7 @@ flowchart TB
     CPDPUDSX["exchanged DSX JWTs<br/>DPU token file: operator tenant<br/>host node attestation: operator tenant"]
     CPDPUFetcher["dsx-token-fetcher process<br/>actual Workload API caller"]
     CPDPUIMDS["paired DPU link-local intercept<br/>NICo or Carbide IMDS passthrough<br/>DSX IMDS (metadata-service)"]
-    CPDPUAgent["external DPU SPIRE agent process<br/>Unix WorkloadAttestor<br/>dsx_dpu NodeAttestor client plugin"]
+    CPDPUAgent["external DPU SPIRE agent process<br/>Unix WorkloadAttestor<br/>dpu_hw NodeAttestor client plugin"]
     CPHardware["DPU serial number and SPDM"]
   end
 
@@ -174,7 +174,7 @@ flowchart TB
     VMDPUDSX["exchanged DSX JWTs<br/>DPU token file: operator tenant<br/>host node attestation: operator tenant"]
     VMDPUFetcher["dsx-token-fetcher process<br/>actual Workload API caller"]
     VMDPUIMDS["paired DPU link-local intercept<br/>NICo or Carbide IMDS passthrough<br/>DSX IMDS (metadata-service)"]
-    VMDPUAgent["external DPU SPIRE agent process<br/>Unix WorkloadAttestor<br/>dsx_dpu NodeAttestor client plugin"]
+    VMDPUAgent["external DPU SPIRE agent process<br/>Unix WorkloadAttestor<br/>dpu_hw NodeAttestor client plugin"]
     VMHardware["DPU serial number and SPDM"]
   end
 
@@ -191,7 +191,7 @@ flowchart TB
     BMDPUDSX["exchanged DSX JWTs<br/>DPU token file: operator tenant<br/>host node attestation: LaunchLayer CR tenant"]
     BMDPUFetcher["dsx-token-fetcher process<br/>actual Workload API caller"]
     BMDPUIMDS["paired DPU link-local intercept<br/>NICo or Carbide IMDS passthrough<br/>DSX IMDS (metadata-service)"]
-    BMDPUAgent["external DPU SPIRE agent process<br/>Unix WorkloadAttestor<br/>dsx_dpu NodeAttestor client plugin"]
+    BMDPUAgent["external DPU SPIRE agent process<br/>Unix WorkloadAttestor<br/>dpu_hw NodeAttestor client plugin"]
     BMHardware["DPU serial number and SPDM"]
   end
 
@@ -267,13 +267,13 @@ through node attestation. They are not registration entries.
 %%{init: {"flowchart": {"defaultRenderer": "elk"}, "elk": {"nodePlacementStrategy": "SIMPLE"}}}%%
 flowchart TB
 
-  subgraph DPUParented["Entries parented to a dsx_dpu agent ID"]
+  subgraph DPUParented["Entries parented to a DPU agent ID"]
     direction LR
 
     subgraph DPULane["DPU"]
       direction TB
-      DPUCR{{"INPUT CR<br/>kind: DPU<br/>id: metadata.name"}}
-      DPUParent(["PARENT AGENT ID<br/>type: dsx_dpu<br/>spiffe://{td}/spire/agent/dsx_dpu/{metadata.name}"])
+      DPUCR{{"INPUT CR<br/>kind: DPU<br/>id: metadata.name<br/>agent serial: spec.serialNumber"}}
+      DPUParent(["PARENT AGENT ID<br/>type: dpu_hw<br/>spiffe://{td}/spire/agent/dpu_hw/{normalized spec.serialNumber}"])
       DPUEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: DSX Identity Controller<br/>subject: /tenant/{operator}/service/dsx/dpu/{metadata.name}<br/>hint: dsx-dpu<br/>selectors: DPU token-fetcher Unix selectors"]
       DPUCR -->|"derives subject"| DPUEntry
       DPUParent -->|"spec.parentID"| DPUEntry
@@ -361,7 +361,7 @@ external to the identity chart.
 | Consumer | SPIRE trust path | DSX JWT delivery |
 |---|---|---|
 | [Kubernetes Pod](cmd/dsx-token-fetcher/README.md) | Kubernetes WorkloadAttestor under the worker's `dsx_imds`-attested host agent. The registration uses the operator tenant and worker host subject | The `dsx-token-fetcher` sidecar selects `dsx-pod`, exchanges the local SPIRE JWT-SVID, and writes the DSX JWT to a Pod-private volume mounted read-only in application containers |
-| [DPU process](cmd/dsx-token-fetcher/README.md) | The external DPU agent attests through the `dsx_dpu` NodeAttestor agent and server. For token-file delivery, Unix WorkloadAttestor selectors bind the base DPU SVID to the `dsx-token-fetcher` process because it is the Workload API caller | `dsx-token-fetcher` selects `dsx-dpu`, exchanges the local SPIRE JWT-SVID, and writes a protected token file. The DPU process consumes that file as a capability |
+| [DPU process](cmd/dsx-token-fetcher/README.md) | The external DPU agent attests through the `dpu_hw` NodeAttestor agent and server. For token-file delivery, Unix WorkloadAttestor selectors bind the base DPU SVID to the `dsx-token-fetcher` process because it is the Workload API caller | `dsx-token-fetcher` selects `dsx-dpu`, exchanges the local SPIRE JWT-SVID, and writes a protected token file. The DPU process consumes that file as a capability |
 | [Bare-metal host process](cmd/dsx-imds-node-attestor-agent/README.md) | The DPU agent is attested through `dsx_dpu`. The host agent is attested through the repository `dsx_imds` NodeAttestor agent and server, then can serve local processes through the Unix WorkloadAttestor | The paired DPU intercept carries link-local IMDS to NICo or Carbide IMDS, which passes identity requests to DSX IMDS. DPU-hosted DSX IMDS exchanges directly with its reachable shard-local DSX Identity Keys. The host agent uses the returned DSX JWT for node attestation. A host-process-specific token delivery contract is not currently defined |
 | [KubeVirt VM](cmd/metadata-service/README.md) | The controller derives the VM subject from the dynamically supplied tenant ID and parents it to the operator-owned worker host's `dsx_imds` agent. The Kubernetes WorkloadAttestor serves the operator-owned virt-launcher Pod, and SPIFFE CSI exposes that same agent's Workload API socket | The DSX IMDS sidecar selects the VM SPIRE JWT-SVID by its exact `dsx-imds-vm` hint, exchanges it through DSX Identity Keys Proxy CSI, and serves the DSX JWT through IMDS |
 
@@ -491,14 +491,8 @@ deployments require the external DPU and LaunchLayer APIs. Identity injection
 requires Kyverno. Tracing requires the DSX observability stack. ServiceMonitor
 resources require the Prometheus Operator APIs.
 
-Kyverno is the admission boundary, not a source of identity data. The identity
-chart installs fail-closed policies before protected registrations. Configured
-deployment subjects may manage release `ClusterSPIFFEID` objects, the Identity
-Controller may manage derived `ClusterStaticEntry` objects, and the official
-controller-manager may update status and finalizers. The controller is the sole
-writer and validator for derived static entries. Admission validates release
-registration shapes and prevents application containers from mounting the
-Workload API or DSX Identity Keys Proxy sockets.
+Kyverno injects identity sidecars and prevents application containers from
+mounting the Workload API or DSX Identity Keys Proxy sockets.
 
 ## Identity contract
 
@@ -559,8 +553,8 @@ The chart requires the controller-manager value to equal
 both values causes the StatefulSet to roll out without a restart hook.
 
 DPU identities remain separate controller-derived static entries parented to
-the external `dsx_dpu` agent. DPUs are not Kubernetes nodes and do not
-participate in Pod registration. The
+the external `dpu_hw` agent identified by the normalized DPU serial. DPUs are
+not Kubernetes nodes and do not participate in Pod registration. The
 [DSX Token Fetcher](cmd/dsx-token-fetcher/README.md) obtains and exchanges the
 DPU SPIRE JWT-SVID, then writes the DSX JWT to a protected file.
 
@@ -788,10 +782,12 @@ sequenceDiagram
 
 ### Workflow
 
-Repository validation requires Git, mise, Make, and `curl`. Mise installs the
-repository-pinned tools. The full E2E lifecycle also requires Docker with
-Buildx, OpenSSL, OpenSSH, and a supported Linux host with the kernel features
-needed by OVN-Kubernetes and KubeVirt. WSL is unsupported.
+Repository validation requires Git, mise, Make, `curl`, and a supported Linux
+host. `make validate` builds Linux-only nftables code and exercises Unix socket
+paths that exceed macOS limits. macOS and WSL are unsupported. Mise installs
+the repository-pinned tools. The full E2E lifecycle also requires Docker with
+Buildx, OpenSSL, OpenSSH, and the kernel features needed by OVN-Kubernetes and
+KubeVirt.
 
 ```bash
 git submodule update --init --recursive
@@ -807,7 +803,7 @@ make clean
 ```
 
 The E2E suite verifies operator-host IMDS through both `dsx_imds` plugin halves,
-dynamic standalone-host registration, DPU file delivery, Pod and VM identity
-delivery, shard isolation, NATS KV propagation, aggregate JWKS behavior,
-OpenBao authorization, restart recovery, and signing-key rotation. External
-DPU and standalone-host hardware is not modeled as Kubernetes Nodes.
+DPU file delivery, Pod and VM identity delivery, shard isolation, NATS KV
+propagation, aggregate JWKS behavior, OpenBao authorization, restart recovery,
+and signing-key rotation. External DPU and standalone-host hardware is not
+modeled as Kubernetes Nodes.
