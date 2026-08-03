@@ -50,7 +50,7 @@ spire:
       extraEnv:
         - name: OPERATOR_TENANT
           value: ""
-      parentIDTemplate: 'spiffe://{{ .TrustDomain }}/spire/agent/dsx_imds/tenant/$OPERATOR_TENANT/host/{{ .NodeMeta.Name }}'
+      parentIDTemplate: 'spiffe://{{ .TrustDomain }}/spire/agent/dsx_imds/tenant/$OPERATOR_TENANT/bm/{{ .NodeMeta.Name }}'
       resources:
         requests:
           cpu: 100m

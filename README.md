@@ -245,7 +245,7 @@ flowchart TB
 The parent association is an attested SPIRE agent, not a resource-ownership
 hierarchy. DPUs are external hardware and are not Kubernetes worker nodes.
 Every Kubernetes worker is an operator-owned bare-metal host, and every Pod
-uses the configured operator tenant and a `/host/<node-name>/pod/<pod-uid>`
+uses the configured operator tenant and a `/bm/<node-name>/pod/<pod-uid>`
 subject. A tenant-facing bare-metal host is standalone and never becomes a
 Kubernetes node. A KubeVirt VM runs in an operator-owned virt-launcher Pod, so
 the Pod keeps its operator identity while its metadata sidecar selects the
@@ -281,9 +281,9 @@ flowchart TB
 
     subgraph HostLane["Standalone tenant-facing bare-metal host"]
       direction TB
-      HostSource{{"INPUT CR<br/>kind: LaunchLayerSourceFixture<br/>spec.type: host"}}
+      HostSource{{"INPUT CR<br/>kind: LaunchLayerSourceFixture<br/>spec.type: bm"}}
       HostParent(["PARENT AGENT ID<br/>type: dsx_dpu<br/>spiffe://{td}/spire/agent/dsx_dpu/{spec.parentID}"])
-      HostEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: DSX Identity Controller<br/>subject: /tenant/{spec.tenantID}/service/dsx/host/{spec.resourceID}[/role/{spec.role}]<br/>hint: dsx-imds<br/>selectors: DPU metadata runtime selectors"]
+      HostEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: DSX Identity Controller<br/>subject: /tenant/{spec.tenantID}/service/dsx/bm/{spec.resourceID}[/role/{spec.role}]<br/>hint: dsx-imds<br/>selectors: DPU metadata runtime selectors"]
       HostSource -->|"derives subject"| HostEntry
       HostParent -->|"spec.parentID"| HostEntry
     end
@@ -296,8 +296,8 @@ flowchart TB
       direction TB
       PodTemplate{{"INPUT TEMPLATE CR<br/>kind: ClusterSPIFFEID<br/>owner: identity chart"}}
       PodObject{{"MATCHED OBJECT<br/>kind: Pod<br/>label: service=dsx"}}
-      PodParent(["PARENT AGENT ID<br/>type: dsx_imds<br/>spiffe://{td}/spire/agent/dsx_imds/tenant/{operator}/host/{Pod spec.nodeName}"])
-      PodEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: SPIRE controller-manager<br/>subject: /tenant/{operator}/service/dsx/host/{Pod spec.nodeName}/pod/{Pod metadata.uid}[/role/{role}]<br/>hint: dsx-pod<br/>selectors: matched Kubernetes Pod"]
+      PodParent(["PARENT AGENT ID<br/>type: dsx_imds<br/>spiffe://{td}/spire/agent/dsx_imds/tenant/{operator}/bm/{Pod spec.nodeName}"])
+      PodEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: SPIRE controller-manager<br/>subject: /tenant/{operator}/service/dsx/bm/{Pod spec.nodeName}/pod/{Pod metadata.uid}[/role/{role}]<br/>hint: dsx-pod<br/>selectors: matched Kubernetes Pod"]
       PodTemplate -->|"supplies templates"| PodEntry
       PodObject -->|"supplies metadata"| PodEntry
       PodParent -->|"parentIDTemplate"| PodEntry
@@ -306,7 +306,7 @@ flowchart TB
     subgraph VMLane["Tenant-owned KubeVirt VM"]
       direction TB
       VMSource{{"INPUT CR<br/>kind: LaunchLayerSourceFixture<br/>spec.type: vm"}}
-      VMParent(["PARENT AGENT ID<br/>type: dsx_imds<br/>spiffe://{td}/spire/agent/dsx_imds/tenant/{operator}/host/{spec.parentID}"])
+      VMParent(["PARENT AGENT ID<br/>type: dsx_imds<br/>spiffe://{td}/spire/agent/dsx_imds/tenant/{operator}/bm/{spec.parentID}"])
       VMEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: DSX Identity Controller<br/>subject: /tenant/{spec.tenantID}/service/dsx/vm/{spec.resourceID}[/role/{spec.role}]<br/>hint: dsx-imds-vm<br/>selectors: holder namespace, service account, and optional Pod UID"]
       VMSource -->|"derives subject"| VMEntry
       VMParent -->|"spec.parentID"| VMEntry
@@ -491,9 +491,9 @@ mounting the Workload API or DSX Identity Keys Proxy sockets.
 DSX JWT subjects use:
 
 ```text
-spiffe://<tenant>.ds9.dsx.nvid.id/<dpu|host|vm>/<resource-id>
+spiffe://<tenant>.ds9.dsx.nvid.id/<dpu|bm|vm>/<resource-id>
   [/process/<name>][/role/<role>]
-spiffe://<operator-tenant>.ds9.dsx.nvid.id/host/<node-name>/pod/<pod-uuid>
+spiffe://<operator-tenant>.ds9.dsx.nvid.id/bm/<node-name>/pod/<pod-uuid>
   [/role/<role>]
 ```
 
@@ -507,9 +507,9 @@ spiffe://<local-trust-domain>/tenant/<tenant>/service/dsx/<resource-type>/<resou
 | Resource | Tenant source | Subject resource path |
 |---|---|---|
 | DPU | `global.operatorTenant` | `/dpu/<dpu-id>` |
-| Operator bare-metal Kubernetes worker | `global.operatorTenant` | `/host/<node-name>` |
-| Kubernetes Pod | `global.operatorTenant` | `/host/<node-name>/pod/<pod-uid>` |
-| Bare-metal host with a LaunchLayer source | Source CR `tenantID`, supplied dynamically | `/host/<host-id>` |
+| Operator bare-metal Kubernetes worker | `global.operatorTenant` | `/bm/<node-name>` |
+| Kubernetes Pod | `global.operatorTenant` | `/bm/<node-name>/pod/<pod-uid>` |
+| Bare-metal host with a LaunchLayer source | Source CR `tenantID`, supplied dynamically | `/bm/<bm-id>` |
 | VM with a LaunchLayer source | Source CR `tenantID`, supplied dynamically | `/vm/<vm-id>` |
 
 Every Kubernetes worker is an operator-owned bare-metal host. There is no
@@ -519,7 +519,7 @@ name. Physical worker-to-DPU pairing belongs to the external NICo and DPU
 integration boundary, not the Identity Controller configuration.
 
 Every DSX Kubernetes Pod supplies the service label. One SPIRE
-controller-manager derives its operator tenant, host resource type, node name,
+controller-manager derives its operator tenant, BM resource type, node name,
 and Pod UID. Every worker is an operator-owned bare-metal host, so the fixed
 parent template identifies that worker's operator-tenant `dsx_imds` agent.
 
@@ -537,7 +537,7 @@ spire:
       extraEnv:
         - name: OPERATOR_TENANT
           value: operator-1
-      parentIDTemplate: 'spiffe://{{ .TrustDomain }}/spire/agent/dsx_imds/tenant/$OPERATOR_TENANT/host/{{ .NodeMeta.Name }}'
+      parentIDTemplate: 'spiffe://{{ .TrustDomain }}/spire/agent/dsx_imds/tenant/$OPERATOR_TENANT/bm/{{ .NodeMeta.Name }}'
 ```
 
 The chart requires the controller-manager value to equal
@@ -557,11 +557,11 @@ publishes its final API, the repository uses a temporary
 
 ```yaml
 spec:
-  type: vm                             # host or vm
+  type: vm                             # bm or vm
   tenantID: tenant-2       # supplied dynamically by this source
   resourceID: vm-1234
-  parentID: host-1234                  # DPU ID for host, operator worker host ID for VM
-  role: database                       # optional for host or VM
+  parentID: host-1234                  # DPU ID for BM, operator worker host ID for VM
+  role: database                       # optional for BM or VM
   holder:
     namespace: tenant-tenant1
     serviceAccount: vm-identity-client

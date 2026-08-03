@@ -79,12 +79,12 @@ func (v *Verifier) Verify(ctx context.Context, rawToken string) (spiffeid.ID, er
 	}
 	// Process, Pod, and role identities are narrower than the host and must not
 	// gain the authority to attest a SPIRE node.
-	if parsedSubject.ResourceType != identity.ResourceHost || parsedSubject.WorkloadType != "" || parsedSubject.Role != "" {
+	if parsedSubject.ResourceType != identity.ResourceBM || parsedSubject.WorkloadType != "" || parsedSubject.Role != "" {
 		return spiffeid.ID{}, fmt.Errorf("attestation subject must identify a base host")
 	}
 
 	agentID, err := spiffeid.FromSegments(v.trustDomain,
-		"spire", "agent", "dsx_imds", "tenant", parsedSubject.Tenant, "host", parsedSubject.ResourceID)
+		"spire", "agent", "dsx_imds", "tenant", parsedSubject.Tenant, "bm", parsedSubject.ResourceID)
 	if err != nil {
 		return spiffeid.ID{}, fmt.Errorf("build host agent ID: %w", err)
 	}

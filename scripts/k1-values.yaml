@@ -17,7 +17,7 @@ spire:
             trust_domain: sjc-1.nvidia.com
     controllerManager:
       # Kind's control-plane node emulates the external DPU boundary.
-      parentIDTemplate: 'spiffe://{{ .TrustDomain }}/spire/agent/{{ if eq .NodeMeta.Name "k1-control-plane" }}k8s_psat/{{ .ClusterName }}/{{ .NodeMeta.UID }}{{ else }}dsx_imds/tenant/$OPERATOR_TENANT/host/{{ .NodeMeta.Name }}{{ end }}'
+      parentIDTemplate: 'spiffe://{{ .TrustDomain }}/spire/agent/{{ if eq .NodeMeta.Name "k1-control-plane" }}k8s_psat/{{ .ClusterName }}/{{ .NodeMeta.UID }}{{ else }}dsx_imds/tenant/$OPERATOR_TENANT/bm/{{ .NodeMeta.Name }}{{ end }}'
 identityKeys:
   shardID: k1
   nats:

@@ -38,12 +38,15 @@
 - Use a `feat/` or `fix/` branch for release-producing changes.
 - Use a Conventional Commit title recognized by semantic-release. Use `feat` for a
   capability and `fix` for corrections, reliability, performance, or maintenance.
-- Include a Jira reference, `NO-REF`, or `NO_REF` as required by MR Cop.
+- Put a supplied Jira reference in the Conventional Commit scope, for example
+  `fix(VMAAS-1586): use BM identity resource type`. Use `NO-REF` or `NO_REF` only
+  when MR Cop permits a change without Jira.
 - Validate every commit from the merge base with the repository's pinned commitlint
   policy. Wrap commit body lines at 72 characters and keep all lines within 100.
 - Keep each MR focused and its description current. Verify branch, title,
   description, complete commit range, and clean worktree before handoff.
-- Keep the MR Draft until required validation and exact-head CI pass.
+- Open MRs ready for review unless the user explicitly requests Draft status.
+  Required CI gates merging and does not determine MR readiness.
 
 ## Implementation
 

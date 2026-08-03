@@ -27,11 +27,11 @@ var LaunchLayerSourceGVK = schema.GroupVersionKind{
 	Kind:    "LaunchLayerSourceFixture",
 }
 
-// LaunchLayerReconciler maps each read-only source to one entry. A host source
-// produces a host SPIRE ID with parent /spire/agent/dsx_dpu/<parentID>, hint
+// LaunchLayerReconciler maps each read-only source to one entry. A BM source
+// produces a BM SPIRE ID with parent /spire/agent/dsx_dpu/<parentID>, hint
 // dsx-imds, and configured DPU metadata selectors. A VM source produces a VM
 // SPIRE ID with its optional role, parent
-// /spire/agent/dsx_imds/tenant/<operator-tenant>/host/<parentID>, hint
+// /spire/agent/dsx_imds/tenant/<operator-tenant>/bm/<parentID>, hint
 // dsx-imds-vm, and source-provided holder selectors.
 type LaunchLayerReconciler struct {
 	client.Client
@@ -77,7 +77,7 @@ func (r *LaunchLayerReconciler) desiredEntry(source *unstructured.Unstructured) 
 	}
 	var selectors []string
 	switch spec.Type {
-	case identity.ResourceHost:
+	case identity.ResourceBM:
 		selectors = slices.Clone(r.Config.DPUMetadataSelectors)
 	case identity.ResourceVM:
 		selectors, err = spec.Holder.selectors()
@@ -107,7 +107,7 @@ func (s launchLayerSpec) parentAgent(td spiffeid.TrustDomain, operatorTenant str
 	}
 
 	switch s.Type {
-	case identity.ResourceHost:
+	case identity.ResourceBM:
 		if !s.Holder.empty() {
 			return spiffeid.ID{}, "", errors.New("holder is only valid for VM LaunchLayer source entries")
 		}
@@ -122,7 +122,7 @@ func (s launchLayerSpec) parentAgent(td spiffeid.TrustDomain, operatorTenant str
 			return spiffeid.ID{}, "", errors.New("holder is required for VM LaunchLayer source entries")
 		}
 		parentID, err := spiffeid.FromSegments(td,
-			"spire", "agent", "dsx_imds", "tenant", operatorTenant, "host", s.ParentID)
+			"spire", "agent", "dsx_imds", "tenant", operatorTenant, "bm", s.ParentID)
 		if err != nil {
 			return spiffeid.ID{}, "", fmt.Errorf("host parent ID: %w", err)
 		}

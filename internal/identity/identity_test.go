@@ -37,23 +37,23 @@ func TestToDSXSPIFFEID(t *testing.T) {
 		},
 		{
 			name:     "operator bare metal host",
-			spiffeID: "spiffe://k2.internal/tenant/operator-1/service/dsx/host/worker-1",
-			dsxID:    "spiffe://operator-1.ds9.dsx.nvid.id/host/worker-1",
+			spiffeID: "spiffe://k2.internal/tenant/operator-1/service/dsx/bm/worker-1",
+			dsxID:    "spiffe://operator-1.ds9.dsx.nvid.id/bm/worker-1",
 		},
 		{
 			name:     "dynamic tenant bare metal host",
-			spiffeID: "spiffe://k2.internal/tenant/tenant-2/service/dsx/host/host-1",
-			dsxID:    "spiffe://tenant-2.ds9.dsx.nvid.id/host/host-1",
+			spiffeID: "spiffe://k2.internal/tenant/tenant-2/service/dsx/bm/host-1",
+			dsxID:    "spiffe://tenant-2.ds9.dsx.nvid.id/bm/host-1",
 		},
 		{
 			name:     "host process with role",
-			spiffeID: "spiffe://k2.internal/tenant/tenant-2/service/dsx/host/host-1/process/nke-agent/role/operator",
-			dsxID:    "spiffe://tenant-2.ds9.dsx.nvid.id/host/host-1/process/nke-agent/role/operator",
+			spiffeID: "spiffe://k2.internal/tenant/tenant-2/service/dsx/bm/host-1/process/nke-agent/role/operator",
+			dsxID:    "spiffe://tenant-2.ds9.dsx.nvid.id/bm/host-1/process/nke-agent/role/operator",
 		},
 		{
 			name:     "pod",
-			spiffeID: "spiffe://k2.internal/tenant/tenant-2/service/dsx/host/worker-1/pod/13c31c2c-2673-42d1-bdeb-241864db47f6",
-			dsxID:    "spiffe://tenant-2.ds9.dsx.nvid.id/host/worker-1/pod/13c31c2c-2673-42d1-bdeb-241864db47f6",
+			spiffeID: "spiffe://k2.internal/tenant/tenant-2/service/dsx/bm/worker-1/pod/13c31c2c-2673-42d1-bdeb-241864db47f6",
+			dsxID:    "spiffe://tenant-2.ds9.dsx.nvid.id/bm/worker-1/pod/13c31c2c-2673-42d1-bdeb-241864db47f6",
 		},
 		{
 			name:     "vm with role",
@@ -89,15 +89,15 @@ func TestRejectInvalidSPIFFEID(t *testing.T) {
 	t.Parallel()
 
 	tests := []string{
-		"spiffe://k2.internal/tenant/tenant_1/service/dsx/host/host-1",
+		"spiffe://k2.internal/tenant/tenant_1/service/dsx/bm/host-1",
 		"spiffe://k2.internal/tenant/operator-1/service/dsx/pod/pod-1",
-		"spiffe://k2.internal/tenant/operator-1/service/dsx/host/host-1/process",
-		"spiffe://k2.internal/tenant/operator-1/service/dsx/host/host-1/pod/not-a-uuid",
+		"spiffe://k2.internal/tenant/operator-1/service/dsx/bm/host-1/process",
+		"spiffe://k2.internal/tenant/operator-1/service/dsx/bm/host-1/pod/not-a-uuid",
 		"spiffe://k2.internal/tenant/operator-1/service/dsx/dpu/dpu-1/pod/13c31c2c-2673-42d1-bdeb-241864db47f6",
 		"spiffe://k2.internal/tenant/operator-1/service/dsx/vm/vm-1/pod/13c31c2c-2673-42d1-bdeb-241864db47f6",
-		"spiffe://k2.internal/tenant/operator-1/service/dsx/host/host-1/role/BadRole",
-		"spiffe://k2.internal/tenant/operator-1/service/dsx/host/host-1/extra/value",
-		"spiffe://k2.internal/tenant/operator-1/service/dsx/host/%20host",
+		"spiffe://k2.internal/tenant/operator-1/service/dsx/bm/host-1/role/BadRole",
+		"spiffe://k2.internal/tenant/operator-1/service/dsx/bm/host-1/extra/value",
+		"spiffe://k2.internal/tenant/operator-1/service/dsx/bm/%20host",
 	}
 	for _, raw := range tests {
 		raw := raw
@@ -118,12 +118,12 @@ func TestRejectInvalidDSXID(t *testing.T) {
 	t.Parallel()
 
 	for _, raw := range []string{
-		"spiffe://operator-1.sjc1.dsx.nvid.id/host/host-1",
-		"spiffe://operator-1.ds9.identity.nvid.id/host/host-1",
-		"spiffe://operator-1.ds9.dsx.nvidia.com/host/host-1",
-		"spiffe://tenant_1.ds9.dsx.nvid.id/host/host-1",
-		"spiffe://operator-1.extra.ds9.dsx.nvid.id/host/host-1",
-		"spiffe://operator-1.ds9.dsx.nvid.id/host",
+		"spiffe://operator-1.sjc1.dsx.nvid.id/bm/host-1",
+		"spiffe://operator-1.ds9.identity.nvid.id/bm/host-1",
+		"spiffe://operator-1.ds9.dsx.nvidia.com/bm/host-1",
+		"spiffe://tenant_1.ds9.dsx.nvid.id/bm/host-1",
+		"spiffe://operator-1.extra.ds9.dsx.nvid.id/bm/host-1",
+		"spiffe://operator-1.ds9.dsx.nvid.id/invalid/resource-1",
 		"spiffe://operator-1.ds9.dsx.nvid.id/dpu/dpu-1/pod/13c31c2c-2673-42d1-bdeb-241864db47f6",
 		"spiffe://operator-1.ds9.dsx.nvid.id/vm/vm-1/pod/13c31c2c-2673-42d1-bdeb-241864db47f6",
 	} {

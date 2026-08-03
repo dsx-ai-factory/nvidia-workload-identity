@@ -35,7 +35,7 @@ func TestAgentServerIntegration(t *testing.T) {
 	}
 	signedHostToken := signToken(t, key, jwt.Claims{
 		Issuer:   identity.Issuer,
-		Subject:  "spiffe://operator-1.ds9.dsx.nvid.id/host/host-7",
+		Subject:  "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7",
 		Audience: jwt.Audience{"spire-server"},
 		Expiry:   jwt.NewNumericDate(time.Now().Add(time.Minute)),
 	})
@@ -58,7 +58,7 @@ func TestAgentServerIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := agentID.String(), "spiffe://k2.internal/spire/agent/dsx_imds/tenant/operator-1/host/host-7"; got != want {
+	if got, want := agentID.String(), "spiffe://k2.internal/spire/agent/dsx_imds/tenant/operator-1/bm/host-7"; got != want {
 		t.Fatalf("agent ID = %q, want %q", got, want)
 	}
 }
@@ -88,17 +88,17 @@ func TestVerifyHostAttestation(t *testing.T) {
 		{
 			name:     "base host",
 			issuer:   identity.Issuer,
-			subject:  "spiffe://operator-1.ds9.dsx.nvid.id/host/host-7",
+			subject:  "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7",
 			audience: jwt.Audience{"spire-server"},
 			expiry:   time.Now().Add(time.Minute),
-			want:     "spiffe://k2.internal/spire/agent/dsx_imds/tenant/operator-1/host/host-7",
+			want:     "spiffe://k2.internal/spire/agent/dsx_imds/tenant/operator-1/bm/host-7",
 		},
-		{name: "wrong issuer", issuer: "spiffe://wrong.example", subject: "spiffe://operator-1.ds9.dsx.nvid.id/host/host-7", audience: jwt.Audience{"spire-server"}, expiry: time.Now().Add(time.Minute), wantErr: true},
-		{name: "wrong audience", issuer: identity.Issuer, subject: "spiffe://operator-1.ds9.dsx.nvid.id/host/host-7", audience: jwt.Audience{"wrong"}, expiry: time.Now().Add(time.Minute), wantErr: true},
-		{name: "extra audience", issuer: identity.Issuer, subject: "spiffe://operator-1.ds9.dsx.nvid.id/host/host-7", audience: jwt.Audience{"spire-server", "extra"}, expiry: time.Now().Add(time.Minute), want: "spiffe://k2.internal/spire/agent/dsx_imds/tenant/operator-1/host/host-7"},
-		{name: "expired", issuer: identity.Issuer, subject: "spiffe://operator-1.ds9.dsx.nvid.id/host/host-7", audience: jwt.Audience{"spire-server"}, expiry: time.Now().Add(-time.Minute), wantErr: true},
+		{name: "wrong issuer", issuer: "spiffe://wrong.example", subject: "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7", audience: jwt.Audience{"spire-server"}, expiry: time.Now().Add(time.Minute), wantErr: true},
+		{name: "wrong audience", issuer: identity.Issuer, subject: "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7", audience: jwt.Audience{"wrong"}, expiry: time.Now().Add(time.Minute), wantErr: true},
+		{name: "extra audience", issuer: identity.Issuer, subject: "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7", audience: jwt.Audience{"spire-server", "extra"}, expiry: time.Now().Add(time.Minute), want: "spiffe://k2.internal/spire/agent/dsx_imds/tenant/operator-1/bm/host-7"},
+		{name: "expired", issuer: identity.Issuer, subject: "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7", audience: jwt.Audience{"spire-server"}, expiry: time.Now().Add(-time.Minute), wantErr: true},
 		{name: "VM", issuer: identity.Issuer, subject: "spiffe://operator-1.ds9.dsx.nvid.id/vm/vm-7", audience: jwt.Audience{"spire-server"}, expiry: time.Now().Add(time.Minute), wantErr: true},
-		{name: "host process", issuer: identity.Issuer, subject: "spiffe://operator-1.ds9.dsx.nvid.id/host/host-7/process/agent", audience: jwt.Audience{"spire-server"}, expiry: time.Now().Add(time.Minute), wantErr: true},
+		{name: "host process", issuer: identity.Issuer, subject: "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7/process/agent", audience: jwt.Audience{"spire-server"}, expiry: time.Now().Add(time.Minute), wantErr: true},
 	}
 
 	for _, test := range tests {
@@ -141,7 +141,7 @@ func TestRemoteVerifierRejectsWrongSignature(t *testing.T) {
 	}
 	token := signToken(t, signingKey, jwt.Claims{
 		Issuer:   identity.Issuer,
-		Subject:  "spiffe://operator-1.ds9.dsx.nvid.id/host/host-7",
+		Subject:  "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7",
 		Audience: jwt.Audience{"spire-server"},
 		Expiry:   jwt.NewNumericDate(time.Now().Add(time.Minute)),
 	})
@@ -167,7 +167,7 @@ func TestRemoteVerifierVerifiesTLSCertificate(t *testing.T) {
 	}
 	token := signToken(t, key, jwt.Claims{
 		Issuer:   identity.Issuer,
-		Subject:  "spiffe://operator-1.ds9.dsx.nvid.id/host/host-7",
+		Subject:  "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7",
 		Audience: jwt.Audience{"spire-server"},
 		Expiry:   jwt.NewNumericDate(time.Now().Add(time.Minute)),
 	})
@@ -245,7 +245,7 @@ func TestRemoteVerifierTimeoutRecovers(t *testing.T) {
 	}
 	token := signToken(t, key, jwt.Claims{
 		Issuer:   identity.Issuer,
-		Subject:  "spiffe://operator-1.ds9.dsx.nvid.id/host/host-7",
+		Subject:  "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7",
 		Audience: jwt.Audience{"spire-server"},
 		Expiry:   jwt.NewNumericDate(time.Now().Add(time.Minute)),
 	})
@@ -261,7 +261,7 @@ func TestRemoteVerifierTimeoutRecovers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("remote verifier did not recover: %v", err)
 	}
-	if got.String() != "spiffe://k2.internal/spire/agent/dsx_imds/tenant/operator-1/host/host-7" {
+	if got.String() != "spiffe://k2.internal/spire/agent/dsx_imds/tenant/operator-1/bm/host-7" {
 		t.Fatalf("agent ID = %q", got)
 	}
 	if requests.Load() < 2 {

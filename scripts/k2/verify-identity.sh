@@ -195,7 +195,7 @@ service/dsx/e2e service-dsx
 resource-type/vm/e2e resource-vm
 EOF
 
-    for path in resource-type/host/e2e resource-type/dpu/e2e forbidden/admin/e2e; do
+    for path in resource-type/bm/e2e resource-type/dpu/e2e forbidden/admin/e2e; do
         status=$(openbao_curl -sS -o /dev/null -w '%{http_code}' \
             -H "X-Vault-Token: ${client_token}" "${OPENBAO_URL}/v1/secret/data/${path}") || return 1
         if [[ "${status}" != "403" ]]; then
@@ -237,7 +237,7 @@ verify_operator_host_imds() {
     local pod expected_subject response="" token deadline=$((SECONDS + 180))
     pod=$(kubectl get pod e2e-nico-mds -n dsx-identity --context "${CONTEXT}" \
         -o jsonpath='{.metadata.name}') || return 1
-    expected_subject="spiffe://operator-1.ds9.dsx.nvid.id/host/${OPERATOR_HOST_ID}"
+    expected_subject="spiffe://operator-1.ds9.dsx.nvid.id/bm/${OPERATOR_HOST_ID}"
     while ((SECONDS < deadline)); do
         response=$(kubectl exec "${pod}" -n dsx-identity --context "${CONTEXT}" \
             -c host-imds-probe -- curl -fsS --max-time 10 -G \
