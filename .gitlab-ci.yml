@@ -1,6 +1,6 @@
 include:
   - project: cds/cicd-pipelines
-    ref: 2.0.0
+    ref: 2.0.7
     file: /templates/pipeline.yml
   - component: $CI_SERVER_FQDN/cds/cds-components/helm-package@0.14.1
     inputs:
