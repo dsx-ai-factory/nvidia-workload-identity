@@ -533,7 +533,7 @@ func TestIdentitySuccessDisablesCaching(t *testing.T) {
 	now := time.Now()
 	token, err := jwt.Signed(signer).Claims(jwt.Claims{
 		Issuer:   "spiffe://ds9.dsx.nvid.id",
-		Subject:  "spiffe://operator-1.ds9.dsx.nvid.id/host/worker-1",
+		Subject:  "spiffe://operator-1.ds9.dsx.nvid.id/bm/worker-1",
 		Audience: jwt.Audience{"test"},
 		IssuedAt: jwt.NewNumericDate(now),
 		Expiry:   jwt.NewNumericDate(now.Add(time.Minute)),
@@ -543,7 +543,7 @@ func TestIdentitySuccessDisablesCaching(t *testing.T) {
 	}
 	server := &MetadataServer{
 		svids: fakeSVIDFetcher{
-			svid: &jwtsvid.SVID{ID: spiffeid.RequireFromString("spiffe://example.org/host/worker-1")},
+			svid: &jwtsvid.SVID{ID: spiffeid.RequireFromString("spiffe://example.org/bm/worker-1")},
 		},
 		exchange: fakeTokenExchanger{
 			token: &oauth2.Token{AccessToken: token, ExpiresIn: 60},

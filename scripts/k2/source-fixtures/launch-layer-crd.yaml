@@ -32,7 +32,7 @@ spec:
                 type:
                   type: string
                   enum:
-                    - host
+                    - bm
                     - vm
                 tenantID:
                   type: string

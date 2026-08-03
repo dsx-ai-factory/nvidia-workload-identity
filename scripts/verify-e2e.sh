@@ -171,7 +171,7 @@ pod_subject() {
         --context "${context}" -o jsonpath='{.metadata.uid}')
     role=$(kubectl get pod "${pod}" --namespace "${namespace}" \
         --context "${context}" -o jsonpath='{.metadata.labels.spiffe\.nvidia\.com/role}')
-    printf 'spiffe://%s.ds9.dsx.nvid.id/host/%s/pod/%s' "${tenant}" "${node}" "${uid}"
+    printf 'spiffe://%s.ds9.dsx.nvid.id/bm/%s/pod/%s' "${tenant}" "${node}" "${uid}"
     [[ -z "${role}" ]] || printf '/role/%s' "${role}"
 }
 
@@ -189,7 +189,7 @@ internal_pod_subject() {
         --context "${context}" -o jsonpath='{.metadata.uid}')
     role=$(kubectl get pod "${pod}" --namespace "${namespace}" \
         --context "${context}" -o jsonpath='{.metadata.labels.spiffe\.nvidia\.com/role}')
-    printf 'spiffe://%s/tenant/%s/service/dsx/host/%s/pod/%s' "${trust_domain}" "${tenant}" "${node}" "${uid}"
+    printf 'spiffe://%s/tenant/%s/service/dsx/bm/%s/pod/%s' "${trust_domain}" "${tenant}" "${node}" "${uid}"
     [[ -z "${role}" ]] || printf '/role/%s' "${role}"
 }
 

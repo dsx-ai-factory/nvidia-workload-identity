@@ -109,14 +109,14 @@ initialize "policies" {
     }
   }
 
-  request "resource-type-host" {
+  request "resource-type-bm" {
     operation = "update"
-    path      = "sys/policies/acl/resource-type-host"
+    path      = "sys/policies/acl/resource-type-bm"
     data = {
       policy = {
         eval_type   = "string"
         eval_source = "file"
-        path        = "/openbao/policies/resource-type-host-policy.hcl"
+        path        = "/openbao/policies/resource-type-bm-policy.hcl"
       }
     }
   }
@@ -155,7 +155,7 @@ initialize "jwt" {
         variables = [
           {
             name       = "is_spiffe"
-            expression = "claims.sub.matches(r'^spiffe://[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?\\.ds9\\.dsx\\.nvid\\.id/((dpu|vm)/[A-Za-z0-9][A-Za-z0-9._:-]*/process/[A-Za-z0-9][A-Za-z0-9._:-]*|(dpu|vm)/[A-Za-z0-9][A-Za-z0-9._:-]*|host/[A-Za-z0-9][A-Za-z0-9._:-]*/(process/[A-Za-z0-9][A-Za-z0-9._:-]*|pod/[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})|host/[A-Za-z0-9][A-Za-z0-9._:-]*)(/role/[a-z0-9][a-z0-9_-]{0,62})?$')"
+            expression = "claims.sub.matches(r'^spiffe://[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?\\.ds9\\.dsx\\.nvid\\.id/((dpu|vm)/[A-Za-z0-9][A-Za-z0-9._:-]*/process/[A-Za-z0-9][A-Za-z0-9._:-]*|(dpu|vm)/[A-Za-z0-9][A-Za-z0-9._:-]*|bm/[A-Za-z0-9][A-Za-z0-9._:-]*/(process/[A-Za-z0-9][A-Za-z0-9._:-]*|pod/[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})|bm/[A-Za-z0-9][A-Za-z0-9._:-]*)(/role/[a-z0-9][a-z0-9_-]{0,62})?$')"
           },
           {
             name       = "uri_parts"
@@ -249,11 +249,11 @@ initialize "fixtures" {
     }
   }
 
-  request "resource-type-host" {
+  request "resource-type-bm" {
     operation = "update"
-    path      = "secret/data/resource-type/host/e2e"
+    path      = "secret/data/resource-type/bm/e2e"
     data = {
-      data = { value = "resource-host" }
+      data = { value = "resource-bm" }
     }
   }
 

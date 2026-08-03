@@ -49,7 +49,7 @@ spiffe.nvidia.com/service: dsx
 
 {{- define "dsx-identity.operatorPodSPIFFEIDTemplate" -}}
 {{- $tenant := include "dsx-identity.operatorTenant" . -}}
-{{- printf "spiffe://{{ .TrustDomain }}/tenant/%s/service/dsx/host/{{ .NodeMeta.Name }}/pod/{{ .PodMeta.UID }}{{ with index .PodMeta.Labels \"spiffe.nvidia.com/role\" }}/role/{{ . }}{{ end }}" $tenant -}}
+{{- printf "spiffe://{{ .TrustDomain }}/tenant/%s/service/dsx/bm/{{ .NodeMeta.Name }}/pod/{{ .PodMeta.UID }}{{ with index .PodMeta.Labels \"spiffe.nvidia.com/role\" }}/role/{{ . }}{{ end }}" $tenant -}}
 {{- end -}}
 
 {{/*

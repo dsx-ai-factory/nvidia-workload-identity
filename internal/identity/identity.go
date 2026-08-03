@@ -31,9 +31,9 @@ var (
 type ResourceType string
 
 const (
-	ResourceDPU  ResourceType = "dpu"
-	ResourceHost ResourceType = "host"
-	ResourceVM   ResourceType = "vm"
+	ResourceDPU ResourceType = "dpu"
+	ResourceBM  ResourceType = "bm"
+	ResourceVM  ResourceType = "vm"
 )
 
 // ValidTenant reports whether tenant can form the leading DNS label of a DSX
@@ -129,8 +129,8 @@ func (s Subject) DSXID() (spiffeid.ID, error) {
 
 // parseResourcePath parses this shared suffix:
 //
-//	<dpu|host|vm>/<id>[/process/<name>][/role/<role>]
-//	host/<id>/pod/<uuid>[/role/<role>]
+//	<dpu|bm|vm>/<id>[/process/<name>][/role/<role>]
+//	bm/<id>/pod/<uuid>[/role/<role>]
 //
 // Sharing this parser prevents the two encodings from accepting different
 // subjects.
@@ -177,7 +177,7 @@ func (s Subject) validate() error {
 		return fmt.Errorf("invalid tenant %q", s.Tenant)
 	}
 	switch s.ResourceType {
-	case ResourceDPU, ResourceHost, ResourceVM:
+	case ResourceDPU, ResourceBM, ResourceVM:
 	default:
 		return fmt.Errorf("invalid resource type %q", s.ResourceType)
 	}
@@ -197,8 +197,8 @@ func (s Subject) validate() error {
 		if s.WorkloadType == "pod" && !ValidPodUID(s.WorkloadID) {
 			return fmt.Errorf("invalid pod UID %q", s.WorkloadID)
 		}
-		if s.WorkloadType == "pod" && s.ResourceType != ResourceHost {
-			return fmt.Errorf("pod identity requires host resource type")
+		if s.WorkloadType == "pod" && s.ResourceType != ResourceBM {
+			return fmt.Errorf("pod identity requires BM resource type")
 		}
 	}
 	if s.Role != "" && !rolePattern.MatchString(s.Role) {

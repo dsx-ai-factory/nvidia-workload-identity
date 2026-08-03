@@ -70,7 +70,7 @@ func TestStaticSigningKeysetAndClaims(t *testing.T) {
 		"exp":    int64(1700000300),
 		"custom": "preserved",
 	}
-	subject := spiffeid.RequireFromString("spiffe://operator-1.ds9.dsx.nvid.id/host/host-1")
+	subject := spiffeid.RequireFromString("spiffe://operator-1.ds9.dsx.nvid.id/bm/host-1")
 	token, err := server.resignJWT(original, subject)
 	if err != nil {
 		t.Fatal(err)
@@ -666,7 +666,7 @@ func signTestToken(t *testing.T, key jose.JSONWebKey) string {
 	}
 	token, err := jwt.Signed(signer).Claims(jwt.Claims{
 		Issuer:   identity.Issuer,
-		Subject:  "spiffe://operator-1.ds9.dsx.nvid.id/host/host-1",
+		Subject:  "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-1",
 		Audience: jwt.Audience{"spiffe://ds9.dsx.nvid.id/openbao"},
 		Expiry:   jwt.NewNumericDate(time.Now().Add(time.Minute)),
 	}).Serialize()

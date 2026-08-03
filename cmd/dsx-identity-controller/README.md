@@ -5,7 +5,7 @@ management cluster and reconciles the corresponding SPIRE
 `ClusterStaticEntry` objects. It derives SPIFFE IDs, parent IDs, selectors,
 and workload hints from each local source. Separate configuration supplies the
 DPU token-fetcher and DPU metadata selectors. A VM source supplies its holder
-namespace, service account, and optional Pod UID. A host source has no holder.
+namespace, service account, and optional Pod UID. A BM source has no holder.
 The source objects remain read-only.
 
 The Identity Controller owns non-Pod registration fields. The official SPIRE
@@ -14,7 +14,7 @@ child SPIFFE IDs and overlapping VM holders, removes stale entries for invalid
 sources, and reconciles again when the source or conflicting entry changes.
 
 Every DPU source is operator-owned and uses the configured operator tenant. A
-standalone tenant-facing host source uses the tenant supplied by LaunchLayer. A
+standalone tenant-facing BM source uses the tenant supplied by LaunchLayer. A
 VM source uses its LaunchLayer tenant only for the VM identity and parents that
 identity to the configured operator tenant's `dsx_imds` agent for the holder's
 worker host. The worker host and its virt-launcher Pod remain operator-owned.

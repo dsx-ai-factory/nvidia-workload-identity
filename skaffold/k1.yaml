@@ -368,7 +368,7 @@ deploy:
           server.standalone.config: ../scripts/k1/openbao/openbao.hcl
           'extraObjects[1].data.region-ds9-policy\.hcl': ../scripts/k1/openbao/policies/region-ds9-policy.hcl
           'extraObjects[1].data.resource-type-dpu-policy\.hcl': ../scripts/k1/openbao/policies/resource-type-dpu-policy.hcl
-          'extraObjects[1].data.resource-type-host-policy\.hcl': ../scripts/k1/openbao/policies/resource-type-host-policy.hcl
+          'extraObjects[1].data.resource-type-bm-policy\.hcl': ../scripts/k1/openbao/policies/resource-type-bm-policy.hcl
           'extraObjects[1].data.resource-type-vm-policy\.hcl': ../scripts/k1/openbao/policies/resource-type-vm-policy.hcl
           'extraObjects[1].data.service-dsx-policy\.hcl': ../scripts/k1/openbao/policies/service-dsx-policy.hcl
           'extraObjects[1].data.spiffe-authenticated-policy\.hcl': ../scripts/k1/openbao/policies/spiffe-authenticated-policy.hcl
