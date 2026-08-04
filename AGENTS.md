@@ -5,8 +5,8 @@
 - Read the relevant [README](README.md) section before changing code or configuration.
   It is authoritative for architecture, topology, identity contracts, deployment,
   observability, and local E2E behavior.
-- Use plans under `docs/plans/` as historical implementation context, not current
-  requirements.
+- Keep current documentation in the root or component READMEs. Do not add a
+  `docs` directory or standalone implementation plans.
 - Inspect repository code, CI configuration, and pinned shared CI templates before
   relying on prior branches, chat history, or generic defaults.
 - Keep a FIFO task list during review loops. Finish the current item unless the user

@@ -23,8 +23,6 @@ Component commands and runtime configuration:
 - [DSX IMDS](cmd/metadata-service/README.md)
 - [DSX Identity Keys](cmd/dsx-identity-keys/README.md)
 
-Do not use files under `docs/plans` as design authority.
-
 ## Architecture
 
 Local SPIRE identities are hierarchical. The DPU identity comes first, the
