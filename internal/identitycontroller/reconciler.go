@@ -38,14 +38,11 @@ const (
 // IDs. OperatorTenant supplies the tenant segment for DPU subjects and the
 // host-agent parent of a VM. A tenant supplied by LaunchLayer remains on the
 // standalone host or VM subject. ClassName is placed on every entry.
-// DPUTokenFetcherSelectors select the process that calls the Workload API and
-// writes the DPU token file.
 type Config struct {
-	TrustDomain              string
-	OperatorTenant           string
-	ClassName                string
-	DPUTokenFetcherSelectors []string
-	DPUMetadataSelectors     []string
+	TrustDomain          string
+	OperatorTenant       string
+	ClassName            string
+	DPUMetadataSelectors []string
 }
 
 // Holder contains stable SPIRE namespace and service account selectors. PodUID
@@ -67,23 +64,15 @@ func (c Config) Validate() error {
 	if c.ClassName == "" {
 		return errors.New("class name is required")
 	}
-	if len(c.DPUTokenFetcherSelectors) == 0 {
-		return errors.New("at least one DPU token fetcher selector is required")
-	}
-	for _, selector := range c.DPUTokenFetcherSelectors {
-		if selector == "" {
-			return errors.New("DPU token fetcher selector must not be empty")
-		}
-		if !strings.HasPrefix(selector, "unix:") {
-			return fmt.Errorf("DPU token fetcher selector %q must use the Unix WorkloadAttestor", selector)
-		}
-	}
 	if len(c.DPUMetadataSelectors) == 0 {
 		return errors.New("at least one DPU metadata selector is required")
 	}
 	for _, selector := range c.DPUMetadataSelectors {
 		if selector == "" {
 			return errors.New("DPU metadata selector must not be empty")
+		}
+		if !strings.HasPrefix(selector, "k8s:") {
+			return fmt.Errorf("DPU metadata selector %q must use the Kubernetes WorkloadAttestor", selector)
 		}
 	}
 	return nil

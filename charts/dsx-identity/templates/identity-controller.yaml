@@ -1,6 +1,13 @@
 {{- if .Values.identityController.enabled }}
 {{- $name := include "dsx-identity.identityControllerFullname" . -}}
 {{- $values := .Values.identityController -}}
+{{- $dpuMetadataSelectors := $values.dpuMetadataSelectors -}}
+{{- if and .Values.dpuService.enabled (empty $dpuMetadataSelectors) -}}
+{{- $dpuMetadataSelectors = list
+      (printf "k8s:ns:%s" .Release.Namespace)
+      (printf "k8s:sa:%s" (required "dpuService.workload.serviceAccountName is required" .Values.dpuService.workload.serviceAccountName))
+      (printf "k8s:container-name:%s" (required "dpuService.workload.containerName is required" .Values.dpuService.workload.containerName)) -}}
+{{- end -}}
 {{- $imageTag := $values.image.tag | default .Values.global.imageTag | default .Chart.Version -}}
 apiVersion: v1
 kind: ServiceAccount
@@ -106,10 +113,7 @@ spec:
             - --operator-tenant={{ include "dsx-identity.operatorTenant" $ }}
             # SPIRE controller-manager derives its class from this release identity.
             - --class-name={{ $.Release.Namespace }}-{{ $.Release.Name }}
-            {{- range $selector := required "identityController.dpuTokenFetcherSelectors is required" $values.dpuTokenFetcherSelectors }}
-            - {{ printf "--dpu-token-fetcher-selector=%s" $selector | quote }}
-            {{- end }}
-            {{- range $selector := required "identityController.dpuMetadataSelectors is required" $values.dpuMetadataSelectors }}
+            {{- range $selector := required "identityController.dpuMetadataSelectors is required" $dpuMetadataSelectors }}
             - {{ printf "--dpu-metadata-selector=%s" $selector | quote }}
             {{- end }}
             - --log-level={{ .Values.observability.logLevel }}

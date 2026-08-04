@@ -1,0 +1,116 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dsx-imds.labels" (dict "root" . "name" "dsx-imds") | nindent 4 }}
+    {{- with .Values.serviceDaemonSet.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.serviceDaemonSet.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.serviceDaemonSet.updateStrategy }}
+  updateStrategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "dsx-imds.selectorLabels" (dict "root" . "name" "dsx-imds") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "dsx-imds.labels" (dict "root" . "name" "dsx-imds") | nindent 8 }}
+        {{- with .Values.serviceDaemonSet.labels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.serviceDaemonSet.annotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ required "workload.serviceAccountName is required" .Values.workload.serviceAccountName }}
+      {{- with .Values.serviceDaemonSet.nodeSelector }}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            {{- toYaml . | nindent 12 }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: {{ required "workload.containerName is required" .Values.workload.containerName }}
+          image: "{{ .Values.metadataService.image.repository }}:{{ .Values.metadataService.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.metadataService.image.pullPolicy }}
+          command:
+            - /usr/local/bin/metadata-service
+          args:
+            - --listen=:8080
+            - --identity-keys-url={{ required "metadataService.identityKeysURL is required" .Values.metadataService.identityKeysURL }}
+            - --svid-hint=dsx-imds
+            - --log-level={{ .Values.metadataService.logLevel }}
+          {{- with .Values.metadataService.env }}
+          {{- $env := . }}
+          env:
+            {{- range $name := keys $env | sortAlpha }}
+            - name: {{ $name }}
+              value: {{ index $env $name | quote }}
+            {{- end }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+          resources:
+            {{- include "dsx-imds.resources" (dict
+                  "serviceDaemonSet" .Values.serviceDaemonSet.resources
+                  "defaults" .Values.metadataService.resources) | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsGroup: 65532
+            runAsUser: 65532
+          volumeMounts:
+            - name: spiffe-workload-api
+              mountPath: /var/run/secrets/spire.io
+              readOnly: true
+      volumes:
+        - name: spiffe-workload-api
+          csi:
+            driver: {{ required "spiffeCsiDriver is required" .Values.spiffeCsiDriver }}
+            readOnly: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dsx-imds.labels" (dict "root" . "name" "dsx-imds") | nindent 4 }}
+spec:
+  # DPU identity must come from the SPIRE agent on the caller's node.
+  internalTrafficPolicy: Local
+  selector:
+    {{- include "dsx-imds.selectorLabels" (dict "root" . "name" "dsx-imds") | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

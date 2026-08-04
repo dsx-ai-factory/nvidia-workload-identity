@@ -11,7 +11,7 @@ flowchart LR
     Fetcher -->|"RFC 8693 request"| IdentityKeys["Shard-local DSX Identity Keys"]
     IdentityKeys -->|"exchanged DSX JWT"| Fetcher
     Fetcher -->|"atomic file replacement"| File["DSX JWT token file"]
-    Consumer["DPU or Pod consumer"] -->|"read DSX JWT"| File
+    Consumer["Pod consumer"] -->|"read DSX JWT"| File
 ```
 
 The identity chart injects the sidecar and shared volume through
@@ -20,15 +20,6 @@ In an identity-enabled namespace, `spiffe.nvidia.com/service: dsx` selects both
 the Pod registration and sidecar injection. The fetcher alone receives the
 Workload API socket, selects the `dsx-pod` SVID, and atomically writes the DSX
 JWT to a Pod-private volume mounted read-only in application containers.
-
-An external DPU supervisor can run the same binary against its local Workload
-API socket and token-file path after the DPU agent attests through `dpu_hw`.
-The base DPU registration selects the `dsx-token-fetcher` process with Unix
-WorkloadAttestor selectors and exposes the `dsx-dpu` SVID hint. The fetcher is
-the Workload API caller, not the consuming DPU process. The protected token file
-is the capability consumed by the DPU process. That integration is outside the
-identity chart. Host-process-specific integration is not part of the current
-repository scope.
 
 ## Flags
 

@@ -28,8 +28,8 @@ var DPUGVK = schema.GroupVersionKind{
 // DPUReconciler maps each read-only DPU source to one entry. metadata.name is
 // the DPU resource ID and OperatorTenant is its tenant. The parent agent is
 // /spire/agent/dpu_hw/<serial>, matching the DPF-provisioned NodeAttestor.
-// Configured Unix selectors identify the token fetcher that calls the Workload
-// API.
+// Configured Kubernetes selectors identify the IMDS container that calls the
+// Workload API through SPIFFE CSI.
 type DPUReconciler struct {
 	client.Client
 	Config   Config
@@ -78,5 +78,5 @@ func (r *DPUReconciler) desiredEntry(dpu *unstructured.Unstructured) (*spirev1al
 	if err != nil {
 		return nil, fmt.Errorf("DPU parent ID: %w", err)
 	}
-	return newEntry(dpu, spiffeID, parentID, "dsx-dpu", r.Config.ClassName, slices.Clone(r.Config.DPUTokenFetcherSelectors))
+	return newEntry(dpu, spiffeID, parentID, "dsx-imds", r.Config.ClassName, slices.Clone(r.Config.DPUMetadataSelectors))
 }

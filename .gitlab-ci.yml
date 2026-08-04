@@ -18,6 +18,34 @@ include:
       ngc-force: true
       ngc-key: $NGC_DSX_COMPONENTS_PUSH_KEY
       extends: [.helm-push-ngc, .helm-push-ngc-rule]
+  - component: $CI_SERVER_FQDN/cds/cds-components/helm-package@0.14.1
+    inputs:
+      job-name: helm-package-dsx-spiffe-csi
+      chart-path: charts/dsx-spiffe-csi
+      chart-version: $NEXT_VERSION
+      extends: [.helm-package, .helm-package-rule]
+  - component: $CI_SERVER_FQDN/cds/cds-components/helm-push-ngc@0.14.1
+    inputs:
+      job-name: helm-push-ngc-dsx-spiffe-csi
+      package-job: helm-package-dsx-spiffe-csi
+      ngc-path: $NGC_HELM_PATH
+      ngc-force: true
+      ngc-key: $NGC_DSX_COMPONENTS_PUSH_KEY
+      extends: [.helm-push-ngc, .helm-push-ngc-rule]
+  - component: $CI_SERVER_FQDN/cds/cds-components/helm-package@0.14.1
+    inputs:
+      job-name: helm-package-dsx-imds
+      chart-path: charts/dsx-imds
+      chart-version: $NEXT_VERSION
+      extends: [.helm-package, .helm-package-rule]
+  - component: $CI_SERVER_FQDN/cds/cds-components/helm-push-ngc@0.14.1
+    inputs:
+      job-name: helm-push-ngc-dsx-imds
+      package-job: helm-package-dsx-imds
+      ngc-path: $NGC_HELM_PATH
+      ngc-force: true
+      ngc-key: $NGC_DSX_COMPONENTS_PUSH_KEY
+      extends: [.helm-push-ngc, .helm-push-ngc-rule]
 
 variables:
   VAULT_ADDR: https://prod.vault.nvidia.com
@@ -73,6 +101,8 @@ commitlint:
       export HELM_CHART_VERSION
       yq -i '.appVersion = strenv(HELM_CHART_VERSION)' charts/dsx-identity/Chart.yaml
       yq -i '.spire."spire-server".image.tag = strenv(HELM_CHART_VERSION)' charts/dsx-identity/values.yaml
+      yq -i '.appVersion = strenv(HELM_CHART_VERSION)' charts/dsx-imds/Chart.yaml
+      yq -i '.appVersion = strenv(HELM_CHART_VERSION)' charts/dsx-spiffe-csi/Chart.yaml
 
 .helm-package-rule:
   rules:
@@ -88,8 +118,6 @@ commitlint:
     - .nvcf-cds-runner-tags
   variables:
     NGC_DSX_COMPONENTS_PUSH_KEY: $NGC_REGISTRY_TOKEN
-  needs:
-    - helm-package-dsx-identity
 
 validate:
   stage: test

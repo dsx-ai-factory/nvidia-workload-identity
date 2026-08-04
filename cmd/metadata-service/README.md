@@ -26,7 +26,8 @@ sequenceDiagram
 The same binary serves the `dsx-imds` host identity behind the paired DPU
 intercept and NICo or Carbide IMDS passthrough, and serves the `dsx-imds-vm`
 identity as a KubeVirt sidecar. The identity chart injects that sidecar through
-`charts/dsx-identity/templates/vm-support.yaml`.
+`charts/dsx-identity/templates/vm-support.yaml`. DPF deploys the same binary on
+DPU nodes through `charts/dsx-imds`.
 
 For KubeVirt, the guest initiates the metadata request. The operator-owned
 virt-launcher Pod and tenant-facing VM identities use the same operator worker

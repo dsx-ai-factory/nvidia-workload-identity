@@ -18,15 +18,20 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-var testConfig = Config{
-	TrustDomain:              "k2.sjc-1.nvidia.com",
-	OperatorTenant:           "operator-1",
-	ClassName:                "dsx-identity-dsx-identity",
-	DPUTokenFetcherSelectors: []string{"unix:uid:1000", "unix:path:/usr/local/bin/dsx-token-fetcher"},
-	DPUMetadataSelectors:     []string{"k8s:ns:dsx-imds", "k8s:sa:metadata-service"},
+var testDPUMetadataSelectors = []string{
+	"k8s:ns:dsx-imds",
+	"k8s:sa:metadata-service",
+	"k8s:container-name:metadata-service",
 }
 
-func TestConfigRejectsInvalidDPUTokenFetcherSelectors(t *testing.T) {
+var testConfig = Config{
+	TrustDomain:          "k2.sjc-1.nvidia.com",
+	OperatorTenant:       "operator-1",
+	ClassName:            "dsx-identity-dsx-identity",
+	DPUMetadataSelectors: testDPUMetadataSelectors,
+}
+
+func TestConfigRejectsInvalidDPUMetadataSelectors(t *testing.T) {
 	t.Parallel()
 
 	for _, test := range []struct {
@@ -34,50 +39,15 @@ func TestConfigRejectsInvalidDPUTokenFetcherSelectors(t *testing.T) {
 		selectors []string
 		want      string
 	}{
-		{name: "missing", want: "at least one DPU token fetcher selector is required"},
-		{name: "empty", selectors: []string{""}, want: "DPU token fetcher selector must not be empty"},
-		{name: "Kubernetes", selectors: []string{"k8s:sa:metadata-service"}, want: "must use the Unix WorkloadAttestor"},
+		{name: "missing", want: "at least one DPU metadata selector is required"},
+		{name: "empty", selectors: []string{""}, want: "DPU metadata selector must not be empty"},
+		{name: "Unix", selectors: []string{"unix:path:/usr/local/bin/metadata-service"}, want: "must use the Kubernetes WorkloadAttestor"},
 	} {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			config := testConfig
-			config.DPUTokenFetcherSelectors = test.selectors
-			if err := config.Validate(); err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("Validate() error = %v, want containing %q", err, test.want)
-			}
-		})
-	}
-}
-
-func TestConfigRejectsInvalidDPUHostConfiguration(t *testing.T) {
-	t.Parallel()
-
-	for _, test := range []struct {
-		name      string
-		configure func(*Config)
-		want      string
-	}{
-		{
-			name: "missing metadata selector",
-			configure: func(config *Config) {
-				config.DPUMetadataSelectors = nil
-			},
-			want: "at least one DPU metadata selector is required",
-		},
-		{
-			name: "empty metadata selector",
-			configure: func(config *Config) {
-				config.DPUMetadataSelectors = []string{""}
-			},
-			want: "DPU metadata selector must not be empty",
-		},
-	} {
-		test := test
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-			config := testConfig
-			test.configure(&config)
+			config.DPUMetadataSelectors = test.selectors
 			if err := config.Validate(); err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("Validate() error = %v, want containing %q", err, test.want)
 			}
@@ -116,8 +86,8 @@ func TestDPUReconcileCreatesBaseIdentityAndCleansUp(t *testing.T) {
 	assertEntry(t, entry,
 		"spiffe://k2.sjc-1.nvidia.com/tenant/operator-1/service/dsx/dpu/dpu-1",
 		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dpu_hw/52tf43g001g",
-		"dsx-dpu",
-		[]string{"unix:uid:1000", "unix:path:/usr/local/bin/dsx-token-fetcher"},
+		"dsx-imds",
+		testDPUMetadataSelectors,
 	)
 	if len(entry.OwnerReferences) != 0 {
 		t.Fatal("cluster-scoped entry must not have an owner reference")
@@ -142,8 +112,8 @@ func TestDPUReconcileCreatesBaseIdentityAndCleansUp(t *testing.T) {
 	assertEntry(t, entry,
 		"spiffe://k2.sjc-1.nvidia.com/tenant/operator-1/service/dsx/dpu/dpu-1",
 		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dpu_hw/52tf43g001g",
-		"dsx-dpu",
-		[]string{"unix:uid:1000", "unix:path:/usr/local/bin/dsx-token-fetcher"},
+		"dsx-imds",
+		testDPUMetadataSelectors,
 	)
 	assertApplyCalls(t, c, 2)
 
@@ -235,7 +205,7 @@ func TestLaunchLayerSourceReconcileLifecycle(t *testing.T) {
 		"spiffe://k2.sjc-1.nvidia.com/tenant/tenant-2/service/dsx/bm/host-1/role/database",
 		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dsx_dpu/dpu-1",
 		"dsx-imds",
-		[]string{"k8s:ns:dsx-imds", "k8s:sa:metadata-service"},
+		testDPUMetadataSelectors,
 	)
 	vmEntry := getEntry(t, c, childName(vm))
 	assertEntry(t, vmEntry,
@@ -268,7 +238,7 @@ func TestLaunchLayerSourceReconcileLifecycle(t *testing.T) {
 		"spiffe://k2.sjc-1.nvidia.com/tenant/tenant-2/service/dsx/bm/host-1/role/database",
 		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dsx_dpu/dpu-1",
 		"dsx-imds",
-		[]string{"k8s:ns:dsx-imds", "k8s:sa:metadata-service"},
+		testDPUMetadataSelectors,
 	)
 	assertApplyCalls(t, c, 3)
 
@@ -290,7 +260,7 @@ func TestLaunchLayerSourceReconcileLifecycle(t *testing.T) {
 		"spiffe://k2.sjc-1.nvidia.com/tenant/tenant-3/service/dsx/bm/host-2/role/database",
 		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dsx_dpu/dpu-2",
 		"dsx-imds",
-		[]string{"k8s:ns:dsx-imds", "k8s:sa:metadata-service"},
+		testDPUMetadataSelectors,
 	)
 	assertApplyCalls(t, c, 4)
 

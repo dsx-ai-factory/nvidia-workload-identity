@@ -1,0 +1,8 @@
+apiVersion: v2
+name: dsx-imds
+description: DSX IMDS for DPU nodes
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+sources:
+  - https://gitlab-master.nvidia.com/ncp/vmaas/dsx-identity

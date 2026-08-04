@@ -1,0 +1,31 @@
+# DPF injects scheduling and ownership metadata for this DPUService.
+serviceDaemonSet:
+  nodeSelector: {}
+  labels: {}
+  annotations: {}
+  updateStrategy: {}
+  resources: {}
+
+imagePullSecrets: []
+
+workload:
+  serviceAccountName: dsx-imds
+  containerName: metadata-service
+
+metadataService:
+  image:
+    repository: nvcr.io/0837451325059433/components-dev/metadata-service
+    tag: ""
+    pullPolicy: IfNotPresent
+  identityKeysURL: ""
+  logLevel: info
+  env: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+spiffeCsiDriver: csi.spiffe.io
