@@ -66,6 +66,10 @@ url = "https://dl.k8s.io/v1.34.0/bin/linux/amd64/kubectl"
 checksum = "sha256:cfda68cba5848bc3b6c6135ae2f20ba2c78de20059f68789c090166d6abc3e2c"
 url = "https://dl.k8s.io/v1.34.0/bin/linux/amd64/kubectl"
 
+[[tools.rust]]
+version = "1.97.1"
+backend = "core:rust"
+
 [[tools.skaffold]]
 version = "v2.21.0"
 backend = "aqua:GoogleContainerTools/skaffold"

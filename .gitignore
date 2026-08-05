@@ -29,6 +29,7 @@ go.work.sum
 /dist/
 /build/
 /target/
+kata-uds-proxy/target/
 
 # IDE and editor files
 .vscode/

@@ -53,6 +53,9 @@ scripts/
 # Third-party submodules
 third-party/
 
+# The Kata UDS proxy builds through kata-uds-proxy/Dockerfile and its own ignore file
+kata-uds-proxy/
+
 # Temporary files
 *.tmp
 *.temp

@@ -235,6 +235,12 @@ docker-build:dsx-spire-agent:
     DOCKERFILE_PATH: Dockerfile.spire
     EXTRA_BUILD_ARGS: "--target dsx-spire-agent"
 
+docker-build:dsx-kata-uds-proxy:
+  extends: [.container-build]
+  variables:
+    DOCKER_IMAGE_NAME: dsx-kata-uds-proxy
+    DOCKERFILE_PATH: kata-uds-proxy/Dockerfile
+
 pulse-scan:dsx-token-fetcher:
   extends:
     - .pulse-scan:container
@@ -314,6 +320,16 @@ pulse-scan:dsx-spire-agent:
     - compute-next-release-version
   variables:
     DOCKER_IMAGE_NAME: dsx-spire-agent
+
+pulse-scan:dsx-kata-uds-proxy:
+  extends:
+    - .pulse-scan:container
+  needs:
+    - job: docker-build:dsx-kata-uds-proxy
+      artifacts: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-kata-uds-proxy
 
 docker-push-ngc:dsx-token-fetcher:
   extends:
@@ -410,6 +426,18 @@ docker-push-ngc:dsx-spire-agent:
     - compute-next-release-version
   variables:
     DOCKER_IMAGE_NAME: dsx-spire-agent
+
+docker-push-ngc:dsx-kata-uds-proxy:
+  extends:
+    - .docker-publish
+  needs:
+    - job: docker-build:dsx-kata-uds-proxy
+      artifacts: true
+    - job: pulse-scan:dsx-kata-uds-proxy
+      optional: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-kata-uds-proxy
 
 semantic-release:
   extends:
