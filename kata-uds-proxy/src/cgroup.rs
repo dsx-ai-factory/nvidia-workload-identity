@@ -34,18 +34,22 @@ fn cgroup_v2_relative_path(pid: i32) -> Result<PathBuf> {
     let data = fs::read_to_string(format!("/proc/{pid}/cgroup"))
         .with_context(|| format!("read /proc/{pid}/cgroup"))?;
 
+    parse_cgroup_v2_relative_path(&data).with_context(|| format!("parse /proc/{pid}/cgroup"))
+}
+
+fn parse_cgroup_v2_relative_path(data: &str) -> Result<PathBuf> {
     for line in data.lines() {
         let line = line.trim();
         if let Some(rest) = line.strip_prefix("0::") {
             let rest = rest.trim_start_matches('/');
             if rest.is_empty() {
-                return Err(anyhow!("pid {pid} has empty cgroup v2 path"));
+                return Err(anyhow!("empty cgroup v2 path"));
             }
             return Ok(PathBuf::from(rest));
         }
     }
 
-    Err(anyhow!("pid {pid} has no cgroup v2 unified entry"))
+    Err(anyhow!("no cgroup v2 unified entry"))
 }
 
 pub fn join_cgroup(cgroup_dir: &Path, pid: i32) -> Result<()> {
@@ -56,23 +60,19 @@ pub fn join_cgroup(cgroup_dir: &Path, pid: i32) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::cgroup_v2_relative_path;
-
-    fn is_cgroup_v2() -> bool {
-        std::fs::read_to_string("/proc/self/cgroup")
-            .map(|data| data.lines().any(|line| line.trim().starts_with("0::")))
-            .unwrap_or(false)
-    }
+    use super::parse_cgroup_v2_relative_path;
+    use std::path::Path;
 
     #[test]
     fn parse_cgroup_v2_line() {
-        if !is_cgroup_v2() {
-            eprintln!("skipping parse_cgroup_v2_line: host is not using cgroup v2");
-            return;
-        }
+        let data = "12:pids:/system.slice/kubelet.service\n\
+                    0::/kubepods.slice/kubepods-pod0e1f.slice/cri-containerd-9ab3.scope\n";
 
-        let pid = std::process::id() as i32;
-        let rel = cgroup_v2_relative_path(pid).expect("current pid cgroup");
-        assert!(!rel.as_os_str().is_empty());
+        let rel = parse_cgroup_v2_relative_path(data).expect("unified entry");
+
+        assert_eq!(
+            rel,
+            Path::new("kubepods.slice/kubepods-pod0e1f.slice/cri-containerd-9ab3.scope")
+        );
     }
 }
