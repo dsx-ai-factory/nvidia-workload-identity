@@ -1,0 +1,89 @@
+{{- if and .Values.kataSupport.enabled (not .Values.spire.enabled) }}
+{{- fail "kataSupport.enabled requires spire.enabled so the host proxy can reach a Workload API socket" }}
+{{- end }}
+{{- if and .Values.kataSupport.enabled (not .Values.podTokenFetcher.enabled) }}
+{{- fail "kataSupport.enabled requires podTokenFetcher.enabled because its policy injects the guest proxy" }}
+{{- end }}
+{{- if .Values.kataSupport.enabled }}
+{{- $imageTag := .Values.kataSupport.image.tag | default .Values.global.imageTag | default .Chart.Version -}}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: dsx-kata-uds-proxy
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dsx-identity.labels" (dict "root" . "name" "dsx-kata-uds-proxy") | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "dsx-identity.selectorLabels" (dict "root" . "name" "dsx-kata-uds-proxy") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "dsx-identity.labels" (dict "root" . "name" "dsx-kata-uds-proxy") | nindent 8 }}
+      {{- with (include "dsx-identity.observabilityPodAnnotations" (dict "root" . "containerNames" "dsx-kata-uds-proxy")) }}
+      annotations:
+        {{- . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # The host side of the proxy should not run in Kata.
+      # It requires hostPID to access the pod cgroup of the pods
+      # that connections come from.
+      hostPID: true
+      # The AF_VSOCK bind table is not scoped per network namespace.
+      hostNetwork: true
+      {{- with .Values.kataSupport.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.kataSupport.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: dsx-kata-uds-proxy
+          image: "{{ .Values.kataSupport.image.repository }}:{{ $imageTag }}"
+          imagePullPolicy: {{ .Values.kataSupport.image.pullPolicy }}
+          command:
+            - /usr/local/bin/host-entrypoint.sh
+          env:
+            # The SPIFFE CSI driver publishes the agent socket under this name.
+            - name: UDS_PATH
+              value: /var/run/secrets/spire.io/spire-agent.sock
+            - name: LISTEN_PORT
+              value: {{ .Values.kataSupport.vsockPort | quote }}
+          # Privileged for CAP_SYS_ADMIN on the cgroup setns and to write host
+          # cgroup hierarchies. This proxy is effectively root on the node, so
+          # its namespace requires the privileged Pod Security Admission level.
+          securityContext:
+            privileged: true
+            runAsUser: 0
+            runAsGroup: 0
+            runAsNonRoot: false
+          resources:
+            {{- toYaml .Values.kataSupport.resources.hostProxy | nindent 12 }}
+          volumeMounts:
+            - name: spiffe-csi
+              mountPath: /var/run/secrets/spire.io
+              readOnly: true
+            # Read-write: the proxy moves each forwarder child into the Kata
+            # sandbox scope by writing its cgroup.procs.
+            - name: cgroup
+              mountPath: /sys/fs/cgroup
+      volumes:
+        # The host proxy runs on the host runtime, so the ordinary CSI bind mount
+        # reaches the agent socket. Connecting to a unix socket through a
+        # read-only mount is permitted.
+        - name: spiffe-csi
+          csi:
+            driver: csi.spiffe.io
+            readOnly: true
+        - name: cgroup
+          hostPath:
+            path: /sys/fs/cgroup
+            type: Directory
+{{- end }}

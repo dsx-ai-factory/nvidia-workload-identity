@@ -22,6 +22,7 @@ Component commands and runtime configuration:
 - [Generate Signing Keyset](cmd/generate-signing-keyset/README.md)
 - [DSX IMDS](cmd/metadata-service/README.md)
 - [DSX Identity Keys](cmd/dsx-identity-keys/README.md)
+- [Kata UDS Proxy](kata-uds-proxy/README.md)
 
 ## Architecture
 
@@ -361,6 +362,7 @@ external to the identity chart.
 | [Kubernetes Pod](cmd/dsx-token-fetcher/README.md) | Kubernetes WorkloadAttestor under the worker's `dsx_imds`-attested host agent. The registration uses the operator tenant and worker host subject | The `dsx-token-fetcher` sidecar selects `dsx-pod`, exchanges the local SPIRE JWT-SVID, and writes the DSX JWT to a Pod-private volume mounted read-only in application containers |
 | [DPU process](cmd/dsx-token-fetcher/README.md) | The external DPU agent attests through the `dpu_hw` NodeAttestor agent and server. For token-file delivery, Unix WorkloadAttestor selectors bind the base DPU SVID to the `dsx-token-fetcher` process because it is the Workload API caller | `dsx-token-fetcher` selects `dsx-dpu`, exchanges the local SPIRE JWT-SVID, and writes a protected token file. The DPU process consumes that file as a capability |
 | [Bare-metal host process](cmd/dsx-imds-node-attestor-agent/README.md) | The DPU agent is attested through `dsx_dpu`. The host agent is attested through the repository `dsx_imds` NodeAttestor agent and server, then can serve local processes through the Unix WorkloadAttestor | The paired DPU intercept carries link-local IMDS to NICo or Carbide IMDS, which passes identity requests to DSX IMDS. DPU-hosted DSX IMDS exchanges directly with its reachable shard-local DSX Identity Keys. The host agent uses the returned DSX JWT for node attestation. A host-process-specific token delivery contract is not currently defined |
+| [Kata Containers Pod](kata-uds-proxy/README.md) | Identical to a Kubernetes Pod. The guest is a VM, so SPIFFE CSI cannot reach the agent socket; the `kata-uds-proxy` host DaemonSet forwards it over vsock into the sandbox instead | Unchanged from a Kubernetes Pod. A guest sidecar re-serves the forwarded socket at the same path, so the same `dsx-token-fetcher` sidecar applies |
 | [KubeVirt VM](cmd/metadata-service/README.md) | The controller derives the VM subject from the dynamically supplied tenant ID and parents it to the operator-owned worker host's `dsx_imds` agent. The Kubernetes WorkloadAttestor serves the operator-owned virt-launcher Pod, and SPIFFE CSI exposes that same agent's Workload API socket | The DSX IMDS sidecar selects the VM SPIRE JWT-SVID by its exact `dsx-imds-vm` hint, exchanges it through DSX Identity Keys Proxy CSI, and serves the DSX JWT through IMDS |
 
 ## Helm chart
@@ -468,6 +470,29 @@ identityController:
   dpuMetadataSelectors:
     - <selector for DPU-hosted metadata-service>
 ```
+
+Shards that schedule Kata Containers workloads enable `kataSupport`. A Kata Pod
+runs inside a VM, so the SPIFFE CSI driver cannot carry the agent's Workload API
+socket across the VM boundary. Enabling this deploys a privileged host DaemonSet
+that serves that socket over vsock, and injects a guest sidecar into Kata Pods
+that re-serves it as a unix socket at the path the token fetcher already uses.
+The token fetcher itself is unchanged in both cases.
+
+```yaml
+kataSupport:
+  enabled: true
+  runtimeClassNames:
+    - kata-qemu-runtime-rs
+    - kata-qemu
+```
+
+The host DaemonSet needs `hostPID`, host cgroup write access, and a privileged
+container, so its namespace requires the `privileged` Pod Security Admission
+level. Nodes must run cgroup v2 with the systemd cgroup driver and configure
+Kata with `sandbox_cgroup_only = true`. The default `nodeSelector` targets the
+`katacontainers.io/kata-runtime=true` label. Every Kata RuntimeClass in use must
+be listed in `runtimeClassNames`, since injection keys off it. See
+[kata-uds-proxy/README.md](kata-uds-proxy/README.md).
 
 `imagePullSecrets` applies to chart-owned and Kyverno-injected DSX images.
 Each matched consumer namespace must contain Secrets with the same names.

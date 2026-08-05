@@ -4,12 +4,13 @@
 .PHONY: help install install-skaffold preload-vm-disk clean
 .PHONY: test test-k2-identity test-cross-shard status
 .PHONY: k1-cluster k2-cluster
-.PHONY: validate test-go test-shell test-chart test-skaffold chart-dependencies
+.PHONY: validate test-go test-rust test-shell test-chart test-skaffold chart-dependencies
 
 MISE ?= mise
 MISE_EXEC := $(MISE) exec --
 SKAFFOLD_RUN := $(MISE_EXEC) skaffold run --iterative-status-check=false
 IDENTITY_E2E_VALUES := -f scripts/identity-e2e-values.yaml
+KATA_UDS_PROXY := --manifest-path kata-uds-proxy/Cargo.toml
 
 # Default target
 help: ## Show this help message
@@ -22,13 +23,18 @@ help: ## Show this help message
 preflight:
 	@./scripts/preflight.sh
 
-validate: test-go test-shell test-chart test-skaffold ## Run local static validation
+validate: test-go test-rust test-shell test-chart test-skaffold ## Run local static validation
 
 test-go:
 	@$(MISE_EXEC) go test -race ./...
 
+test-rust:
+	@$(MISE_EXEC) cargo fmt $(KATA_UDS_PROXY) -- --check
+	@$(MISE_EXEC) cargo clippy $(KATA_UDS_PROXY) --all-targets --locked -- -D warnings
+	@$(MISE_EXEC) cargo test $(KATA_UDS_PROXY) --locked
+
 test-shell:
-	@find scripts -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
+	@find scripts kata-uds-proxy -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
 
 test-chart: chart-dependencies
 	@$(MISE_EXEC) helm lint charts/dsx-identity $(IDENTITY_E2E_VALUES) -f scripts/k1-values.yaml

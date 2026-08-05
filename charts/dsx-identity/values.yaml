@@ -244,6 +244,37 @@ vmSupport:
     serviceAccount:
       name: kubevirt-controller
       namespace: kubevirt
+
+# Kata Containers support. A Kata Pod runs inside a VM, so the SPIFFE CSI driver
+# cannot carry the Workload API socket across the VM boundary. The host proxy
+# serves that socket over vsock and the guest proxy re-serves it as a unix socket
+# at the path the token fetcher already expects.
+kataSupport:
+  enabled: false
+  image:
+    repository: nvcr.io/0837451325059433/components-dev/dsx-kata-uds-proxy
+    tag: ""
+    pullPolicy: IfNotPresent
+  # Pods with one of these runtime classes receive the guest proxy in place of
+  # the SPIFFE CSI volume.
+  runtimeClassNames:
+    - kata-qemu-runtime-rs
+    - kata-qemu
+  # Both halves of the proxy must agree on this vsock port.
+  vsockPort: 3978
+  # The Kata operator labels every node that provides a Kata runtime. The host
+  # proxy also requires cgroup v2, the systemd cgroup driver, and Kata configured
+  # with sandbox_cgroup_only=true.
+  nodeSelector:
+    katacontainers.io/kata-runtime: "true"
+  tolerations: []
+  resources:
+    hostProxy:
+      requests: {cpu: 10m, memory: 16Mi}
+      limits: {cpu: 50m, memory: 32Mi}
+    guestProxy:
+      requests: {cpu: 10m, memory: 16Mi}
+      limits: {cpu: 50m, memory: 32Mi}
 identityController:
   enabled: false
   image:

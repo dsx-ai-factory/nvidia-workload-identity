@@ -90,6 +90,77 @@ spec:
                   readOnly: true
               - name: dsx-token
                 emptyDir: {}
+    {{- if .Values.kataSupport.enabled }}
+    # When Kata is enabled, tweak the token fetcher flow. In particular,
+    # replace the SPIFFE CSI bind mount with the kata-uds-proxy sidecar.
+    - name: add-kata-guest-proxy
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              selector:
+                matchLabels:
+                  spiffe.nvidia.com/service: dsx
+              namespaceSelector:
+                {{- toYaml .Values.podTokenFetcher.policy.namespaceLabelSelector | nindent 16 }}
+      preconditions:
+        all:
+          - key: "{{ `{{ request.object.spec.runtimeClassName || '' }}` }}"
+            operator: AnyIn
+            value:
+              {{- toYaml .Values.kataSupport.runtimeClassNames | nindent 14 }}
+      mutate:
+        patchStrategicMerge:
+          spec:
+            initContainers:
+              # volumeMounts merges on mountPath, so naming the same path here
+              # repoints the existing mount at the emptyDir below.
+              - name: dsx-token-fetcher
+                volumeMounts:
+                  - name: kata-workload-api
+                    mountPath: /var/run/secrets/spire.io
+                    readOnly: true
+              # The token fetcher retries the Workload API every
+              # second, so it tolerates this socket appearing after it starts.
+              - name: dsx-kata-guest-proxy
+                image: "{{ .Values.kataSupport.image.repository }}:{{ .Values.kataSupport.image.tag | default .Values.global.imageTag | default .Chart.Version }}"
+                imagePullPolicy: {{ .Values.kataSupport.image.pullPolicy }}
+                restartPolicy: Always
+                command:
+                  - /usr/local/bin/guest-entrypoint.sh
+                env:
+                  - name: SOCK_PATH
+                    value: /var/run/secrets/spire.io/spire-agent.sock
+                  - name: VSOCK_PORT
+                    value: {{ .Values.kataSupport.vsockPort | quote }}
+                # MKNOD creates /dev/vsock, which a Kata guest exposes in sysfs
+                # but leaves out of the container image. Both writes target tmpfs
+                # and the shared volume, so the root filesystem stays read-only.
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop: ["ALL"]
+                    add: ["MKNOD"]
+                  readOnlyRootFilesystem: true
+                  runAsGroup: 0
+                  runAsNonRoot: false
+                  runAsUser: 0
+                resources:
+                  {{- toYaml .Values.kataSupport.resources.guestProxy | nindent 18 }}
+                volumeMounts:
+                  # Read-write, unlike the token fetcher: this container creates
+                  # the socket that the fetcher then dials.
+                  - name: kata-workload-api
+                    mountPath: /var/run/secrets/spire.io
+            volumes:
+              # Rather than SPIFFE CSI, which won't work with Kata (the host unix socket
+              # isn't accessible), use an emptyDir shared with the proxy sidecar.
+              - name: spiffe-csi
+                $patch: delete
+              - name: kata-workload-api
+                emptyDir: {}
+    {{- end }}
     - name: validate-operator-pod-role
       match:
         any:

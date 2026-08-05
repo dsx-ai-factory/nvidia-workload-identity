@@ -1,5 +1,6 @@
 [tools]
 go = "1.26.4"
+rust = "1.97.1"
 kind = "v0.32.0"
 kubectl = "v1.34.0"
 helm = "v3.21.2"
