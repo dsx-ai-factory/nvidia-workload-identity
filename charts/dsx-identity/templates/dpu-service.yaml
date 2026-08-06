@@ -7,11 +7,13 @@ metadata:
   labels:
     {{- include "dsx-identity.labels" (dict "root" . "name" "dsx-imds") | nindent 4 }}
 spec:
+  security:
+    privileged: false
   helmChart:
     source:
-      repoURL: https://helm.ngc.nvidia.com/0837451325059433/components-dev
+      repoURL: {{ .Values.dpuService.imds.helmChart.repoURL }}
       chart: dsx-imds
-      version: {{ .Chart.Version | quote }}
+      version: {{ .Values.dpuService.imds.helmChart.version | default .Chart.Version | quote }}
       releaseName: dsx-imds
     values:
       imagePullSecrets:
@@ -19,6 +21,8 @@ spec:
       workload:
         {{- toYaml .Values.dpuService.workload | nindent 8 }}
       metadataService:
+        image:
+          {{- toYaml .Values.dpuService.imds.image | nindent 10 }}
         identityKeysURL: {{ required "dpuService.identityKeysURL is required" .Values.dpuService.identityKeysURL | quote }}
         logLevel: {{ .Values.observability.logLevel }}
         env:
@@ -37,11 +41,16 @@ spec:
     privileged: true
   helmChart:
     source:
-      repoURL: https://helm.ngc.nvidia.com/0837451325059433/components-dev
+      repoURL: {{ .Values.dpuService.spiffeCsi.helmChart.repoURL }}
       chart: dsx-spiffe-csi
-      version: {{ .Chart.Version | quote }}
+      version: {{ .Values.dpuService.spiffeCsi.helmChart.version | default .Chart.Version | quote }}
       releaseName: dsx-spiffe-csi
     values:
       imagePullSecrets:
         {{- toYaml .Values.imagePullSecrets | nindent 8 }}
+      image:
+        {{- toYaml .Values.dpuService.spiffeCsi.image | nindent 8 }}
+      nodeDriverRegistrar:
+        image:
+          {{- toYaml .Values.dpuService.spiffeCsi.nodeDriverRegistrar.image | nindent 10 }}
 {{- end }}
