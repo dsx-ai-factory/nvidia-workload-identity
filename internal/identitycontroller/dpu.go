@@ -18,6 +18,8 @@ import (
 	"dsx-identity/internal/identity"
 )
 
+const dpuMachineIDLabel = "carbide.nvidia.com/dpu-machine-id"
+
 // DPUGVK identifies the externally owned hardware inventory source.
 var DPUGVK = schema.GroupVersionKind{
 	Group:   "provisioning.dpu.nvidia.com",
@@ -25,11 +27,11 @@ var DPUGVK = schema.GroupVersionKind{
 	Kind:    "DPU",
 }
 
-// DPUReconciler maps each read-only DPU source to one entry. metadata.name is
-// the DPU resource ID and OperatorTenant is its tenant. The parent agent is
-// /spire/agent/dpu_hw/<serial>, matching the DPF-provisioned NodeAttestor.
-// Configured Kubernetes selectors identify the IMDS container that calls the
-// Workload API through SPIFFE CSI.
+// DPUReconciler maps each read-only DPU source to its paired BM entry. The
+// machine ID label is the BM resource ID and OperatorTenant is its tenant. The
+// parent agent is /spire/agent/dpu_hw/<serial>, matching the DPF-provisioned
+// NodeAttestor. Configured Kubernetes selectors identify the IMDS container
+// that calls the Workload API through SPIFFE CSI.
 type DPUReconciler struct {
 	client.Client
 	Config   Config
@@ -55,10 +57,14 @@ func (r *DPUReconciler) desiredEntry(dpu *unstructured.Unstructured) (*spirev1al
 	if err != nil {
 		return nil, err
 	}
+	machineID, err := dpuMachineID(dpu)
+	if err != nil {
+		return nil, err
+	}
 	spiffeID, err := (identity.Subject{
 		Tenant:       r.Config.OperatorTenant,
-		ResourceType: identity.ResourceDPU,
-		ResourceID:   dpu.GetName(),
+		ResourceType: identity.ResourceBM,
+		ResourceID:   machineID,
 	}).SPIFFEID(td)
 	if err != nil {
 		return nil, err
@@ -79,4 +85,15 @@ func (r *DPUReconciler) desiredEntry(dpu *unstructured.Unstructured) (*spirev1al
 		return nil, fmt.Errorf("DPU parent ID: %w", err)
 	}
 	return newEntry(dpu, spiffeID, parentID, "dsx-imds", r.Config.ClassName, slices.Clone(r.Config.DPUMetadataSelectors))
+}
+
+func dpuMachineID(dpu *unstructured.Unstructured) (string, error) {
+	machineID := dpu.GetLabels()[dpuMachineIDLabel]
+	if machineID == "" {
+		return "", fmt.Errorf("DPU label %q is required", dpuMachineIDLabel)
+	}
+	if !identity.ValidResourceID(machineID) {
+		return "", fmt.Errorf("invalid DPU machine ID %q", machineID)
+	}
+	return machineID, nil
 }

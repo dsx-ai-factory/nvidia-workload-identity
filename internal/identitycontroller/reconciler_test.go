@@ -55,7 +55,7 @@ func TestConfigRejectsInvalidDPUMetadataSelectors(t *testing.T) {
 	}
 }
 
-func TestDPUReconcileCreatesBaseIdentityAndCleansUp(t *testing.T) {
+func TestDPUReconcileCreatesPairedBMIdentityAndCleansUp(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -63,6 +63,7 @@ func TestDPUReconcileCreatesBaseIdentityAndCleansUp(t *testing.T) {
 	dpu.SetGroupVersionKind(DPUGVK)
 	dpu.SetName("dpu-1")
 	dpu.SetUID(types.UID("f6e44986-13f5-4778-8424-1f0514a0f20c"))
+	dpu.SetLabels(map[string]string{dpuMachineIDLabel: "machine-1"})
 	setSourceSpecField(t, dpu, "serialNumber", "52TF43G001G")
 	c := &applyClient{Client: fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(dpu).Build()}
 	r := &DPUReconciler{Client: c, Config: testConfig, Recorder: record.NewFakeRecorder(4)}
@@ -84,7 +85,7 @@ func TestDPUReconcileCreatesBaseIdentityAndCleansUp(t *testing.T) {
 	}
 	entry := getEntry(t, c, childName(dpu))
 	assertEntry(t, entry,
-		"spiffe://k2.sjc-1.nvidia.com/tenant/operator-1/service/dsx/dpu/dpu-1",
+		"spiffe://k2.sjc-1.nvidia.com/tenant/operator-1/service/dsx/bm/machine-1",
 		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dpu_hw/52tf43g001g",
 		"dsx-imds",
 		testDPUMetadataSelectors,
@@ -110,7 +111,7 @@ func TestDPUReconcileCreatesBaseIdentityAndCleansUp(t *testing.T) {
 	}
 	entry = getEntry(t, c, childName(dpu))
 	assertEntry(t, entry,
-		"spiffe://k2.sjc-1.nvidia.com/tenant/operator-1/service/dsx/dpu/dpu-1",
+		"spiffe://k2.sjc-1.nvidia.com/tenant/operator-1/service/dsx/bm/machine-1",
 		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dpu_hw/52tf43g001g",
 		"dsx-imds",
 		testDPUMetadataSelectors,
@@ -138,17 +139,20 @@ func TestDPUReconcileCreatesBaseIdentityAndCleansUp(t *testing.T) {
 	}
 }
 
-func TestDPUDesiredEntryRequiresValidSerial(t *testing.T) {
+func TestDPUDesiredEntryRequiresValidSource(t *testing.T) {
 	t.Parallel()
 
 	for _, test := range []struct {
-		name   string
-		serial any
-		want   string
+		name      string
+		machineID string
+		serial    any
+		want      string
 	}{
-		{name: "missing", want: "spec.serialNumber is required"},
-		{name: "wrong type", serial: int64(1), want: "spec.serialNumber"},
-		{name: "invalid", serial: "invalid serial", want: "invalid character"},
+		{name: "missing machine ID", serial: "52TF43G001G", want: dpuMachineIDLabel},
+		{name: "invalid machine ID", machineID: "invalid/id", serial: "52TF43G001G", want: "invalid DPU machine ID"},
+		{name: "missing serial", machineID: "machine-1", want: "spec.serialNumber is required"},
+		{name: "wrong serial type", machineID: "machine-1", serial: int64(1), want: "spec.serialNumber"},
+		{name: "invalid serial", machineID: "machine-1", serial: "invalid serial", want: "invalid character"},
 	} {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
@@ -156,6 +160,9 @@ func TestDPUDesiredEntryRequiresValidSerial(t *testing.T) {
 			dpu := &unstructured.Unstructured{}
 			dpu.SetGroupVersionKind(DPUGVK)
 			dpu.SetName("dpu-1")
+			if test.machineID != "" {
+				dpu.SetLabels(map[string]string{dpuMachineIDLabel: test.machineID})
+			}
 			if test.serial != nil {
 				setSourceSpecField(t, dpu, "serialNumber", test.serial)
 			}
