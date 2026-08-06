@@ -252,13 +252,13 @@ flowchart TB
   subgraph DPUParented["Entries parented to a DPU agent ID"]
     direction LR
 
-    subgraph DPULane["DPU"]
+    subgraph DPULane["DPU-paired operator bare-metal host"]
       direction TB
-      DPUCR{{"INPUT CR<br/>kind: DPU<br/>id: metadata.name<br/>agent serial: spec.serialNumber"}}
+      DPUCR{{"INPUT CR<br/>kind: DPU<br/>BM id: carbide.nvidia.com/dpu-machine-id label<br/>agent serial: spec.serialNumber"}}
       DPUParent(["PARENT AGENT ID<br/>type: dpu_hw<br/>spiffe://{td}/spire/agent/dpu_hw/{normalized spec.serialNumber}"])
-      DPUEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: DSX Identity Controller<br/>subject: /tenant/{operator}/service/dsx/dpu/{metadata.name}<br/>hint: dsx-imds<br/>selectors: DPU IMDS Kubernetes selectors"]
+      DPUEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: DSX Identity Controller<br/>subject: /tenant/{operator}/service/dsx/bm/{dpu-machine-id}<br/>hint: dsx-imds<br/>selectors: DPU IMDS Kubernetes selectors"]
       DPUCR -->|"derives subject"| DPUEntry
-      DPUParent -->|"spec.parentID"| DPUEntry
+      DPUParent -->|"spec.serialNumber"| DPUEntry
     end
 
     subgraph HostLane["Standalone tenant-facing bare-metal host"]
@@ -296,13 +296,10 @@ flowchart TB
   end
 ```
 
-The external DPU and NICo integration must provision a SPIRE registration for
-the operator worker host beneath the paired DPU's `dsx_dpu` agent. The
-registration selectors allow DPU-hosted DSX IMDS to obtain the host SPIRE
-JWT-SVID and exchange it for the DSX JWT returned through link-local IMDS. The
-worker uses that DSX JWT to attest its local SPIRE agent through `dsx_imds`.
-Because the repository has no worker-to-DPU mapping, it does not own this
-bootstrap registration and the registration is outside this diagram.
+The DPU resource supplies the worker-to-DPU relationship. Its IMDS registration
+allows DPU-hosted DSX IMDS to obtain the paired worker's SPIRE JWT-SVID and
+exchange it for the DSX JWT returned through link-local IMDS. The worker uses
+that DSX JWT to attest its local SPIRE agent through `dsx_imds`.
 
 For a standalone host, the LaunchLayer source supplies the host-to-DPU
 relationship, so the DSX Identity Controller creates the equivalent host
@@ -343,7 +340,7 @@ external to the identity chart.
 | Consumer | SPIRE trust path | DSX JWT delivery |
 |---|---|---|
 | [Kubernetes Pod](cmd/dsx-token-fetcher/README.md) | Kubernetes WorkloadAttestor under the worker's `dsx_imds`-attested host agent. The registration uses the operator tenant and worker host subject | The `dsx-token-fetcher` sidecar selects `dsx-pod`, exchanges the local SPIRE JWT-SVID, and writes the DSX JWT to a Pod-private volume mounted read-only in application containers |
-| DPU IMDS | The external DPU agent attests through the `dpu_hw` NodeAttestor agent and server. Its Kubernetes WorkloadAttestor binds the DPU identity to the IMDS Pod | SPIFFE CSI exposes the DPU agent Workload API socket. DSX IMDS selects `dsx-imds`, exchanges the local SPIRE JWT-SVID, and serves the DSX JWT through IMDS |
+| DPU IMDS | The external DPU agent attests through the `dpu_hw` NodeAttestor agent and server. Its Kubernetes WorkloadAttestor binds the paired BM identity to the IMDS Pod | SPIFFE CSI exposes the DPU agent Workload API socket. DSX IMDS selects `dsx-imds`, exchanges the local SPIRE JWT-SVID, and serves the BM DSX JWT through IMDS |
 | [Bare-metal host process](cmd/dsx-imds-node-attestor-agent/README.md) | The DPU agent is attested through `dsx_dpu`. The host agent is attested through the repository `dsx_imds` NodeAttestor agent and server, then can serve local processes through the Unix WorkloadAttestor | The paired DPU intercept carries link-local IMDS to NICo or Carbide IMDS, which passes identity requests to DSX IMDS. DPU-hosted DSX IMDS exchanges directly with its reachable shard-local DSX Identity Keys. The host agent uses the returned DSX JWT for node attestation. A host-process-specific token delivery contract is not currently defined |
 | [Kata Containers Pod](kata-uds-proxy/README.md) | Identical to a Kubernetes Pod. The guest is a VM, so SPIFFE CSI cannot reach the agent socket; the `kata-uds-proxy` host DaemonSet forwards it over vsock into the sandbox instead | Unchanged from a Kubernetes Pod. A guest sidecar re-serves the forwarded socket at the same path, so the same `dsx-token-fetcher` sidecar applies |
 | [KubeVirt VM](cmd/metadata-service/README.md) | The controller derives the VM subject from the dynamically supplied tenant ID and parents it to the operator-owned worker host's `dsx_imds` agent. The Kubernetes WorkloadAttestor serves the operator-owned virt-launcher Pod, and SPIFFE CSI exposes that same agent's Workload API socket | The DSX IMDS sidecar selects the VM SPIRE JWT-SVID by its exact `dsx-imds-vm` hint, exchanges it through DSX Identity Keys Proxy CSI, and serves the DSX JWT through IMDS |
@@ -528,8 +525,8 @@ spiffe://<local-trust-domain>/tenant/<tenant>/service/dsx/<resource-type>/<resou
 Every Kubernetes worker is an operator-owned bare-metal host. There is no
 configured worker list and no LaunchLayer source for these hosts. The Pod
 registration template derives the host ID directly from the Kubernetes node
-name. Physical worker-to-DPU pairing belongs to the external NICo and DPU
-integration boundary, not the Identity Controller configuration.
+name. The DPU source supplies the BM resource ID through its
+`carbide.nvidia.com/dpu-machine-id` label.
 
 Every DSX Kubernetes Pod supplies the service label. One SPIRE
 controller-manager derives its operator tenant, BM resource type, node name,

@@ -46,7 +46,7 @@ verify_dpu_controller_registration() {
     log_test "Checking the Identity Controller DPU registration..."
 
     local spiffe_id parent_id entries="" deadline=$((SECONDS + 60))
-    spiffe_id="spiffe://k2.sjc-1.nvidia.com/tenant/operator-1/service/dsx/dpu/e2e-controller-dpu"
+    spiffe_id="spiffe://k2.sjc-1.nvidia.com/tenant/operator-1/service/dsx/bm/e2e-machine-001"
     parent_id="spiffe://k2.sjc-1.nvidia.com/spire/agent/dpu_hw/dpf-serial-001"
     while ((SECONDS < deadline)); do
         entries=$(kubectl exec statefulset/dsx-identity-server -n dsx-identity \

@@ -3,5 +3,7 @@ kind: DPU
 metadata:
   name: e2e-controller-dpu
   namespace: dsx-identity
+  labels:
+    carbide.nvidia.com/dpu-machine-id: e2e-machine-001
 spec:
   serialNumber: DPF-SERIAL-001

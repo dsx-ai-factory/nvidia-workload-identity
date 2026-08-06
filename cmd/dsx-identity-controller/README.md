@@ -13,18 +13,19 @@ controller-manager owns Pod registrations. The controller rejects duplicate
 child SPIFFE IDs and overlapping VM holders, removes stale entries for invalid
 sources, and reconciles again when the source or conflicting entry changes.
 
-Every DPU source is operator-owned and uses the configured operator tenant. A
-standalone tenant-facing BM source uses the tenant supplied by LaunchLayer. A
-VM source uses its LaunchLayer tenant only for the VM identity and parents that
-identity to the configured operator tenant's `dsx_imds` agent for the holder's
-worker host. The worker host and its virt-launcher Pod remain operator-owned.
-LaunchLayer is the source of a tenant ID, not a tenant itself.
+Every DPU source identifies its paired operator-owned BM through the
+`carbide.nvidia.com/dpu-machine-id` label and uses the configured operator
+tenant. A standalone tenant-facing BM source uses the tenant supplied by
+LaunchLayer. A VM source uses its LaunchLayer tenant only for the VM identity
+and parents that identity to the configured operator tenant's `dsx_imds` agent
+for the holder's worker host. The worker host and its virt-launcher Pod remain
+operator-owned. LaunchLayer is the source of a tenant ID, not a tenant itself.
 
 The official controller-manager registers each Kubernetes Pod beneath its
 worker's `dsx_imds`-attested agent. Its registration uses the configured
 operator tenant, Kubernetes node name, and Pod UID, and the Kubernetes
-WorkloadAttestor serves it. The base DPU registration is instead parented to
-the external `dpu_hw`-attested agent identified by the DPU serial number.
+WorkloadAttestor serves it. The paired BM registration is parented to the
+external `dpu_hw`-attested agent identified by the DPU serial number.
 
 ```mermaid
 flowchart LR
