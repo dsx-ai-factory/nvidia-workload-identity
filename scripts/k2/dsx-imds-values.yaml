@@ -15,6 +15,7 @@ workload:
 
 metadataService:
   identityKeysURL: http://dsx-identity-keys.dsx-identity.svc.cluster.local:8080/v1/exchange
+  spireSocketPath: /var/run/secrets/spire.io/spire-agent.sock
   env:
     OTEL_SDK_DISABLED: "true"
 
