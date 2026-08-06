@@ -31,10 +31,6 @@ func run() (runErr error) {
 	flag.StringVar(&config.TrustDomain, "trust-domain", "", "local SPIRE trust domain")
 	flag.StringVar(&config.OperatorTenant, "operator-tenant", "", "configured tenant for operator identities")
 	flag.StringVar(&config.ClassName, "class-name", "", "SPIRE controller manager class name")
-	flag.Func("dpu-token-fetcher-selector", "SPIRE selector for the DPU token fetcher, repeatable", func(value string) error {
-		config.DPUTokenFetcherSelectors = append(config.DPUTokenFetcherSelectors, value)
-		return nil
-	})
 	flag.Func("dpu-metadata-selector", "SPIRE selector for DPU-side metadata-service, repeatable", func(value string) error {
 		config.DPUMetadataSelectors = append(config.DPUMetadataSelectors, value)
 		return nil

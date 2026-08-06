@@ -1,0 +1,12 @@
+# K2 uses k8s_psat to terminate the external DPU agent boundary.
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: e2e-dpu-imds-bootstrap
+spec:
+  className: dsx-identity-dsx-identity
+  hint: dsx-imds
+  spiffeIDTemplate: spiffe://{{ .TrustDomain }}/tenant/operator-1/service/dsx/dpu/e2e-dpu-imds
+  podSelector:
+    matchLabels:
+      identity.dsx.nvidia.com/dpu-imds: e2e

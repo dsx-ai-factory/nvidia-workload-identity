@@ -1,0 +1,11 @@
+serviceDaemonSet:
+  nodeSelector:
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: kubernetes.io/hostname
+            operator: In
+            values: [k2-worker]
+
+# The local host agent uses the upstream chart's host socket path.
+pluginName: dpu.csi.spiffe.io
+agentSocketPath: /run/spire/agent-sockets/spire-agent.sock

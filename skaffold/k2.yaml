@@ -303,6 +303,7 @@ requires:
 manifests:
   rawYaml:
     - ../scripts/k2/source-fixtures/operator-host-bootstrap.yaml
+    - ../scripts/k2/source-fixtures/dpu-imds-bootstrap.yaml
     - ../scripts/k2/dpu/e2e-nico-mds.yaml
 deploy:
   kubeContext: kind-k2
@@ -342,20 +343,69 @@ deploy:
 apiVersion: skaffold/v4beta14
 kind: Config
 metadata:
-  name: k2-fixture
+  name: dpu-spiffe-csi-k2
 requires:
   - path: images.yaml
     configs:
       - images
   - configs:
       - worker-host-k2
+deploy:
+  kubeContext: kind-k2
+  statusCheckDeadlineSeconds: 180
+  tolerateFailuresUntilDeadline: true
+  helm:
+    releases:
+      - name: dsx-spiffe-csi
+        chartPath: ../charts/dsx-spiffe-csi
+        namespace: dsx-identity
+        valuesFiles:
+          - ../scripts/k2/dsx-spiffe-csi-values.yaml
+---
+apiVersion: skaffold/v4beta14
+kind: Config
+metadata:
+  name: dpu-imds-k2
+requires:
+  - path: images.yaml
+    configs:
+      - images
+  - configs:
+      - dpu-spiffe-csi-k2
+manifests:
+  rawYaml:
+    - ../scripts/k2/dpu/e2e-dpu-imds.yaml
+deploy:
+  kubeContext: kind-k2
+  statusCheckDeadlineSeconds: 180
+  tolerateFailuresUntilDeadline: true
+  kubectl: {}
+  helm:
+    releases:
+      - name: dsx-imds
+        chartPath: ../charts/dsx-imds
+        namespace: dsx-identity
+        valuesFiles:
+          - ../scripts/k2/dsx-imds-values.yaml
+        setValueTemplates:
+          metadataService.image.repository: "{{.IMAGE_REPO_dsx_identity_metadata_service}}"
+          metadataService.image.tag: "{{.IMAGE_TAG_dsx_identity_metadata_service}}"
+---
+apiVersion: skaffold/v4beta14
+kind: Config
+metadata:
+  name: k2-fixture
+requires:
+  - path: images.yaml
+    configs:
+      - images
+  - configs:
+      - dpu-imds-k2
 manifests:
   rawYaml:
     - ../scripts/k2/source-fixtures/dpu-controller.yaml
-    - ../scripts/k2/source-fixtures/dpu-token-fetcher.yaml
     - ../scripts/k2/nginx/e2e-nginx.yaml
     - ../scripts/k2/nginx/e2e-spire-client.yaml
-    - ../scripts/k2/dpu/e2e-dpu-token-fetcher.yaml
 deploy:
   kubeContext: kind-k2
   statusCheckDeadlineSeconds: 180

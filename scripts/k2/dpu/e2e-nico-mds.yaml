@@ -64,7 +64,7 @@ spec:
         - name: bootstrap-spiffe-csi
           mountPath: /var/run/secrets/spire.io
           readOnly: true
-    - name: host-imds-probe
+    - name: imds-probe
       image: dsx-identity/e2e-probe:0.1.0
       imagePullPolicy: IfNotPresent
       command: ["tail", "-f", "/dev/null"]

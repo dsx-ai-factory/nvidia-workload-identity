@@ -245,6 +245,19 @@ vmSupport:
       name: kubevirt-controller
       namespace: kubevirt
 
+# DPF deploys this service into each selected DPU cluster.
+dpuService:
+  enabled: false
+  # Defaults used by both the child chart and the controller's DPU entry.
+  workload:
+    serviceAccountName: dsx-imds
+    containerName: metadata-service
+  # DPU clusters cannot resolve the management cluster's Kubernetes Services.
+  identityKeysURL: ""
+  # Set the DPU collector endpoint here. The management-cluster sidecar endpoint
+  # under observability.env is not reachable from DPU Pods.
+  observabilityEnv: {}
+
 # Kata Containers support. A Kata Pod runs inside a VM, so the SPIFFE CSI driver
 # cannot carry the Workload API socket across the VM boundary. The host proxy
 # serves that socket over vsock and the guest proxy re-serves it as a unix socket
@@ -281,9 +294,7 @@ identityController:
     repository: nvcr.io/0837451325059433/components-dev/dsx-identity-controller
     tag: ""
     pullPolicy: IfNotPresent
-  # These selectors identify the token fetcher that calls each DPU Workload API.
-  dpuTokenFetcherSelectors: []
-  # These selectors identify DPU-side metadata-service for host identities.
+  # Replaces the selectors derived from dpuService.workload when non-empty.
   dpuMetadataSelectors: []
   replicaCount: 2
   resources:

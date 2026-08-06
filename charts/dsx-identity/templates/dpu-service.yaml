@@ -1,0 +1,47 @@
+{{- if .Values.dpuService.enabled }}
+apiVersion: svc.dpu.nvidia.com/v1alpha1
+kind: DPUService
+metadata:
+  name: dsx-imds
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dsx-identity.labels" (dict "root" . "name" "dsx-imds") | nindent 4 }}
+spec:
+  helmChart:
+    source:
+      repoURL: https://helm.ngc.nvidia.com/0837451325059433/components-dev
+      chart: dsx-imds
+      version: {{ .Chart.Version | quote }}
+      releaseName: dsx-imds
+    values:
+      imagePullSecrets:
+        {{- toYaml .Values.imagePullSecrets | nindent 8 }}
+      workload:
+        {{- toYaml .Values.dpuService.workload | nindent 8 }}
+      metadataService:
+        identityKeysURL: {{ required "dpuService.identityKeysURL is required" .Values.dpuService.identityKeysURL | quote }}
+        logLevel: {{ .Values.observability.logLevel }}
+        env:
+          {{- toYaml .Values.dpuService.observabilityEnv | nindent 10 }}
+---
+apiVersion: svc.dpu.nvidia.com/v1alpha1
+kind: DPUService
+metadata:
+  name: dsx-spiffe-csi
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dsx-identity.labels" (dict "root" . "name" "dsx-spiffe-csi") | nindent 4 }}
+spec:
+  # The CSI driver needs privileged mount propagation on each DPU node.
+  security:
+    privileged: true
+  helmChart:
+    source:
+      repoURL: https://helm.ngc.nvidia.com/0837451325059433/components-dev
+      chart: dsx-spiffe-csi
+      version: {{ .Chart.Version | quote }}
+      releaseName: dsx-spiffe-csi
+    values:
+      imagePullSecrets:
+        {{- toYaml .Values.imagePullSecrets | nindent 8 }}
+{{- end }}

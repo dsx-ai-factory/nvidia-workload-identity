@@ -31,13 +31,15 @@ DSX Identity turns shard-local SPIRE JWT-SVIDs into DSX JWTs that relying partie
 This repository is primarily a Go service and Kubernetes Helm chart repository. It contains multiple security-sensitive binaries:
 
 - `cmd/dsx-identity-keys`: HTTP token-exchange service, OIDC discovery endpoint, JWKS endpoint, local signing-key loader, and NATS JetStream KV public-key synchronizer.
-- `cmd/dsx-token-fetcher`: sidecar or DPU process helper that fetches SPIRE JWT-SVIDs from the SPIRE Workload API, exchanges them for DSX JWTs, and writes tokens to a configured file path.
+- `cmd/dsx-token-fetcher`: Pod sidecar that fetches SPIRE JWT-SVIDs from the SPIRE Workload API, exchanges them for DSX JWTs, and writes tokens to a configured file path.
 - `cmd/metadata-service`: tokenless metadata service for host and VM identity flows, serving `/latest/meta-data/identity` and `/2009-04-04/meta-data/identity`.
 - `cmd/dsx-imds-node-attestor-agent` and `cmd/dsx-imds-node-attestor-server`: SPIRE NodeAttestor plugins that bootstrap host agents using DSX JWTs obtained through IMDS.
 - `cmd/dsx-dpu-node-attestor-server` and `internal/dpu`: SPIRE NodeAttestor plugin for DPU node attestation.
 - `cmd/dsx-identity-controller` and `internal/identitycontroller`: Kubernetes controller that derives SPIRE `ClusterStaticEntry` resources from DPU and LaunchLayer source resources.
 - `cmd/dsx-identity-keys-proxy-csi`: CSI node plugin exposing a local socket path used by VM metadata sidecars to reach DSX Identity Keys.
-- `charts/dsx-identity`: Helm chart for DSX Identity Keys, SPIRE integration, identity injection policies, VM support, observability, service accounts, and deployment security contexts.
+- `charts/dsx-identity`: Helm chart for the management-cluster identity shard and DPF DPUService registration.
+- `charts/dsx-imds`: DPUService payload for DSX IMDS on DPU nodes.
+- `charts/dsx-spiffe-csi`: DPUService payload for SPIFFE CSI on DPU nodes.
 
 Primary security responsibilities:
 

@@ -3,8 +3,8 @@
 `dsx-identity-controller` watches DPU and LaunchLayer source objects in one
 management cluster and reconciles the corresponding SPIRE
 `ClusterStaticEntry` objects. It derives SPIFFE IDs, parent IDs, selectors,
-and workload hints from each local source. Separate configuration supplies the
-DPU token-fetcher and DPU metadata selectors. A VM source supplies its holder
+and workload hints from each local source. Configuration supplies the DPU IMDS
+Kubernetes selectors. A VM source supplies its holder
 namespace, service account, and optional Pod UID. A BM source has no holder.
 The source objects remain read-only.
 
@@ -46,8 +46,7 @@ cluster that owns the identity shard's source CRs through
 | `--trust-domain` | required | Local SPIRE trust domain |
 | `--operator-tenant` | required | Configured tenant for operator identities |
 | `--class-name` | required | SPIRE controller-manager class name |
-| `--dpu-token-fetcher-selector` | required, repeatable | Unix WorkloadAttestor selector for the `dsx-token-fetcher` process that calls the DPU Workload API |
-| `--dpu-metadata-selector` | required, repeatable | External DPU runtime selector for DSX IMDS when it selects a host identity |
+| `--dpu-metadata-selector` | required, repeatable | Kubernetes WorkloadAttestor selector for DPU IMDS |
 | `--metrics-bind-address` | `:8080` | Controller metrics address |
 | `--health-probe-bind-address` | `:8081` | `/healthz` and `/readyz` address |
 | `--leader-elect` | `true` | Enable Kubernetes leader election |

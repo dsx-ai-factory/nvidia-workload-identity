@@ -21,7 +21,6 @@ OPENBAO_URL="http://${GATEWAY_HOST}:8200"
 EXTERNAL_CLIENT_NAME="e2e-external-client"
 EXTERNAL_CLIENT_CONTAINER="external-client"
 OPERATOR_HOST_ID="k2-worker"
-DPU_TOKEN_FETCHER_POD="e2e-dpu-token-fetcher"
 VM_TOKEN=""
 K2_IDENTITY_KEYS_KID=""
 GATEWAY_ADDRESS=""
@@ -56,9 +55,15 @@ verify_dpu_controller_registration() {
             -output json 2>/dev/null) || continue
         jq -e --arg parent "${parent_id}" '
             .entries | length == 1 and
-            ("spiffe://" + .[0].parent_id.trust_domain + .[0].parent_id.path) == $parent
+            ("spiffe://" + .[0].parent_id.trust_domain + .[0].parent_id.path) == $parent and
+            .[0].hint == "dsx-imds" and
+            ([.[0].selectors[] | .type + ":" + .value] | sort) == [
+                "k8s:container-name:e2e-metadata-service",
+                "k8s:ns:dsx-identity",
+                "k8s:sa:e2e-dsx-imds"
+            ]
         ' <<<"${entries}" >/dev/null && {
-            log_success "Identity Controller created the DPU entry under its dpu_hw agent"
+            log_success "Identity Controller created the DPU IMDS entry under its dpu_hw agent"
             return 0
         }
     done
@@ -207,57 +212,46 @@ EOF
     log_success "OpenBao verified the VM signature and enforced its exact policies"
 }
 
-verify_dpu_token_file() {
-    log_test "Exercising DPU token-file delivery through the external-agent fixture..."
+verify_imds_identity() {
+    local pod="$1" expected_subject="$2" endpoint="${3:-http://127.0.0.1:18080}" response="" token deadline=$((SECONDS + 180))
 
-    local token="" deadline=$((SECONDS + 180))
-    local expected_subject="spiffe://operator-1.ds9.dsx.nvid.id/dpu/e2e-dpu-token-fetcher"
-    while ((SECONDS < deadline)); do
-        token=$(kubectl exec "${DPU_TOKEN_FETCHER_POD}" -n dsx-identity --context "${CONTEXT}" \
-            -c dpu-consumer -- cat /run/secrets/nvidia.com/dsx/token 2>/dev/null) || continue
-        [[ -n "${token}" ]] && break
-    done
-    if [[ -z "${token}" ]]; then
-        log_error "DPU fixture did not receive a DSX token file"
-        return 1
-    fi
-    check_token_contract "${token}" "${expected_subject}" "${TEST_AUDIENCE}" || return 1
-    kubectl exec "${DPU_TOKEN_FETCHER_POD}" -n dsx-identity --context "${CONTEXT}" \
-        -c dpu-consumer -- test ! -e /var/run/secrets/spire.io/spire-agent.sock || {
-        log_error "DPU consumer unexpectedly received the Workload API socket"
-        return 1
-    }
-
-    log_success "The real DPU fetcher wrote a token consumed by its fixture process"
-}
-
-verify_operator_host_imds() {
-    log_test "Requesting the operator worker-host identity from bootstrap IMDS..."
-
-    local pod expected_subject response="" token deadline=$((SECONDS + 180))
-    pod=$(kubectl get pod e2e-nico-mds -n dsx-identity --context "${CONTEXT}" \
-        -o jsonpath='{.metadata.name}') || return 1
-    expected_subject="spiffe://operator-1.ds9.dsx.nvid.id/bm/${OPERATOR_HOST_ID}"
     while ((SECONDS < deadline)); do
         response=$(kubectl exec "${pod}" -n dsx-identity --context "${CONTEXT}" \
-            -c host-imds-probe -- curl -fsS --max-time 10 -G \
+            -c imds-probe -- curl -fsS --max-time 10 -G \
             -H 'Metadata: true' -H 'Accept: application/json' \
-            'http://127.0.0.1:18080/latest/meta-data/identity' \
+            "${endpoint}/latest/meta-data/identity" \
             --data-urlencode "aud=${HOST_AUDIENCE}" 2>/dev/null) || continue
         jq -e --arg subject "${expected_subject}" '.spiffe_id == $subject' \
             <<<"${response}" >/dev/null && break
         response=""
     done
     if [[ -z "${response}" ]]; then
-        log_error "Operator worker-host IMDS did not return the expected identity"
+        log_error "${pod} did not return ${expected_subject}"
         return 1
     fi
     jq -e --arg subject "${expected_subject}" '.spiffe_id == $subject' \
         <<<"${response}" >/dev/null || return 1
     token=$(jq -er '.token' <<<"${response}") || return 1
     check_token_contract "${token}" "${expected_subject}" "${HOST_AUDIENCE}" || return 1
+}
+
+verify_operator_host_imds() {
+    log_test "Requesting the operator worker-host identity from bootstrap IMDS..."
+
+    verify_imds_identity e2e-nico-mds \
+        "spiffe://operator-1.ds9.dsx.nvid.id/bm/${OPERATOR_HOST_ID}" || return 1
 
     log_success "Operator worker-host IMDS returned the configured tenant and node ID"
+}
+
+verify_dpu_imds() {
+    log_test "Requesting the DPU identity from metadata-service..."
+
+    verify_imds_identity e2e-dpu-imds-probe \
+        spiffe://operator-1.ds9.dsx.nvid.id/dpu/e2e-dpu-imds \
+        http://dsx-imds || return 1
+
+    log_success "DPU IMDS exchanged its SPIFFE identity"
 }
 
 verify_metadata_access() {
@@ -311,7 +305,7 @@ main() {
 
     run_timed "DPU controller registration" verify_dpu_controller_registration || failed=$((failed + 1))
     run_timed "operator host IMDS" verify_operator_host_imds || failed=$((failed + 1))
-    run_timed "DPU token file" verify_dpu_token_file || failed=$((failed + 1))
+    run_timed "DPU IMDS" verify_dpu_imds || failed=$((failed + 1))
     run_timed "VM identity and OpenBao" verify_metadata_access || failed=$((failed + 1))
     echo
     if [[ $failed -eq 0 ]]; then

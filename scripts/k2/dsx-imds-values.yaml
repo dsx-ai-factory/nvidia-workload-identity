@@ -1,0 +1,21 @@
+serviceDaemonSet:
+  nodeSelector:
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: kubernetes.io/hostname
+            operator: In
+            values: [k2-worker]
+  labels:
+    identity.dsx.nvidia.com/dpu-imds: e2e
+
+# Exercise the workload selector override contract.
+workload:
+  serviceAccountName: e2e-dsx-imds
+  containerName: e2e-metadata-service
+
+metadataService:
+  identityKeysURL: http://dsx-identity-keys.dsx-identity.svc.cluster.local:8080/v1/exchange
+  env:
+    OTEL_SDK_DISABLED: "true"
+
+spiffeCsiDriver: dpu.csi.spiffe.io

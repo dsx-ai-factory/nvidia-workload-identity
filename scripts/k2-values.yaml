@@ -41,9 +41,7 @@ identityController:
   replicaCount: 1
   # k2 bootstrap installs an API-only Kind fixture for the external DPU CRD.
   # dsx_dpu is supplied separately.
-  dpuTokenFetcherSelectors:
-    - unix:uid:1000
-    - unix:path:/usr/local/bin/dsx-token-fetcher
   dpuMetadataSelectors:
     - k8s:ns:dsx-identity
-    - k8s:sa:e2e-nico-mds
+    - k8s:sa:e2e-dsx-imds
+    - k8s:container-name:e2e-metadata-service
