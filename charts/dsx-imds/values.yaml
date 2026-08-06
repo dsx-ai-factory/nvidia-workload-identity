@@ -18,6 +18,8 @@ metadataService:
     tag: ""
     pullPolicy: IfNotPresent
   identityKeysURL: ""
+  # DPF's CSI volume exposes the Workload API socket at this path.
+  spireSocketPath: /var/run/secrets/spire.io/agent.sock
   logLevel: info
   env: {}
   resources:

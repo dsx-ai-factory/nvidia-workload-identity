@@ -24,6 +24,9 @@ spec:
         image:
           {{- toYaml .Values.dpuService.imds.image | nindent 10 }}
         identityKeysURL: {{ required "dpuService.identityKeysURL is required" .Values.dpuService.identityKeysURL | quote }}
+        {{- with .Values.dpuService.imds.spireSocketPath }}
+        spireSocketPath: {{ . | quote }}
+        {{- end }}
         logLevel: {{ .Values.observability.logLevel }}
         env:
           {{- toYaml .Values.dpuService.observabilityEnv | nindent 10 }}
