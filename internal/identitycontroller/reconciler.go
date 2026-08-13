@@ -17,7 +17,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -36,21 +35,13 @@ const (
 
 // Config holds shard-wide controller values. TrustDomain encodes local SPIRE
 // IDs. OperatorTenant supplies the tenant segment for DPU subjects and the
-// host-agent parent of a VM. A tenant supplied by LaunchLayer remains on the
-// standalone host or VM subject. ClassName is placed on every entry.
+// host-agent parent of a VM. Launch Layer supplies tenant subjects. ClassName
+// is placed on every entry.
 type Config struct {
 	TrustDomain          string
 	OperatorTenant       string
 	ClassName            string
 	DPUMetadataSelectors []string
-}
-
-// Holder contains stable SPIRE namespace and service account selectors. PodUID
-// narrows selection only when the external source supplies it.
-type Holder struct {
-	Namespace      string `json:"namespace"`
-	ServiceAccount string `json:"serviceAccount"`
-	PodUID         string `json:"podUID,omitempty"`
 }
 
 // Validate verifies shard configuration before either controller starts.
@@ -99,7 +90,7 @@ func reconcileSource(
 	recorder record.EventRecorder,
 	request ctrl.Request,
 	gvk schema.GroupVersionKind,
-	buildEntry func(*unstructured.Unstructured) (*spirev1alpha1.ClusterStaticEntry, error),
+	buildEntry func(context.Context, *unstructured.Unstructured) (*spirev1alpha1.ClusterStaticEntry, error),
 ) (ctrl.Result, error) {
 	source := &unstructured.Unstructured{}
 	source.SetGroupVersionKind(gvk)
@@ -115,7 +106,7 @@ func reconcileSource(
 		return deleteEntry(ctx, c, entryName)
 	}
 
-	entry, err := buildEntry(source)
+	entry, err := buildEntry(ctx, source)
 	if err != nil {
 		if _, deleteErr := deleteEntry(ctx, c, entryName); deleteErr != nil {
 			return ctrl.Result{}, deleteErr
@@ -125,6 +116,9 @@ func reconcileSource(
 		}
 		// A source update is the meaningful retry trigger for invalid input.
 		return ctrl.Result{}, nil
+	}
+	if entry == nil {
+		return deleteEntry(ctx, c, entryName)
 	}
 	if err := validateEntryConflicts(ctx, c, entry); err != nil {
 		if _, deleteErr := deleteEntry(ctx, c, entryName); deleteErr != nil {
@@ -154,14 +148,14 @@ func validateEntryConflicts(ctx context.Context, c client.Client, desired *spire
 			return fmt.Errorf("SPIFFE ID %q is already managed by %q", desired.Spec.SPIFFEID, entry.Name)
 		}
 		if entry.Spec.Hint == "dsx-imds-vm" && desired.Spec.Hint == "dsx-imds-vm" &&
-			vmHoldersOverlap(entry.Spec.Selectors, desired.Spec.Selectors) {
-			return fmt.Errorf("VM holder selectors overlap with managed identity %q", entry.Name)
+			vmPodUIDsOverlap(entry.Spec.Selectors, desired.Spec.Selectors) {
+			return fmt.Errorf("VM Pod UID overlaps with managed identity %q", entry.Name)
 		}
 	}
 	return nil
 }
 
-func vmHoldersOverlap(a, b []string) bool {
+func vmPodUIDsOverlap(a, b []string) bool {
 	selector := func(selectors []string, prefix string) string {
 		for _, value := range selectors {
 			if suffix, ok := strings.CutPrefix(value, prefix); ok {
@@ -170,13 +164,9 @@ func vmHoldersOverlap(a, b []string) bool {
 		}
 		return ""
 	}
-	if selector(a, "k8s:ns:") != selector(b, "k8s:ns:") ||
-		selector(a, "k8s:sa:") != selector(b, "k8s:sa:") {
-		return false
-	}
 	aUID := selector(a, "k8s:pod-uid:")
 	bUID := selector(b, "k8s:pod-uid:")
-	return aUID == "" || bUID == "" || aUID == bUID
+	return aUID != "" && aUID == bUID
 }
 
 // deleteEntry is idempotent because a missing child is already deleted.
@@ -237,34 +227,6 @@ func requestForSource(group, kind string) handler.MapFunc {
 			Name:      annotations[sourceNameAnnotation],
 		}}}
 	}
-}
-
-func (h Holder) validate() error {
-	if errs := validation.IsDNS1123Label(h.Namespace); len(errs) > 0 {
-		return fmt.Errorf("holder namespace: %s", errs[0])
-	}
-	if errs := validation.IsDNS1123Subdomain(h.ServiceAccount); len(errs) > 0 {
-		return fmt.Errorf("holder service account: %s", errs[0])
-	}
-	if h.PodUID != "" && !identity.ValidPodUID(h.PodUID) {
-		return fmt.Errorf("holder pod UID %q is not a canonical UUID", h.PodUID)
-	}
-	return nil
-}
-
-func (h Holder) selectors() ([]string, error) {
-	if err := h.validate(); err != nil {
-		return nil, err
-	}
-	selectors := []string{"k8s:ns:" + h.Namespace, "k8s:sa:" + h.ServiceAccount}
-	if h.PodUID != "" {
-		selectors = append(selectors, "k8s:pod-uid:"+h.PodUID)
-	}
-	return selectors, nil
-}
-
-func (h Holder) empty() bool {
-	return h.Namespace == "" && h.ServiceAccount == "" && h.PodUID == ""
 }
 
 func childName(source client.Object) string {

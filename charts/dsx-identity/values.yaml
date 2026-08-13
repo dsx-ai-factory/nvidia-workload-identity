@@ -235,9 +235,6 @@ vmSupport:
       limits: {cpu: 100m, memory: 64Mi}
   policy:
     annotation: spiffe.nvidia.com/inject-dsx-imds
-    namespaceSelector:
-      matchLabels:
-        spiffe.nvidia.com/vm-metadata-enabled: "true"
     podSelector:
       matchLabels:
         kubevirt.io: virt-launcher

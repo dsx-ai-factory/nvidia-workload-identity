@@ -31,9 +31,8 @@ rules:
   - apiGroups: ["provisioning.dpu.nvidia.com"]
     resources: ["dpus"]
     verbs: ["get", "list", "watch"]
-  # TODO: Replace this E2E stand-in when LaunchLayer publishes its source CR.
-  - apiGroups: ["e2e.dsx-identity.nvidia.com"]
-    resources: ["launchlayersourcefixtures"]
+  - apiGroups: ["launchlayer.nvidia.com"]
+    resources: ["virtualinstances", "baremetalinstances"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["spire.spiffe.io"]
     resources: ["clusterstaticentries"]

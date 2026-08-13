@@ -6,20 +6,15 @@ metadata:
   name: e2e-debian-vm
 automountServiceAccountToken: false
 ---
-apiVersion: e2e.dsx-identity.nvidia.com/v1alpha1
-kind: LaunchLayerSourceFixture
+apiVersion: launchlayer.nvidia.com/v1alpha1
+kind: VirtualInstance
 metadata:
-  name: e2e-vm-source-e2e-debian-vm
+  name: e2e-debian-vm
+  annotations:
+    launchlayer.nvidia.com/org-id: tenant-2
 spec:
-  type: vm
-  tenantID: tenant-2
-  resourceID: e2e-debian-vm
-  role: database
-  # This parent must match the VM nodeSelector and its dsx_imds host agent.
-  parentID: k2-worker
-  holder:
-    namespace: tenant-tenant1
-    serviceAccount: e2e-debian-vm
+  instance_id: e2e-debian-vm
+  node_name: k2-worker
 ---
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
@@ -89,3 +84,67 @@ spec:
         - name: vm-service-account
           serviceAccount:
             serviceAccountName: e2e-debian-vm
+---
+# Launch Layer normally publishes the virt-launcher Pod UID to VirtualInstance status.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: e2e-launch-layer-status
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: e2e-launch-layer-status
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["launchlayer.nvidia.com"]
+    resources: ["virtualinstances/status"]
+    verbs: ["get", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: e2e-launch-layer-status
+subjects:
+  - kind: ServiceAccount
+    name: e2e-launch-layer-status
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: e2e-launch-layer-status
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: e2e-launch-layer-status
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: e2e-launch-layer-status
+      containers:
+        - name: status-publisher
+          image: docker.io/alpine/k8s:1.32.2@sha256:15cfdf84d6de3559bc54d7479eb4e8aadbf71f6d7f08782cb1e91f3446f4b2d8
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              kubectl wait --for=create pod -l kubevirt.io=virt-launcher --timeout=300s
+              uid=$(kubectl get pod -l kubevirt.io=virt-launcher -o jsonpath='{.items[0].metadata.uid}')
+              kubectl patch virtualinstance e2e-debian-vm --subresource=status --type=merge -p "{\"status\":{\"pod_uid\":\"$uid\"}}"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsGroup: 65532
+            runAsNonRoot: true
+            runAsUser: 65532

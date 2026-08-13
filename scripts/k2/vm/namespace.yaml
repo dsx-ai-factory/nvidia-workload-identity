@@ -4,5 +4,4 @@ metadata:
   name: tenant-tenant1
   labels:
     k8s.ovn.org/primary-user-defined-network: ""
-    spiffe.nvidia.com/vm-metadata-enabled: "true"
     tenant: tenant1

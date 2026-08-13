@@ -263,11 +263,11 @@ flowchart TB
 
     subgraph HostLane["Standalone tenant-facing bare-metal host"]
       direction TB
-      HostSource{{"INPUT CR<br/>kind: LaunchLayerSourceFixture<br/>spec.type: bm"}}
-      HostParent(["PARENT AGENT ID<br/>type: dsx_dpu<br/>spiffe://{td}/spire/agent/dsx_dpu/{spec.parentID}"])
-      HostEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: DSX Identity Controller<br/>subject: /tenant/{spec.tenantID}/service/dsx/bm/{spec.resourceID}[/role/{spec.role}]<br/>hint: dsx-imds<br/>selectors: DPU IMDS Kubernetes selectors"]
+      HostSource{{"INPUT CR<br/>kind: BareMetalInstance<br/>tenant: org-id annotation<br/>BM id: spec.instance_id<br/>DPU id and serial: status.primary_dpu"}}
+      HostParent(["PARENT AGENT ID<br/>type: dpu_hw<br/>spiffe://{td}/spire/agent/dpu_hw/{normalized DPU serial}"])
+      HostEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: DSX Identity Controller<br/>subject: /tenant/{org-id}/service/dsx/bm/{spec.instance_id}<br/>hint: dsx-imds<br/>selectors: DPU IMDS Kubernetes selectors"]
       HostSource -->|"derives subject"| HostEntry
-      HostParent -->|"spec.parentID"| HostEntry
+      HostParent -->|"status.primary_dpu.serial_number"| HostEntry
     end
   end
 
@@ -287,11 +287,11 @@ flowchart TB
 
     subgraph VMLane["Tenant-owned KubeVirt VM"]
       direction TB
-      VMSource{{"INPUT CR<br/>kind: LaunchLayerSourceFixture<br/>spec.type: vm"}}
-      VMParent(["PARENT AGENT ID<br/>type: dsx_imds<br/>spiffe://{td}/spire/agent/dsx_imds/tenant/{operator}/bm/{spec.parentID}"])
-      VMEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: DSX Identity Controller<br/>subject: /tenant/{spec.tenantID}/service/dsx/vm/{spec.resourceID}[/role/{spec.role}]<br/>hint: dsx-imds-vm<br/>selectors: holder namespace, service account, and optional Pod UID"]
+      VMSource{{"INPUT CR<br/>kind: VirtualInstance<br/>tenant: org-id annotation<br/>VM id: spec.instance_id<br/>host: spec.node_name<br/>holder: status.pod_uid"}}
+      VMParent(["PARENT AGENT ID<br/>type: dsx_imds<br/>spiffe://{td}/spire/agent/dsx_imds/tenant/{operator}/bm/{spec.node_name}"])
+      VMEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: DSX Identity Controller<br/>subject: /tenant/{org-id}/service/dsx/vm/{spec.instance_id}<br/>hint: dsx-imds-vm<br/>selector: Pod UID"]
       VMSource -->|"derives subject"| VMEntry
-      VMParent -->|"spec.parentID"| VMEntry
+      VMParent -->|"spec.node_name"| VMEntry
     end
   end
 ```
@@ -301,10 +301,9 @@ allows DPU-hosted DSX IMDS to obtain the paired worker's SPIRE JWT-SVID and
 exchange it for the DSX JWT returned through link-local IMDS. The worker uses
 that DSX JWT to attest its local SPIRE agent through `dsx_imds`.
 
-For a standalone host, the LaunchLayer source supplies the host-to-DPU
-relationship, so the DSX Identity Controller creates the equivalent host
-entry. No current host-process static entry is defined beneath the resulting
-`dsx_imds` agent.
+For a tenant-assigned host, the `BareMetalInstance` supplies the host-to-DPU
+relationship. Its entry replaces the operator fallback derived from the DPU
+resource.
 
 Local consumers exchange local SPIRE JWT-SVIDs with their shard's DSX Identity Keys for
 DSX JWTs. DSX Identity Keys instances share only public signing keys across shards.
@@ -519,8 +518,8 @@ spiffe://<local-trust-domain>/tenant/<tenant>/service/dsx/<resource-type>/<resou
 | DPU | `global.operatorTenant` | `/dpu/<dpu-id>` |
 | Operator bare-metal Kubernetes worker | `global.operatorTenant` | `/bm/<node-name>` |
 | Kubernetes Pod | `global.operatorTenant` | `/bm/<node-name>/pod/<pod-uid>` |
-| Bare-metal host with a LaunchLayer source | Source CR `tenantID`, supplied dynamically | `/bm/<bm-id>` |
-| VM with a LaunchLayer source | Source CR `tenantID`, supplied dynamically | `/vm/<vm-id>` |
+| Bare-metal host with a Launch Layer source | `launchlayer.nvidia.com/org-id` annotation | `/bm/<bm-id>` |
+| VM with a Launch Layer source | `launchlayer.nvidia.com/org-id` annotation | `/vm/<vm-id>` |
 
 Every Kubernetes worker is an operator-owned bare-metal host. There is no
 configured worker list and no LaunchLayer source for these hosts. The Pod
@@ -561,27 +560,25 @@ WorkloadAttestor identifies the IMDS Pod, and SPIFFE CSI exposes the agent's
 Workload API socket to that Pod.
 
 The [DSX Identity Controller](cmd/dsx-identity-controller/README.md) derives
-SPIRE registration entries from DPU and LaunchLayer sources. Until LaunchLayer
-publishes its final API, the repository uses a temporary
-`LaunchLayerSourceFixture` with only the fields shown below.
+SPIRE registration entries from DPU and Launch Layer sources.
 
 ```yaml
+apiVersion: launchlayer.nvidia.com/v1alpha1
+kind: VirtualInstance
+metadata:
+  annotations:
+    launchlayer.nvidia.com/org-id: tenant-2
 spec:
-  type: vm                             # bm or vm
-  tenantID: tenant-2       # supplied dynamically by this source
-  resourceID: vm-1234
-  parentID: host-1234                  # DPU ID for BM, operator worker host ID for VM
-  role: database                       # optional for BM or VM
-  holder:
-    namespace: tenant-tenant1
-    serviceAccount: vm-identity-client
-    podUID: <pod-uuid>                 # optional
+  instance_id: vm-1234
+  node_name: host-1234
+status:
+  pod_uid: <virt-launcher-pod-uid>
 ```
 
-The temporary source has no `parentTenantID`. The configured operator tenant
-determines a VM entry's operator-worker parent. It also has no SPIFFE IDs,
-selectors, hints, or class names because the Identity Controller derives those
-registration outputs.
+`BareMetalInstance` uses the same tenant annotation, `spec.instance_id`, and
+`status.primary_dpu.machine_id` plus `status.primary_dpu.serial_number`. The
+configured operator tenant determines a VM entry's worker parent. The Identity
+Controller owns SPIFFE IDs, selectors, hints, and class names.
 
 ## DSX Identity Keys and Event Bus
 

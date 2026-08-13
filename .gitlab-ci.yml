@@ -209,6 +209,9 @@ e2e:
   stage: build
   extends:
     - .build-image-dind
+  variables:
+    # The GitLab registry rejects BuildKit's default provenance manifest.
+    BUILDX_NO_DEFAULT_ATTESTATIONS: "1"
   needs:
     - compute-next-release-version
     - validate
