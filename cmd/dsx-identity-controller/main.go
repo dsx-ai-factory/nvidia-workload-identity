@@ -13,6 +13,7 @@ import (
 	spirev1alpha1 "github.com/spiffe/spire-controller-manager/api/v1alpha1"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -80,8 +81,15 @@ func run() (runErr error) {
 	if err := (&identitycontroller.DPUReconciler{Client: mgr.GetClient(), Config: config, Recorder: recorder}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("set up DPU controller: %w", err)
 	}
-	if err := (&identitycontroller.LaunchLayerReconciler{Client: mgr.GetClient(), Config: config, Recorder: recorder}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("set up LaunchLayer identity controller: %w", err)
+	for _, sourceGVK := range []schema.GroupVersionKind{
+		identitycontroller.VirtualInstanceGVK,
+		identitycontroller.BareMetalInstanceGVK,
+	} {
+		if err := (&identitycontroller.LaunchLayerReconciler{
+			Client: mgr.GetClient(), Config: config, Recorder: recorder, SourceGVK: sourceGVK,
+		}).SetupWithManager(mgr); err != nil {
+			return fmt.Errorf("set up %s identity controller: %w", sourceGVK.Kind, err)
+		}
 	}
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		return fmt.Errorf("register health check: %w", err)

@@ -22,8 +22,6 @@ spec:
                 - Pod
               annotations:
                 {{ .Values.vmSupport.policy.annotation }}: "true"
-              namespaceSelector:
-                {{- toYaml .Values.vmSupport.policy.namespaceSelector | nindent 16 }}
               selector:
                 {{- toYaml .Values.vmSupport.policy.podSelector | nindent 16 }}
             subjects:

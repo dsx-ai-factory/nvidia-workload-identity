@@ -16,154 +16,161 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 
+	dpuidentity "dsx-identity/internal/dpu"
 	"dsx-identity/internal/identity"
 )
 
-// LaunchLayerSourceGVK identifies the temporary source contract used until
-// LaunchLayer publishes its final API.
-var LaunchLayerSourceGVK = schema.GroupVersionKind{
-	Group:   "e2e.dsx-identity.nvidia.com",
-	Version: "v1alpha1",
-	Kind:    "LaunchLayerSourceFixture",
-}
+const OrgIDAnnotation = "launchlayer.nvidia.com/org-id"
 
-// LaunchLayerReconciler maps each read-only source to one entry. A BM source
-// produces a BM SPIRE ID with parent /spire/agent/dsx_dpu/<parentID>, hint
-// dsx-imds, and configured DPU metadata selectors. A VM source produces a VM
-// SPIRE ID with its optional role, parent
-// /spire/agent/dsx_imds/tenant/<operator-tenant>/bm/<parentID>, hint
-// dsx-imds-vm, and source-provided holder selectors.
+var (
+	VirtualInstanceGVK = schema.GroupVersionKind{
+		Group: "launchlayer.nvidia.com", Version: "v1alpha1", Kind: "VirtualInstance",
+	}
+	BareMetalInstanceGVK = schema.GroupVersionKind{
+		Group: "launchlayer.nvidia.com", Version: "v1alpha1", Kind: "BareMetalInstance",
+	}
+)
+
 type LaunchLayerReconciler struct {
 	client.Client
-	Config   Config
-	Recorder record.EventRecorder
+	Config    Config
+	Recorder  record.EventRecorder
+	SourceGVK schema.GroupVersionKind
 }
 
 func (r *LaunchLayerReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	name, err := launchLayerControllerName(r.SourceGVK)
+	if err != nil {
+		return err
+	}
 	source := &unstructured.Unstructured{}
-	source.SetGroupVersionKind(LaunchLayerSourceGVK)
+	source.SetGroupVersionKind(r.SourceGVK)
 	return ctrl.NewControllerManagedBy(mgr).
-		Named("launch-layer-source").
+		Named(name).
 		For(source).
-		Watches(&spirev1alpha1.ClusterStaticEntry{}, handler.EnqueueRequestsFromMapFunc(requestForSource(LaunchLayerSourceGVK.Group, LaunchLayerSourceGVK.Kind))).
+		Watches(&spirev1alpha1.ClusterStaticEntry{}, handler.EnqueueRequestsFromMapFunc(requestForSource(r.SourceGVK.Group, r.SourceGVK.Kind))).
 		Complete(r)
 }
 
 func (r *LaunchLayerReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
-	return reconcileSource(ctx, r.Client, r.Recorder, request, LaunchLayerSourceGVK, r.desiredEntry)
+	return reconcileSource(ctx, r.Client, r.Recorder, request, r.SourceGVK, r.desiredEntry)
 }
 
-func (r *LaunchLayerReconciler) desiredEntry(source *unstructured.Unstructured) (*spirev1alpha1.ClusterStaticEntry, error) {
+func (r *LaunchLayerReconciler) desiredEntry(_ context.Context, source *unstructured.Unstructured) (*spirev1alpha1.ClusterStaticEntry, error) {
+	switch source.GroupVersionKind() {
+	case VirtualInstanceGVK:
+		return r.virtualInstanceEntry(source)
+	case BareMetalInstanceGVK:
+		return r.bareMetalInstanceEntry(source)
+	default:
+		return nil, fmt.Errorf("unsupported LaunchLayer source %s", source.GroupVersionKind())
+	}
+}
+
+type virtualInstanceSource struct {
+	Spec struct {
+		InstanceID string `json:"instance_id"`
+		NodeName   string `json:"node_name"`
+	} `json:"spec"`
+	Status struct {
+		PodUID string `json:"pod_uid"`
+	} `json:"status"`
+}
+
+func (r *LaunchLayerReconciler) virtualInstanceEntry(source *unstructured.Unstructured) (*spirev1alpha1.ClusterStaticEntry, error) {
+	var instance virtualInstanceSource
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(source.Object, &instance); err != nil {
+		return nil, fmt.Errorf("VirtualInstance: %w", err)
+	}
+	if instance.Spec.InstanceID == "" {
+		return nil, errors.New("VirtualInstance spec.instance_id is required")
+	}
+	if !identity.ValidResourceID(instance.Spec.NodeName) {
+		return nil, fmt.Errorf("invalid VirtualInstance spec.node_name %q", instance.Spec.NodeName)
+	}
+	if !identity.ValidPodUID(instance.Status.PodUID) {
+		return nil, fmt.Errorf("VirtualInstance status.pod_uid %q is not a canonical UUID", instance.Status.PodUID)
+	}
+
 	td, err := r.Config.trustDomain()
 	if err != nil {
 		return nil, err
 	}
-	spec, err := launchLayerSourceSpec(source)
-	if err != nil {
-		return nil, err
-	}
 	spiffeID, err := (identity.Subject{
-		Tenant:       spec.TenantID,
-		ResourceType: spec.Type,
-		ResourceID:   spec.ResourceID,
-		Role:         spec.Role,
+		Tenant:       source.GetAnnotations()[OrgIDAnnotation],
+		ResourceType: identity.ResourceVM,
+		ResourceID:   instance.Spec.InstanceID,
 	}).SPIFFEID(td)
 	if err != nil {
 		return nil, err
 	}
-	parentID, hint, err := spec.parentAgent(td, r.Config.OperatorTenant)
+	parentID, err := spiffeid.FromSegments(td,
+		"spire", "agent", "dsx_imds", "tenant", r.Config.OperatorTenant, "bm", instance.Spec.NodeName)
+	if err != nil {
+		return nil, fmt.Errorf("host parent ID: %w", err)
+	}
+	return newEntry(source, spiffeID, parentID, "dsx-imds-vm", r.Config.ClassName,
+		[]string{"k8s:pod-uid:" + instance.Status.PodUID})
+}
+
+type bareMetalInstanceSource struct {
+	Spec struct {
+		InstanceID string `json:"instance_id"`
+	} `json:"spec"`
+	Status struct {
+		PrimaryDPU *struct {
+			MachineID    string `json:"machine_id"`
+			SerialNumber string `json:"serial_number"`
+		} `json:"primary_dpu"`
+	} `json:"status"`
+}
+
+func (r *LaunchLayerReconciler) bareMetalInstanceEntry(source *unstructured.Unstructured) (*spirev1alpha1.ClusterStaticEntry, error) {
+	var instance bareMetalInstanceSource
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(source.Object, &instance); err != nil {
+		return nil, fmt.Errorf("BareMetalInstance: %w", err)
+	}
+	if instance.Spec.InstanceID == "" {
+		return nil, errors.New("BareMetalInstance spec.instance_id is required")
+	}
+	if instance.Status.PrimaryDPU == nil {
+		return nil, errors.New("BareMetalInstance status.primary_dpu is required")
+	}
+	if !identity.ValidResourceID(instance.Status.PrimaryDPU.MachineID) {
+		return nil, fmt.Errorf("invalid BareMetalInstance status.primary_dpu.machine_id %q", instance.Status.PrimaryDPU.MachineID)
+	}
+	serial, err := dpuidentity.NormalizeSerial(instance.Status.PrimaryDPU.SerialNumber)
+	if err != nil {
+		return nil, fmt.Errorf("BareMetalInstance status.primary_dpu.serial_number: %w", err)
+	}
+
+	td, err := r.Config.trustDomain()
 	if err != nil {
 		return nil, err
 	}
-	var selectors []string
-	switch spec.Type {
-	case identity.ResourceBM:
-		selectors = slices.Clone(r.Config.DPUMetadataSelectors)
-	case identity.ResourceVM:
-		selectors, err = spec.Holder.selectors()
-		if err != nil {
-			return nil, err
-		}
-	}
-	return newEntry(source, spiffeID, parentID, hint, r.Config.ClassName, selectors)
-}
-
-// launchLayerSpec contains derivation inputs only. Complete SPIFFE IDs remain
-// controller-owned outputs.
-type launchLayerSpec struct {
-	Type       identity.ResourceType `json:"type"`
-	TenantID   string                `json:"tenantID"`
-	ResourceID string                `json:"resourceID"`
-	Role       string                `json:"role,omitempty"`
-	ParentID   string                `json:"parentID"`
-	Holder     Holder                `json:"holder,omitempty"`
-}
-
-// parentAgent uses the configured operator tenant for a VM's Kubernetes worker
-// agent. The source tenant belongs only to the VM identity.
-func (s launchLayerSpec) parentAgent(td spiffeid.TrustDomain, operatorTenant string) (spiffeid.ID, string, error) {
-	if !identity.ValidResourceID(s.ParentID) {
-		return spiffeid.ID{}, "", fmt.Errorf("invalid parent resource ID %q", s.ParentID)
-	}
-
-	switch s.Type {
-	case identity.ResourceBM:
-		if !s.Holder.empty() {
-			return spiffeid.ID{}, "", errors.New("holder is only valid for VM LaunchLayer source entries")
-		}
-		parentID, err := spiffeid.FromSegments(td, "spire", "agent", "dsx_dpu", s.ParentID)
-		if err != nil {
-			return spiffeid.ID{}, "", fmt.Errorf("DPU parent ID: %w", err)
-		}
-		return parentID, "dsx-imds", nil
-
-	case identity.ResourceVM:
-		if s.Holder.empty() {
-			return spiffeid.ID{}, "", errors.New("holder is required for VM LaunchLayer source entries")
-		}
-		parentID, err := spiffeid.FromSegments(td,
-			"spire", "agent", "dsx_imds", "tenant", operatorTenant, "bm", s.ParentID)
-		if err != nil {
-			return spiffeid.ID{}, "", fmt.Errorf("host parent ID: %w", err)
-		}
-		return parentID, "dsx-imds-vm", nil
-
-	default:
-		return spiffeid.ID{}, "", fmt.Errorf("unsupported LaunchLayer source resource type %q", s.Type)
-	}
-}
-
-func launchLayerSourceSpec(source *unstructured.Unstructured) (launchLayerSpec, error) {
-	raw, found, err := unstructured.NestedMap(source.Object, "spec")
+	spiffeID, err := (identity.Subject{
+		Tenant:       source.GetAnnotations()[OrgIDAnnotation],
+		ResourceType: identity.ResourceBM,
+		ResourceID:   instance.Spec.InstanceID,
+	}).SPIFFEID(td)
 	if err != nil {
-		return launchLayerSpec{}, fmt.Errorf("spec: %w", err)
+		return nil, err
 	}
-	if !found {
-		return launchLayerSpec{}, errors.New("spec is required")
+	parentID, err := spiffeid.FromSegments(td, "spire", "agent", dpuidentity.PluginName, serial)
+	if err != nil {
+		return nil, fmt.Errorf("DPU parent ID: %w", err)
 	}
-	var spec launchLayerSpec
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(raw, &spec); err != nil {
-		return launchLayerSpec{}, fmt.Errorf("spec: %w", err)
+	return newEntry(source, spiffeID, parentID, "dsx-imds", r.Config.ClassName,
+		slices.Clone(r.Config.DPUMetadataSelectors))
+}
+
+func launchLayerControllerName(gvk schema.GroupVersionKind) (string, error) {
+	switch gvk {
+	case VirtualInstanceGVK:
+		return "launch-layer-virtual-instance", nil
+	case BareMetalInstanceGVK:
+		return "launch-layer-bare-metal-instance", nil
+	default:
+		return "", fmt.Errorf("unsupported LaunchLayer source %s", gvk)
 	}
-	for _, field := range []struct{ name, value string }{
-		{"type", string(spec.Type)},
-		{"tenantID", spec.TenantID},
-		{"resourceID", spec.ResourceID},
-		{"parentID", spec.ParentID},
-	} {
-		if field.value == "" {
-			return launchLayerSpec{}, fmt.Errorf("spec.%s is required", field.name)
-		}
-	}
-	if spec.Type == identity.ResourceVM {
-		for _, field := range []struct{ name, value string }{
-			{"holder.namespace", spec.Holder.Namespace},
-			{"holder.serviceAccount", spec.Holder.ServiceAccount},
-		} {
-			if field.value == "" {
-				return launchLayerSpec{}, fmt.Errorf("spec.%s is required", field.name)
-			}
-		}
-	}
-	return spec, nil
 }

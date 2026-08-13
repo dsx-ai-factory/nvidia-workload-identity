@@ -41,9 +41,12 @@ type DPUReconciler struct {
 func (r *DPUReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	dpu := &unstructured.Unstructured{}
 	dpu.SetGroupVersionKind(DPUGVK)
+	bm := &unstructured.Unstructured{}
+	bm.SetGroupVersionKind(BareMetalInstanceGVK)
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("dsx-dpu-identity").
 		For(dpu).
+		Watches(bm, handler.EnqueueRequestsFromMapFunc(r.requestsForDPU)).
 		Watches(&spirev1alpha1.ClusterStaticEntry{}, handler.EnqueueRequestsFromMapFunc(requestForSource(DPUGVK.Group, DPUGVK.Kind))).
 		Complete(r)
 }
@@ -52,7 +55,7 @@ func (r *DPUReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ct
 	return reconcileSource(ctx, r.Client, r.Recorder, request, DPUGVK, r.desiredEntry)
 }
 
-func (r *DPUReconciler) desiredEntry(dpu *unstructured.Unstructured) (*spirev1alpha1.ClusterStaticEntry, error) {
+func (r *DPUReconciler) desiredEntry(ctx context.Context, dpu *unstructured.Unstructured) (*spirev1alpha1.ClusterStaticEntry, error) {
 	td, err := r.Config.trustDomain()
 	if err != nil {
 		return nil, err
@@ -61,6 +64,17 @@ func (r *DPUReconciler) desiredEntry(dpu *unstructured.Unstructured) (*spirev1al
 	if err != nil {
 		return nil, err
 	}
+	rawSerial, found, err := unstructured.NestedString(dpu.Object, "spec", "serialNumber")
+	if err != nil {
+		return nil, fmt.Errorf("DPU spec.serialNumber: %w", err)
+	}
+	assigned, err := r.hasTenantBareMetalInstance(ctx, machineID)
+	if err != nil {
+		return nil, err
+	}
+	if assigned {
+		return nil, nil
+	}
 	spiffeID, err := (identity.Subject{
 		Tenant:       r.Config.OperatorTenant,
 		ResourceType: identity.ResourceBM,
@@ -68,10 +82,6 @@ func (r *DPUReconciler) desiredEntry(dpu *unstructured.Unstructured) (*spirev1al
 	}).SPIFFEID(td)
 	if err != nil {
 		return nil, err
-	}
-	rawSerial, found, err := unstructured.NestedString(dpu.Object, "spec", "serialNumber")
-	if err != nil {
-		return nil, fmt.Errorf("DPU spec.serialNumber: %w", err)
 	}
 	if !found {
 		return nil, fmt.Errorf("DPU spec.serialNumber is required")
@@ -87,6 +97,30 @@ func (r *DPUReconciler) desiredEntry(dpu *unstructured.Unstructured) (*spirev1al
 	return newEntry(dpu, spiffeID, parentID, "dsx-imds", r.Config.ClassName, slices.Clone(r.Config.DPUMetadataSelectors))
 }
 
+func (r *DPUReconciler) hasTenantBareMetalInstance(ctx context.Context, dpuMachineID string) (bool, error) {
+	instances := &unstructured.UnstructuredList{}
+	instances.SetGroupVersionKind(BareMetalInstanceGVK.GroupVersion().WithKind(BareMetalInstanceGVK.Kind + "List"))
+	if err := r.List(ctx, instances); err != nil {
+		return false, fmt.Errorf("list BareMetalInstances: %w", err)
+	}
+	for i := range instances.Items {
+		instance := &instances.Items[i]
+		if !instance.GetDeletionTimestamp().IsZero() {
+			continue
+		}
+		machineID, found, err := unstructured.NestedString(instance.Object, "status", "primary_dpu", "machine_id")
+		if err != nil {
+			return false, fmt.Errorf("BareMetalInstance status.primary_dpu.machine_id: %w", err)
+		}
+		if found && machineID == dpuMachineID {
+			if _, err := (&LaunchLayerReconciler{Config: r.Config}).bareMetalInstanceEntry(instance); err == nil {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 func dpuMachineID(dpu *unstructured.Unstructured) (string, error) {
 	machineID := dpu.GetLabels()[dpuMachineIDLabel]
 	if machineID == "" {
@@ -96,4 +130,25 @@ func dpuMachineID(dpu *unstructured.Unstructured) (string, error) {
 		return "", fmt.Errorf("invalid DPU machine ID %q", machineID)
 	}
 	return machineID, nil
+}
+
+func (r *DPUReconciler) requestsForDPU(ctx context.Context, source client.Object) []ctrl.Request {
+	bm, ok := source.(*unstructured.Unstructured)
+	if !ok {
+		return nil
+	}
+	machineID, found, err := unstructured.NestedString(bm.Object, "status", "primary_dpu", "machine_id")
+	if err != nil || !found || machineID == "" {
+		return nil
+	}
+	dpus := &unstructured.UnstructuredList{}
+	dpus.SetGroupVersionKind(DPUGVK.GroupVersion().WithKind(DPUGVK.Kind + "List"))
+	if err := r.List(ctx, dpus, client.MatchingLabels{dpuMachineIDLabel: machineID}); err != nil {
+		return nil
+	}
+	requests := make([]ctrl.Request, 0, len(dpus.Items))
+	for i := range dpus.Items {
+		requests = append(requests, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&dpus.Items[i])})
+	}
+	return requests
 }

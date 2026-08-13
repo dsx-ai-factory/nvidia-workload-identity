@@ -11,6 +11,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -68,7 +69,7 @@ func TestDPUReconcileCreatesPairedBMIdentityAndCleansUp(t *testing.T) {
 	c := &applyClient{Client: fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(dpu).Build()}
 	r := &DPUReconciler{Client: c, Config: testConfig, Recorder: record.NewFakeRecorder(4)}
 	request := ctrl.Request{NamespacedName: types.NamespacedName{Name: dpu.GetName()}}
-	if _, err := r.desiredEntry(dpu); err != nil {
+	if _, err := r.desiredEntry(ctx, dpu); err != nil {
 		t.Fatal(err)
 	}
 
@@ -118,6 +119,42 @@ func TestDPUReconcileCreatesPairedBMIdentityAndCleansUp(t *testing.T) {
 	)
 	assertApplyCalls(t, c, 2)
 
+	invalidAssignment := newBareMetalInstance("invalid-assignment", "tenant-system", "2bf2c1e4-b919-43dc-85f9-f46926a20fc7",
+		"INVALID", "instance-1", "machine-1", "52TF43G001G")
+	if err := c.Create(ctx, invalidAssignment); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Reconcile(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	getEntry(t, c, childName(dpu))
+	if err := c.Delete(ctx, invalidAssignment); err != nil {
+		t.Fatal(err)
+	}
+
+	assigned := newBareMetalInstance("assigned-host", "tenant-system", "940863e9-1e6f-40ea-9104-c46a7b041ce5",
+		"tenant-2", "instance-1", "machine-1", "52TF43G001G")
+	if err := c.Create(ctx, assigned); err != nil {
+		t.Fatal(err)
+	}
+	requests = r.requestsForDPU(ctx, assigned)
+	if len(requests) != 1 || requests[0] != request {
+		t.Fatalf("BareMetalInstance mapped to %#v, want %#v", requests, request)
+	}
+	if _, err := r.Reconcile(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Get(ctx, client.ObjectKey{Name: entry.Name}, &spirev1alpha1.ClusterStaticEntry{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("operator entry remained after tenant assignment: %v", err)
+	}
+	if err := c.Delete(ctx, assigned); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Reconcile(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	entry = getEntry(t, c, childName(dpu))
+
 	current := &unstructured.Unstructured{}
 	current.SetGroupVersionKind(DPUGVK)
 	if err := c.Get(ctx, request.NamespacedName, current); err != nil {
@@ -166,7 +203,8 @@ func TestDPUDesiredEntryRequiresValidSource(t *testing.T) {
 			if test.serial != nil {
 				setSourceSpecField(t, dpu, "serialNumber", test.serial)
 			}
-			_, err := (&DPUReconciler{Config: testConfig}).desiredEntry(dpu)
+			c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
+			_, err := (&DPUReconciler{Client: c, Config: testConfig}).desiredEntry(context.Background(), dpu)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("desiredEntry() error = %v, want containing %q", err, test.want)
 			}
@@ -174,32 +212,40 @@ func TestDPUDesiredEntryRequiresValidSource(t *testing.T) {
 	}
 }
 
-func TestLaunchLayerSourceReconcileLifecycle(t *testing.T) {
+func TestLaunchLayerReconcileLifecycle(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	host := newLaunchLayerSource("host-source", "tenant-system", "7ae7fe75-e671-4b0e-a76d-ef02bb5b040b", map[string]any{
-		"type": "bm", "tenantID": "tenant-2", "resourceID": "host-1", "role": "database", "parentID": "dpu-1",
-	})
-	vm := newLaunchLayerSource("vm-source", "tenant-system", "e35e41ae-a112-4f64-8841-298c2a6662b0", map[string]any{
-		"type": "vm", "tenantID": "tenant-2", "resourceID": "vm-1", "role": "database", "parentID": "host-1",
-		"holder": map[string]any{"namespace": "tenant-vms", "serviceAccount": "vm-metadata"},
-	})
+	host := newBareMetalInstance("host-source", "tenant-system", "7ae7fe75-e671-4b0e-a76d-ef02bb5b040b",
+		"tenant-2", "host-1", "dpu-1", "dpu-1")
+	vm := newVirtualInstance("vm-source", "tenant-system", "e35e41ae-a112-4f64-8841-298c2a6662b0",
+		"tenant-2", "vm-1", "host-1", "e35e41ae-a112-4f64-8841-298c2a6662b0")
 	recorder := record.NewFakeRecorder(8)
 	c := &applyClient{Client: fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(host, vm).Build()}
-	r := &LaunchLayerReconciler{Client: c, Config: testConfig, Recorder: recorder}
+	hostReconciler := &LaunchLayerReconciler{
+		Client: c, Config: testConfig, Recorder: recorder, SourceGVK: BareMetalInstanceGVK,
+	}
+	vmReconciler := &LaunchLayerReconciler{
+		Client: c, Config: testConfig, Recorder: recorder, SourceGVK: VirtualInstanceGVK,
+	}
 
 	hostRequest := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(host)}
 	vmRequest := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(vm)}
-	for _, request := range []ctrl.Request{hostRequest, vmRequest} {
-		if result, err := r.Reconcile(ctx, request); err != nil || result.Requeue {
+	for _, reconcile := range []struct {
+		reconciler *LaunchLayerReconciler
+		request    ctrl.Request
+	}{{hostReconciler, hostRequest}, {vmReconciler, vmRequest}} {
+		if result, err := reconcile.reconciler.Reconcile(ctx, reconcile.request); err != nil || result.Requeue {
 			t.Fatalf("LaunchLayer reconciliation = %#v, %v", result, err)
 		}
 	}
-	for _, request := range []ctrl.Request{hostRequest, vmRequest} {
+	for _, source := range []struct {
+		gvk     schema.GroupVersionKind
+		request ctrl.Request
+	}{{BareMetalInstanceGVK, hostRequest}, {VirtualInstanceGVK, vmRequest}} {
 		stored := &unstructured.Unstructured{}
-		stored.SetGroupVersionKind(LaunchLayerSourceGVK)
-		if err := c.Get(ctx, request.NamespacedName, stored); err != nil {
+		stored.SetGroupVersionKind(source.gvk)
+		if err := c.Get(ctx, source.request.NamespacedName, stored); err != nil {
 			t.Fatal(err)
 		}
 		if len(stored.GetFinalizers()) != 0 {
@@ -209,63 +255,70 @@ func TestLaunchLayerSourceReconcileLifecycle(t *testing.T) {
 
 	hostEntry := getEntry(t, c, childName(host))
 	assertEntry(t, hostEntry,
-		"spiffe://k2.sjc-1.nvidia.com/tenant/tenant-2/service/dsx/bm/host-1/role/database",
-		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dsx_dpu/dpu-1",
+		"spiffe://k2.sjc-1.nvidia.com/tenant/tenant-2/service/dsx/bm/host-1",
+		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dpu_hw/dpu-1",
 		"dsx-imds",
 		testDPUMetadataSelectors,
 	)
 	vmEntry := getEntry(t, c, childName(vm))
 	assertEntry(t, vmEntry,
-		"spiffe://k2.sjc-1.nvidia.com/tenant/tenant-2/service/dsx/vm/vm-1/role/database",
+		"spiffe://k2.sjc-1.nvidia.com/tenant/tenant-2/service/dsx/vm/vm-1",
 		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dsx_imds/tenant/operator-1/bm/host-1",
 		"dsx-imds-vm",
-		[]string{"k8s:ns:tenant-vms", "k8s:sa:vm-metadata"},
+		[]string{"k8s:pod-uid:e35e41ae-a112-4f64-8841-298c2a6662b0"},
 	)
-	assertSourceAnnotations(t, hostEntry, LaunchLayerSourceGVK.Group, LaunchLayerSourceGVK.Kind, host.GetNamespace(), host.GetName())
-	assertSourceAnnotations(t, vmEntry, LaunchLayerSourceGVK.Group, LaunchLayerSourceGVK.Kind, vm.GetNamespace(), vm.GetName())
+	assertSourceAnnotations(t, hostEntry, BareMetalInstanceGVK.Group, BareMetalInstanceGVK.Kind, host.GetNamespace(), host.GetName())
+	assertSourceAnnotations(t, vmEntry, VirtualInstanceGVK.Group, VirtualInstanceGVK.Kind, vm.GetNamespace(), vm.GetName())
 	assertApplyCalls(t, c, 2)
-	invalidRole := vm.DeepCopy()
-	setSourceSpecField(t, invalidRole, "role", "BadRole")
-	if _, err := r.desiredEntry(invalidRole); err == nil {
-		t.Fatal("expected invalid role to be rejected")
+	invalidPodUID := vm.DeepCopy()
+	if err := unstructured.SetNestedField(invalidPodUID.Object, "not-a-uid", "status", "pod_uid"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := vmReconciler.desiredEntry(ctx, invalidPodUID); err == nil {
+		t.Fatal("expected invalid Pod UID to be rejected")
 	}
 	hostEntry.Spec.ParentID = "spiffe://drift.invalid/spire/agent/wrong"
 	if err := c.Update(ctx, hostEntry); err != nil {
 		t.Fatal(err)
 	}
-	driftRequests := requestForSource(LaunchLayerSourceGVK.Group, LaunchLayerSourceGVK.Kind)(ctx, hostEntry)
+	driftRequests := requestForSource(BareMetalInstanceGVK.Group, BareMetalInstanceGVK.Kind)(ctx, hostEntry)
 	if len(driftRequests) != 1 || driftRequests[0] != hostRequest {
 		t.Fatalf("drifted child mapped to %#v, want %#v", driftRequests, hostRequest)
 	}
-	if _, err := r.Reconcile(ctx, driftRequests[0]); err != nil {
+	if _, err := hostReconciler.Reconcile(ctx, driftRequests[0]); err != nil {
 		t.Fatal(err)
 	}
 	hostEntry = getEntry(t, c, hostEntry.Name)
 	assertEntry(t, hostEntry,
-		"spiffe://k2.sjc-1.nvidia.com/tenant/tenant-2/service/dsx/bm/host-1/role/database",
-		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dsx_dpu/dpu-1",
+		"spiffe://k2.sjc-1.nvidia.com/tenant/tenant-2/service/dsx/bm/host-1",
+		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dpu_hw/dpu-1",
 		"dsx-imds",
 		testDPUMetadataSelectors,
 	)
 	assertApplyCalls(t, c, 3)
 
 	updated := &unstructured.Unstructured{}
-	updated.SetGroupVersionKind(LaunchLayerSourceGVK)
+	updated.SetGroupVersionKind(BareMetalInstanceGVK)
 	if err := c.Get(ctx, hostRequest.NamespacedName, updated); err != nil {
 		t.Fatal(err)
 	}
-	setSourceSpecField(t, updated, "tenantID", "tenant-3")
-	setSourceSpecField(t, updated, "resourceID", "host-2")
-	setSourceSpecField(t, updated, "parentID", "dpu-2")
+	updated.SetAnnotations(map[string]string{OrgIDAnnotation: "tenant-3"})
+	setSourceSpecField(t, updated, "instance_id", "host-2")
+	if err := unstructured.SetNestedField(updated.Object, "dpu-2", "status", "primary_dpu", "machine_id"); err != nil {
+		t.Fatal(err)
+	}
+	if err := unstructured.SetNestedField(updated.Object, "dpu-2", "status", "primary_dpu", "serial_number"); err != nil {
+		t.Fatal(err)
+	}
 	if err := c.Update(ctx, updated); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.Reconcile(ctx, hostRequest); err != nil {
+	if _, err := hostReconciler.Reconcile(ctx, hostRequest); err != nil {
 		t.Fatal(err)
 	}
 	assertEntry(t, getEntry(t, c, hostEntry.Name),
-		"spiffe://k2.sjc-1.nvidia.com/tenant/tenant-3/service/dsx/bm/host-2/role/database",
-		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dsx_dpu/dpu-2",
+		"spiffe://k2.sjc-1.nvidia.com/tenant/tenant-3/service/dsx/bm/host-2",
+		"spiffe://k2.sjc-1.nvidia.com/spire/agent/dpu_hw/dpu-2",
 		"dsx-imds",
 		testDPUMetadataSelectors,
 	)
@@ -274,11 +327,13 @@ func TestLaunchLayerSourceReconcileLifecycle(t *testing.T) {
 	if err := c.Get(ctx, hostRequest.NamespacedName, updated); err != nil {
 		t.Fatal(err)
 	}
-	setSourceSpecField(t, updated, "holder", map[string]any{"namespace": "dsx-imds", "serviceAccount": "metadata-service"})
+	if err := unstructured.SetNestedField(updated.Object, "invalid serial", "status", "primary_dpu", "serial_number"); err != nil {
+		t.Fatal(err)
+	}
 	if err := c.Update(ctx, updated); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.Reconcile(ctx, hostRequest); err != nil {
+	if _, err := hostReconciler.Reconcile(ctx, hostRequest); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Get(ctx, client.ObjectKey{Name: hostEntry.Name}, &spirev1alpha1.ClusterStaticEntry{}); !apierrors.IsNotFound(err) {
@@ -294,7 +349,7 @@ func TestLaunchLayerSourceReconcileLifecycle(t *testing.T) {
 	}
 
 	deletingVM := &unstructured.Unstructured{}
-	deletingVM.SetGroupVersionKind(LaunchLayerSourceGVK)
+	deletingVM.SetGroupVersionKind(VirtualInstanceGVK)
 	if err := c.Get(ctx, vmRequest.NamespacedName, deletingVM); err != nil {
 		t.Fatal(err)
 	}
@@ -302,10 +357,10 @@ func TestLaunchLayerSourceReconcileLifecycle(t *testing.T) {
 	if err := c.Delete(ctx, deletingVM); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.Reconcile(ctx, vmRequest); !errors.Is(err, errInjectedChildDelete) {
+	if _, err := vmReconciler.Reconcile(ctx, vmRequest); !errors.Is(err, errInjectedChildDelete) {
 		t.Fatalf("first child deletion error = %v, want %v", err, errInjectedChildDelete)
 	}
-	if result, err := r.Reconcile(ctx, vmRequest); err != nil || result.Requeue {
+	if result, err := vmReconciler.Reconcile(ctx, vmRequest); err != nil || result.Requeue {
 		t.Fatalf("LaunchLayer deletion reconciliation = %#v, %v", result, err)
 	}
 	if err := c.Get(ctx, vmRequest.NamespacedName, deletingVM); !apierrors.IsNotFound(err) {
@@ -320,20 +375,16 @@ func TestLaunchLayerConflictsRecoverAfterSourceCorrection(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	vmA := newLaunchLayerSource("vm-a", "tenant-system", "3f94f124-72cd-467b-9b83-b5f536a8620d", map[string]any{
-		"type": "vm", "tenantID": "tenant-2", "resourceID": "vm-a", "parentID": "worker-1",
-		"holder": map[string]any{"namespace": "tenant-vms", "serviceAccount": "vm-metadata"},
-	})
-	vmB := newLaunchLayerSource("vm-b", "tenant-system", "db1f2eb8-7ec4-4a72-af0e-089f8d6dc427", map[string]any{
-		"type": "vm", "tenantID": "tenant-2", "resourceID": "vm-b", "parentID": "worker-1",
-		"holder": map[string]any{"namespace": "tenant-vms", "serviceAccount": "vm-metadata", "podUID": "1e605955-c4b7-4090-b12a-8fcf3b9f334d"},
-	})
-	vmC := newLaunchLayerSource("vm-c", "tenant-system", "93fc5f2d-5ba2-4f77-a67c-c8ac260cd70a", map[string]any{
-		"type": "vm", "tenantID": "tenant-2", "resourceID": "vm-b", "parentID": "worker-1",
-		"holder": map[string]any{"namespace": "tenant-vms", "serviceAccount": "vm-metadata-c"},
-	})
+	vmA := newVirtualInstance("vm-a", "tenant-system", "3f94f124-72cd-467b-9b83-b5f536a8620d",
+		"tenant-2", "vm-a", "worker-1", "1e605955-c4b7-4090-b12a-8fcf3b9f334d")
+	vmB := newVirtualInstance("vm-b", "tenant-system", "db1f2eb8-7ec4-4a72-af0e-089f8d6dc427",
+		"tenant-2", "vm-b", "worker-1", "1e605955-c4b7-4090-b12a-8fcf3b9f334d")
+	vmC := newVirtualInstance("vm-c", "tenant-system", "93fc5f2d-5ba2-4f77-a67c-c8ac260cd70a",
+		"tenant-2", "vm-b", "worker-1", "93fc5f2d-5ba2-4f77-a67c-c8ac260cd70a")
 	c := &applyClient{Client: fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(vmA, vmB, vmC).Build()}
-	r := &LaunchLayerReconciler{Client: c, Config: testConfig, Recorder: record.NewFakeRecorder(8)}
+	r := &LaunchLayerReconciler{
+		Client: c, Config: testConfig, Recorder: record.NewFakeRecorder(8), SourceGVK: VirtualInstanceGVK,
+	}
 	requestA := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(vmA)}
 	requestB := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(vmB)}
 	requestC := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(vmC)}
@@ -341,18 +392,17 @@ func TestLaunchLayerConflictsRecoverAfterSourceCorrection(t *testing.T) {
 	if _, err := r.Reconcile(ctx, requestA); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.Reconcile(ctx, requestB); err == nil || !strings.Contains(err.Error(), "holder selectors overlap") {
-		t.Fatalf("overlapping holder error = %v", err)
+	if _, err := r.Reconcile(ctx, requestB); err == nil || !strings.Contains(err.Error(), "Pod UID overlaps") {
+		t.Fatalf("overlapping Pod UID error = %v", err)
 	}
 	if err := c.Get(ctx, client.ObjectKey{Name: childName(vmB)}, &spirev1alpha1.ClusterStaticEntry{}); !apierrors.IsNotFound(err) {
-		t.Fatalf("conflicting holder entry exists: %v", err)
+		t.Fatalf("conflicting Pod UID entry exists: %v", err)
 	}
 
-	updateSourceField(t, ctx, c, requestB.NamespacedName, "holder", map[string]any{
-		"namespace": "tenant-vms", "serviceAccount": "vm-metadata-b",
-	})
+	updateSourceField(t, ctx, c, requestB.NamespacedName, VirtualInstanceGVK,
+		"2e605955-c4b7-4090-b12a-8fcf3b9f334d", "status", "pod_uid")
 	if _, err := r.Reconcile(ctx, requestB); err != nil {
-		t.Fatalf("holder conflict did not recover: %v", err)
+		t.Fatalf("Pod UID conflict did not recover: %v", err)
 	}
 	getEntry(t, c, childName(vmB))
 
@@ -363,7 +413,8 @@ func TestLaunchLayerConflictsRecoverAfterSourceCorrection(t *testing.T) {
 		t.Fatalf("duplicate SPIFFE ID entry exists: %v", err)
 	}
 
-	updateSourceField(t, ctx, c, requestC.NamespacedName, "resourceID", "vm-c")
+	updateSourceField(t, ctx, c, requestC.NamespacedName, VirtualInstanceGVK,
+		"vm-c", "spec", "instance_id")
 	if _, err := r.Reconcile(ctx, requestC); err != nil {
 		t.Fatalf("SPIFFE ID conflict did not recover: %v", err)
 	}
@@ -379,12 +430,31 @@ func testScheme(t *testing.T) *runtime.Scheme {
 	return scheme
 }
 
-func newLaunchLayerSource(name, namespace, uid string, spec map[string]any) *unstructured.Unstructured {
-	source := &unstructured.Unstructured{Object: map[string]any{"spec": spec}}
-	source.SetGroupVersionKind(LaunchLayerSourceGVK)
+func newVirtualInstance(name, namespace, uid, tenantID, instanceID, nodeName, podUID string) *unstructured.Unstructured {
+	source := &unstructured.Unstructured{Object: map[string]any{
+		"spec":   map[string]any{"instance_id": instanceID, "node_name": nodeName},
+		"status": map[string]any{"pod_uid": podUID},
+	}}
+	source.SetGroupVersionKind(VirtualInstanceGVK)
 	source.SetName(name)
 	source.SetNamespace(namespace)
 	source.SetUID(types.UID(uid))
+	source.SetAnnotations(map[string]string{OrgIDAnnotation: tenantID})
+	return source
+}
+
+func newBareMetalInstance(name, namespace, uid, tenantID, instanceID, dpuMachineID, dpuSerial string) *unstructured.Unstructured {
+	source := &unstructured.Unstructured{Object: map[string]any{
+		"spec": map[string]any{"instance_id": instanceID},
+		"status": map[string]any{"primary_dpu": map[string]any{
+			"machine_id": dpuMachineID, "serial_number": dpuSerial,
+		}},
+	}}
+	source.SetGroupVersionKind(BareMetalInstanceGVK)
+	source.SetName(name)
+	source.SetNamespace(namespace)
+	source.SetUID(types.UID(uid))
+	source.SetAnnotations(map[string]string{OrgIDAnnotation: tenantID})
 	return source
 }
 
@@ -395,14 +465,16 @@ func setSourceSpecField(t *testing.T, source *unstructured.Unstructured, name st
 	}
 }
 
-func updateSourceField(t *testing.T, ctx context.Context, c client.Client, key client.ObjectKey, name string, value any) {
+func updateSourceField(t *testing.T, ctx context.Context, c client.Client, key client.ObjectKey, gvk schema.GroupVersionKind, value any, fields ...string) {
 	t.Helper()
 	source := &unstructured.Unstructured{}
-	source.SetGroupVersionKind(LaunchLayerSourceGVK)
+	source.SetGroupVersionKind(gvk)
 	if err := c.Get(ctx, key, source); err != nil {
 		t.Fatal(err)
 	}
-	setSourceSpecField(t, source, name, value)
+	if err := unstructured.SetNestedField(source.Object, value, fields...); err != nil {
+		t.Fatal(err)
+	}
 	if err := c.Update(ctx, source); err != nil {
 		t.Fatal(err)
 	}

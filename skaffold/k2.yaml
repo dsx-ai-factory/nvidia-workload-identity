@@ -146,7 +146,8 @@ deploy:
               - --context=kind-k2
               - --timeout=120s
               - crd/dpus.provisioning.dpu.nvidia.com
-              - crd/launchlayersourcefixtures.e2e.dsx-identity.nvidia.com
+              - crd/virtualinstances.launchlayer.nvidia.com
+              - crd/baremetalinstances.launchlayer.nvidia.com
 ---
 apiVersion: skaffold/v4beta14
 kind: Config
