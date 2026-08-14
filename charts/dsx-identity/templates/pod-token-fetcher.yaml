@@ -114,13 +114,6 @@ spec:
         patchStrategicMerge:
           spec:
             initContainers:
-              # volumeMounts merges on mountPath, so naming the same path here
-              # repoints the existing mount at the emptyDir below.
-              - name: dsx-token-fetcher
-                volumeMounts:
-                  - name: kata-workload-api
-                    mountPath: /var/run/secrets/spire.io
-                    readOnly: true
               # The token fetcher retries the Workload API every
               # second, so it tolerates this socket appearing after it starts.
               - name: dsx-kata-guest-proxy
@@ -153,13 +146,22 @@ spec:
                   # the socket that the fetcher then dials.
                   - name: kata-workload-api
                     mountPath: /var/run/secrets/spire.io
+              # volumeMounts merges on mountPath, so naming the same path here
+              # repoints the existing mount at the emptyDir below.
+              - name: dsx-token-fetcher
+                volumeMounts:
+                  - name: kata-workload-api
+                    mountPath: /var/run/secrets/spire.io
+                    readOnly: true
             volumes:
               # Rather than SPIFFE CSI, which won't work with Kata (the host unix socket
               # isn't accessible), use an emptyDir shared with the proxy sidecar.
               - name: spiffe-csi
                 $patch: delete
               - name: kata-workload-api
-                emptyDir: {}
+                emptyDir:
+                  medium: Memory
+                  sizeLimit: 1Mi
     {{- end }}
     - name: validate-operator-pod-role
       match:
