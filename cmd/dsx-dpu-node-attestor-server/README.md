@@ -14,4 +14,6 @@ spiffe://<trust-domain>/spire/agent/dpu_hw/<normalized-serial>
 SPIRE starts the binary through the plugin SDK. Configure it under
 `customPlugins.nodeAttestor.dpu_hw` with `plugin_cmd` pointing at the embedded
 binary path and an optional `plugin_checksum`. `plugin_data` is empty for the
-current plaintext verifier.
+current serial-based verifier. The external provisioning system owns the
+serial-to-DPU association, and access to the SPIRE node-attestation service is
+the boundary that controls which DPU may assert it.

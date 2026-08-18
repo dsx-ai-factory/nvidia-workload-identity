@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
-	"maps"
 	"mime"
 	"net"
 	"net/http"
@@ -84,9 +83,13 @@ func (s *identityKeysServer) Close() error {
 }
 
 func (s *identityKeysServer) resignJWT(originalClaims map[string]any, newSubject spiffeid.ID) (string, error) {
-	// Preserve every validated claim except sub and iss.
-	newClaims := make(map[string]any, len(originalClaims))
-	maps.Copy(newClaims, originalClaims)
+	// Preserve only registered JWT-SVID claims across the shard boundary.
+	newClaims := make(map[string]any, 7)
+	for _, name := range []string{"aud", "exp", "iat", "jti", "nbf"} {
+		if value, ok := originalClaims[name]; ok {
+			newClaims[name] = value
+		}
+	}
 	newClaims["sub"] = newSubject.String()
 	newClaims["iss"] = identity.Issuer
 

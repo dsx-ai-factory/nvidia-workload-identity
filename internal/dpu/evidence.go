@@ -14,8 +14,9 @@ type EvidenceVerifier interface {
 	VerifyAndExtractSerial(ctx context.Context, payload []byte) (rawSerial string, err error)
 }
 
-// PlaintextVerifier treats the payload as the raw serial without cryptographic
-// verification. Suitable for development wiring only.
+// PlaintextVerifier treats the payload as the pre-provisioned raw DPU serial.
+// The attestation service access policy and serial-to-DPU association are its
+// trust boundary.
 type PlaintextVerifier struct{}
 
 // VerifyAndExtractSerial returns the payload bytes as the raw serial.

@@ -2,8 +2,9 @@
 
 `dsx-identity-keys` is the DSX Identity Keys process installed in each identity
 shard. It validates only local SPIRE JWT-SVIDs, transforms their SPIFFE subject
-to the DSX identity contract, preserves validated claims except `sub` and
-`iss`, and signs the exchanged DSX JWT with the shard's active key. It has no
+to the DSX identity contract, preserves the registered `aud`, `exp`, `iat`,
+`jti`, and `nbf` claims, and signs the exchanged DSX JWT with the shard's active
+key. It has no
 tenant configuration or tenant-specific authorization policy. SPIRE
 registration determines the tenant in the local subject, and DSX Identity Keys
 preserves it while validating the common identity grammar. It obtains local
