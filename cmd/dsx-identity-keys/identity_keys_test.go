@@ -68,7 +68,7 @@ func TestStaticSigningKeysetAndClaims(t *testing.T) {
 		"aud":    []string{"spiffe://ds9.dsx.nvid.id/openbao"},
 		"iat":    int64(1700000000),
 		"exp":    int64(1700000300),
-		"custom": "preserved",
+		"custom": "not propagated",
 	}
 	subject := spiffeid.RequireFromString("spiffe://operator-1.ds9.dsx.nvid.id/bm/host-1")
 	token, err := server.resignJWT(original, subject)
@@ -86,7 +86,13 @@ func TestStaticSigningKeysetAndClaims(t *testing.T) {
 	if err := parsed.Claims(active.Public().Key, &claims); err != nil {
 		t.Fatal(err)
 	}
-	rawExpected, err := json.Marshal(original)
+	rawExpected, err := json.Marshal(map[string]any{
+		"aud": original["aud"],
+		"exp": original["exp"],
+		"iat": original["iat"],
+		"iss": identity.Issuer,
+		"sub": subject.String(),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,8 +100,6 @@ func TestStaticSigningKeysetAndClaims(t *testing.T) {
 	if err := json.Unmarshal(rawExpected, &expected); err != nil {
 		t.Fatal(err)
 	}
-	expected["iss"] = identity.Issuer
-	expected["sub"] = subject.String()
 	if !reflect.DeepEqual(claims, expected) {
 		t.Fatalf("claims = %#v, want %#v", claims, expected)
 	}

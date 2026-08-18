@@ -22,7 +22,7 @@ type Plugin struct {
 	trustDomain string
 }
 
-// New returns a server Plugin using the default PlaintextVerifier.
+// New returns a server Plugin using the serial-based default verifier.
 func New() *Plugin {
 	return &Plugin{verifier: PlaintextVerifier{}}
 }
