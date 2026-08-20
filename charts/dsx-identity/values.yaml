@@ -294,6 +294,7 @@ kataSupport:
   # Pods with one of these runtime classes receive the guest proxy in place of
   # the SPIFFE CSI volume.
   runtimeClassNames:
+    - kata-qemu-nvidia-cpu-runtime-rs
     - kata-qemu-runtime-rs
     - kata-qemu
   # Both halves of the proxy must agree on this vsock port.

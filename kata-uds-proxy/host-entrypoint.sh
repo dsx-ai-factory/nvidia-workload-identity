@@ -23,6 +23,10 @@ if [ ! -w /sys/fs/cgroup/cgroup.procs ]; then
     exit 1
 fi
 
+if ! nsenter --target 1 --mount -- modprobe vhost_vsock; then
+    echo "warning: failed to load vhost_vsock" >&2
+fi
+
 if [ ! -S "$UDS_PATH" ]; then
     echo "warning: $UDS_PATH is not a socket yet; connections will fail until it appears" >&2
 fi
