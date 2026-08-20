@@ -9,6 +9,11 @@ observability:
   metrics:
     enabled: false
 
+# Local E2E emulates the DPU boundary without the DPF DPUService API.
+dpuService:
+  imds:
+    enabled: false
+
 spire:
   spire-server:
     image:

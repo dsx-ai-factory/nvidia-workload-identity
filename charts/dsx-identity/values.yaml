@@ -249,8 +249,8 @@ vmSupport:
 
 # DPF deploys this service into each selected DPU cluster.
 dpuService:
-  enabled: false
   imds:
+    enabled: true
     helmChart:
       repoURL: https://helm.ngc.nvidia.com/0837451325059433/components-dev/
       version: ""
@@ -259,6 +259,8 @@ dpuService:
       tag: ""
       pullPolicy: IfNotPresent
   spiffeCsi:
+    # DPF provides csi.spiffe.io. Enable only when another deployment does not.
+    enabled: false
     helmChart:
       repoURL: https://helm.ngc.nvidia.com/0837451325059433/components-dev/
       version: ""

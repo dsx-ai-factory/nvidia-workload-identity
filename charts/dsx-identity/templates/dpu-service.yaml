@@ -1,4 +1,4 @@
-{{- if .Values.dpuService.enabled }}
+{{- if .Values.dpuService.imds.enabled }}
 apiVersion: svc.dpu.nvidia.com/v1alpha1
 kind: DPUService
 metadata:
@@ -30,6 +30,8 @@ spec:
         logLevel: {{ .Values.observability.logLevel }}
         env:
           {{- toYaml .Values.dpuService.observabilityEnv | nindent 10 }}
+{{- end }}
+{{- if .Values.dpuService.spiffeCsi.enabled }}
 ---
 apiVersion: svc.dpu.nvidia.com/v1alpha1
 kind: DPUService
