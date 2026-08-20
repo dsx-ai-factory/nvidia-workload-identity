@@ -119,7 +119,7 @@ observability:
     port: 9464
     serviceMonitor:
       # The Prometheus Operator and its CRDs are external to this chart.
-      enabled: false
+      enabled: true
       interval: 30s
       scrapeTimeout: 10s
       labels: {}
