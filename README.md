@@ -458,14 +458,29 @@ vmSupport:
 identityController:
   enabled: true
 dpuService:
-  enabled: true
+  imds:
+    enabled: true
   identityKeysURL: https://identity-keys.shard.example.com/v1/exchange
 ```
 
-When `dpuService` is enabled, the identity controller derives selectors from
-the release namespace and `dpuService.workload`. An explicit
+When `dpuService.imds` is enabled, the identity controller derives selectors
+from the release namespace and `dpuService.workload`. An explicit
 `identityController.dpuMetadataSelectors` list replaces those defaults. The DPU
-CSI chart exposes the host SPIRE agent socket through `csi.spiffe.io`.
+CSI driver exposes the host SPIRE agent socket through `csi.spiffe.io`.
+
+DSX IMDS is enabled by default. DPF provides `csi.spiffe.io`, so the identity
+chart's DPU CSI service is disabled by default. Each service has its own switch:
+
+```yaml
+dpuService:
+  imds:
+    enabled: false
+  spiffeCsi:
+    enabled: false
+```
+
+DPF's SPIFFE CSI bind-mounts `/run/spire`, preserving `agent.sock` at the path
+mounted and used by DSX IMDS.
 
 Shards that schedule Kata Containers workloads enable `kataSupport`. A Kata Pod
 runs inside a VM, so the SPIFFE CSI driver cannot carry the agent's Workload API

@@ -2,7 +2,7 @@
 {{- $name := include "dsx-identity.identityControllerFullname" . -}}
 {{- $values := .Values.identityController -}}
 {{- $dpuMetadataSelectors := $values.dpuMetadataSelectors -}}
-{{- if and .Values.dpuService.enabled (empty $dpuMetadataSelectors) -}}
+{{- if and .Values.dpuService.imds.enabled (empty $dpuMetadataSelectors) -}}
 {{- $dpuMetadataSelectors = list
       (printf "k8s:ns:%s" .Release.Namespace)
       (printf "k8s:sa:%s" (required "dpuService.workload.serviceAccountName is required" .Values.dpuService.workload.serviceAccountName))
