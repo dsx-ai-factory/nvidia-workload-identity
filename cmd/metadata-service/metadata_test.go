@@ -532,7 +532,7 @@ func TestIdentitySuccessDisablesCaching(t *testing.T) {
 	}
 	now := time.Now()
 	token, err := jwt.Signed(signer).Claims(jwt.Claims{
-		Issuer:   "spiffe://ds9.dsx.nvid.id",
+		Issuer:   "https://ds9.dsx.nvid.id",
 		Subject:  "spiffe://operator-1.ds9.dsx.nvid.id/bm/worker-1",
 		Audience: jwt.Audience{"test"},
 		IssuedAt: jwt.NewNumericDate(now),

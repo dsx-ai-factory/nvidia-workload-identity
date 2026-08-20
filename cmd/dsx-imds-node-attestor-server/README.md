@@ -38,17 +38,15 @@ CLI flags. Configure it in the SPIRE server HCL:
 ```hcl
 plugin_data {
   jwks_url = "https://identity-keys.shard.example.com/.well-known/jwks.json"
+  issuer = "https://ds9.dsx.nvid.id"
   audience = "spiffe://k2.sjc-1.nvidia.com/spire/server"
-  trust_domain = "k2.sjc-1.nvidia.com"
 }
 ```
 
-All three fields are required. `jwks_url` may name any reachable DSX Identity Keys instance's
-flat aggregate JWKS. The standard OIDC remote key set caches keys and refreshes
-when it encounters an unknown `kid`. `Dockerfile.spire` embeds the plugin in
-the DSX SPIRE server image. The local E2E configuration selects that image in
-`scripts/identity-e2e-values.yaml` and supplies each shard's plugin data in its
-shard values file.
+All three fields are required. SPIRE supplies the trust domain through its core
+configuration. `issuer` sets the expected `iss` claim because `jwks_url` does
+not. The standard OIDC remote key set caches and refreshes keys.
+`Dockerfile.spire` embeds the plugin in the DSX SPIRE server image.
 
 ## Testing
 

@@ -16,10 +16,9 @@ flowchart LR
 
 The identity chart injects the sidecar and shared volume through
 `charts/dsx-identity/templates/pod-token-fetcher.yaml`.
-In an identity-enabled namespace, `spiffe.nvidia.com/service: dsx` selects both
-the Pod registration and sidecar injection. The fetcher alone receives the
-Workload API socket, selects the `dsx-pod` SVID, and atomically writes the DSX
-JWT to a Pod-private volume mounted read-only in application containers.
+The `spiffe.nvidia.com/inject-dsx-token-fetcher: "true"` annotation selects
+injection. The `spiffe.nvidia.com/service` label independently selects SPIRE
+registration. The fetcher writes the DSX JWT to the shared Pod volume.
 
 ## Flags
 

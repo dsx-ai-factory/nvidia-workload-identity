@@ -75,11 +75,14 @@ func (r *DPUReconciler) desiredEntry(ctx context.Context, dpu *unstructured.Unst
 	if assigned {
 		return nil, nil
 	}
+	// Controller-managed DPU, VM, and bare-metal identities have no Pod service
+	// label, so their service comes from global.dsx.defaultServiceName. td
+	// supplies the trust domain and r.Config.Service supplies /service/<service>.
 	spiffeID, err := (identity.Subject{
 		Tenant:       r.Config.OperatorTenant,
 		ResourceType: identity.ResourceBM,
 		ResourceID:   machineID,
-	}).SPIFFEID(td)
+	}).SPIFFEID(td, r.Config.Service)
 	if err != nil {
 		return nil, err
 	}
@@ -90,6 +93,7 @@ func (r *DPUReconciler) desiredEntry(ctx context.Context, dpu *unstructured.Unst
 	if err != nil {
 		return nil, fmt.Errorf("DPU spec.serialNumber: %w", err)
 	}
+	// The paired DPU agent is attested under dpu_hw with this hardware serial.
 	parentID, err := spiffeid.FromSegments(td, "spire", "agent", dpuidentity.PluginName, serial)
 	if err != nil {
 		return nil, fmt.Errorf("DPU parent ID: %w", err)
@@ -98,6 +102,8 @@ func (r *DPUReconciler) desiredEntry(ctx context.Context, dpu *unstructured.Unst
 }
 
 func (r *DPUReconciler) hasTenantBareMetalInstance(ctx context.Context, dpuMachineID string) (bool, error) {
+	// A valid LaunchLayer BM identity replaces the operator fallback for the same
+	// machine, preventing two tenants from owning one resource.
 	instances := &unstructured.UnstructuredList{}
 	instances.SetGroupVersionKind(BareMetalInstanceGVK.GroupVersion().WithKind(BareMetalInstanceGVK.Kind + "List"))
 	if err := r.List(ctx, instances); err != nil {
@@ -133,6 +139,8 @@ func dpuMachineID(dpu *unstructured.Unstructured) (string, error) {
 }
 
 func (r *DPUReconciler) requestsForDPU(ctx context.Context, source client.Object) []ctrl.Request {
+	// BM assignment changes requeue the paired DPU so it can add or remove the
+	// operator fallback identity.
 	bm, ok := source.(*unstructured.Unstructured)
 	if !ok {
 		return nil

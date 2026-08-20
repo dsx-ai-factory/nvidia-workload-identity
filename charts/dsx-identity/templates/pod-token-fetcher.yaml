@@ -26,9 +26,8 @@ spec:
               operations:
                 - CREATE
                 - UPDATE
-              selector:
-                matchLabels:
-                  spiffe.nvidia.com/service: dsx
+              annotations:
+                spiffe.nvidia.com/inject-dsx-token-fetcher: "true"
               namespaceSelector:
                 {{- toYaml .Values.podTokenFetcher.policy.namespaceLabelSelector | nindent 16 }}
       mutate:
@@ -102,9 +101,8 @@ spec:
           - resources:
               kinds:
                 - Pod
-              selector:
-                matchLabels:
-                  spiffe.nvidia.com/service: dsx
+              annotations:
+                spiffe.nvidia.com/inject-dsx-token-fetcher: "true"
               namespaceSelector:
                 {{- toYaml .Values.podTokenFetcher.policy.namespaceLabelSelector | nindent 16 }}
       preconditions:
@@ -166,21 +164,25 @@ spec:
                   medium: Memory
                   sizeLimit: 1Mi
     {{- end }}
-    - name: validate-operator-pod-role
+    - name: validate-operator-pod-labels
       match:
         any:
           - resources:
               kinds:
                 - Pod
               selector:
-                matchLabels:
-                  spiffe.nvidia.com/service: dsx
+                matchExpressions:
+                  - key: spiffe.nvidia.com/service
+                    operator: Exists
               namespaceSelector:
                 {{- toYaml .Values.podTokenFetcher.policy.namespaceLabelSelector | nindent 16 }}
       validate:
         failureAction: Enforce
         cel:
           expressions:
+            - expression: >-
+                object.metadata.labels['spiffe.nvidia.com/service'].matches('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$')
+              message: The service label must be a DNS label.
             - expression: >-
                 !('spiffe.nvidia.com/role' in object.metadata.labels) ||
                 object.metadata.labels['spiffe.nvidia.com/role'].matches('^[a-z0-9][a-z0-9_-]{0,62}$')

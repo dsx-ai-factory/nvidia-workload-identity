@@ -1,6 +1,11 @@
 # DSX identity chart. Override the trust domain and cluster name per shard.
 global:
   imageTag: ""
+  dsx:
+    # HTTPS issuer placed in exchanged DSX JWTs and accepted for host attestation.
+    jwtIssuer: ""
+    # Default service name for chart-owned and controller-managed identities.
+    defaultServiceName: dsx
   # Tenant for operator DPUs, Kubernetes Pods, and bare-metal worker hosts.
   operatorTenant: ""
   spire:

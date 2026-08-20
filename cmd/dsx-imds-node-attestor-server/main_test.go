@@ -19,9 +19,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-
-	"dsx-identity/internal/identity"
 )
+
+const testIssuer = "https://ds9.dsx.nvid.id"
 
 func TestAttest(t *testing.T) {
 	t.Parallel()
@@ -41,7 +41,10 @@ func TestAttest(t *testing.T) {
 	if err := plugin.Attest(&fakeAttestStream{ctx: context.Background()}); status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("unconfigured error = %v", err)
 	}
-	if _, err := plugin.Configure(context.Background(), &configv1.ConfigureRequest{HclConfiguration: "jwks_url = \"" + jwksServer.URL + "\"\naudience = \"spire-server\"\ntrust_domain = \"k2.internal\""}); err != nil {
+	if _, err := plugin.Configure(context.Background(), &configv1.ConfigureRequest{
+		HclConfiguration:  "jwks_url = \"" + jwksServer.URL + "\"\nissuer = \"" + testIssuer + "\"\naudience = \"spire-server\"",
+		CoreConfiguration: &configv1.CoreConfiguration{TrustDomain: "k2.internal"},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := plugin.Attest(&fakeAttestStream{ctx: context.Background(), request: &serverv1.AttestRequest{}}); status.Code(err) != codes.InvalidArgument {
@@ -69,7 +72,21 @@ func TestAttest(t *testing.T) {
 func TestConfigureRejectsMissingAudience(t *testing.T) {
 	t.Parallel()
 	plugin := new(Plugin)
-	_, err := plugin.Configure(context.Background(), &configv1.ConfigureRequest{HclConfiguration: `jwks_url = "http://127.0.0.1/jwks"` + "\n" + `trust_domain = "k2.internal"`})
+	_, err := plugin.Configure(context.Background(), &configv1.ConfigureRequest{
+		HclConfiguration:  `jwks_url = "http://127.0.0.1/jwks"` + "\n" + `issuer = "` + testIssuer + `"`,
+		CoreConfiguration: &configv1.CoreConfiguration{TrustDomain: "k2.internal"},
+	})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("error = %v, want InvalidArgument", err)
+	}
+}
+
+func TestConfigureRejectsMissingCoreTrustDomain(t *testing.T) {
+	t.Parallel()
+	plugin := new(Plugin)
+	_, err := plugin.Configure(context.Background(), &configv1.ConfigureRequest{
+		HclConfiguration: `jwks_url = "http://127.0.0.1/jwks"` + "\n" + `issuer = "` + testIssuer + `"` + "\n" + `audience = "spire-server"`,
+	})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("error = %v, want InvalidArgument", err)
 	}
@@ -83,7 +100,7 @@ func signAttestationToken(t *testing.T, key *ecdsa.PrivateKey) string {
 		t.Fatal(err)
 	}
 	token, err := jwt.Signed(signer).Claims(jwt.Claims{
-		Issuer:   identity.Issuer,
+		Issuer:   testIssuer,
 		Subject:  "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7",
 		Audience: jwt.Audience{"spire-server"},
 		Expiry:   jwt.NewNumericDate(time.Now().Add(time.Minute)),

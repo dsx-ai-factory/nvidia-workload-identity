@@ -96,19 +96,24 @@ func (r *LaunchLayerReconciler) virtualInstanceEntry(source *unstructured.Unstru
 	if err != nil {
 		return nil, err
 	}
+	// Controller-managed DPU, VM, and bare-metal identities have no Pod service
+	// label, so their service comes from global.dsx.defaultServiceName. td
+	// supplies the trust domain and r.Config.Service supplies /service/<service>.
 	spiffeID, err := (identity.Subject{
 		Tenant:       source.GetAnnotations()[OrgIDAnnotation],
 		ResourceType: identity.ResourceVM,
 		ResourceID:   instance.Spec.InstanceID,
-	}).SPIFFEID(td)
+	}).SPIFFEID(td, r.Config.Service)
 	if err != nil {
 		return nil, err
 	}
+	// The virt-launcher Pod uses the worker's dsx_imds-attested host agent.
 	parentID, err := spiffeid.FromSegments(td,
 		"spire", "agent", "dsx_imds", "tenant", r.Config.OperatorTenant, "bm", instance.Spec.NodeName)
 	if err != nil {
 		return nil, fmt.Errorf("host parent ID: %w", err)
 	}
+	// Pod UID binds the entry to this virt-launcher instance across name reuse.
 	return newEntry(source, spiffeID, parentID, "dsx-imds-vm", r.Config.ClassName,
 		[]string{"k8s:pod-uid:" + instance.Status.PodUID})
 }
@@ -148,14 +153,18 @@ func (r *LaunchLayerReconciler) bareMetalInstanceEntry(source *unstructured.Unst
 	if err != nil {
 		return nil, err
 	}
+	// Controller-managed DPU, VM, and bare-metal identities have no Pod service
+	// label, so their service comes from global.dsx.defaultServiceName. td
+	// supplies the trust domain and r.Config.Service supplies /service/<service>.
 	spiffeID, err := (identity.Subject{
 		Tenant:       source.GetAnnotations()[OrgIDAnnotation],
 		ResourceType: identity.ResourceBM,
 		ResourceID:   instance.Spec.InstanceID,
-	}).SPIFFEID(td)
+	}).SPIFFEID(td, r.Config.Service)
 	if err != nil {
 		return nil, err
 	}
+	// The BM identity is served by its primary DPU's dpu_hw-attested agent.
 	parentID, err := spiffeid.FromSegments(td, "spire", "agent", dpuidentity.PluginName, serial)
 	if err != nil {
 		return nil, fmt.Errorf("DPU parent ID: %w", err)

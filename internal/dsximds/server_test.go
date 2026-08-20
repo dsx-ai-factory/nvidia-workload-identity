@@ -17,9 +17,9 @@ import (
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
-
-	"dsx-identity/internal/identity"
 )
+
+const testIssuer = "https://ds9.dsx.nvid.id"
 
 func TestAgentServerIntegration(t *testing.T) {
 	t.Parallel()
@@ -28,13 +28,13 @@ func TestAgentServerIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifier, err := newRemoteVerifier(context.Background(), jwksServer(t, key).URL, "spire-server",
-		spiffeid.RequireTrustDomainFromString("k2.internal"), time.Second)
+	verifier, err := newRemoteVerifier(context.Background(), testIssuer, "spire-server",
+		spiffeid.RequireTrustDomainFromString("k2.internal"), jwksServer(t, key).URL, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
 	signedHostToken := signToken(t, key, jwt.Claims{
-		Issuer:   identity.Issuer,
+		Issuer:   testIssuer,
 		Subject:  "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7",
 		Audience: jwt.Audience{"spire-server"},
 		Expiry:   jwt.NewNumericDate(time.Now().Add(time.Minute)),
@@ -70,8 +70,8 @@ func TestVerifyHostAttestation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifier, err := NewVerifier(&oidc.StaticKeySet{PublicKeys: []crypto.PublicKey{&key.PublicKey}}, "spire-server",
-		spiffeid.RequireTrustDomainFromString("k2.internal"))
+	verifier, err := NewVerifier(testIssuer, "spire-server", spiffeid.RequireTrustDomainFromString("k2.internal"),
+		&oidc.StaticKeySet{PublicKeys: []crypto.PublicKey{&key.PublicKey}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,18 +87,18 @@ func TestVerifyHostAttestation(t *testing.T) {
 	}{
 		{
 			name:     "base host",
-			issuer:   identity.Issuer,
+			issuer:   testIssuer,
 			subject:  "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7",
 			audience: jwt.Audience{"spire-server"},
 			expiry:   time.Now().Add(time.Minute),
 			want:     "spiffe://k2.internal/spire/agent/dsx_imds/tenant/operator-1/bm/host-7",
 		},
 		{name: "wrong issuer", issuer: "spiffe://wrong.example", subject: "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7", audience: jwt.Audience{"spire-server"}, expiry: time.Now().Add(time.Minute), wantErr: true},
-		{name: "wrong audience", issuer: identity.Issuer, subject: "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7", audience: jwt.Audience{"wrong"}, expiry: time.Now().Add(time.Minute), wantErr: true},
-		{name: "extra audience", issuer: identity.Issuer, subject: "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7", audience: jwt.Audience{"spire-server", "extra"}, expiry: time.Now().Add(time.Minute), want: "spiffe://k2.internal/spire/agent/dsx_imds/tenant/operator-1/bm/host-7"},
-		{name: "expired", issuer: identity.Issuer, subject: "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7", audience: jwt.Audience{"spire-server"}, expiry: time.Now().Add(-time.Minute), wantErr: true},
-		{name: "VM", issuer: identity.Issuer, subject: "spiffe://operator-1.ds9.dsx.nvid.id/vm/vm-7", audience: jwt.Audience{"spire-server"}, expiry: time.Now().Add(time.Minute), wantErr: true},
-		{name: "host process", issuer: identity.Issuer, subject: "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7/process/agent", audience: jwt.Audience{"spire-server"}, expiry: time.Now().Add(time.Minute), wantErr: true},
+		{name: "wrong audience", issuer: testIssuer, subject: "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7", audience: jwt.Audience{"wrong"}, expiry: time.Now().Add(time.Minute), wantErr: true},
+		{name: "extra audience", issuer: testIssuer, subject: "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7", audience: jwt.Audience{"spire-server", "extra"}, expiry: time.Now().Add(time.Minute), want: "spiffe://k2.internal/spire/agent/dsx_imds/tenant/operator-1/bm/host-7"},
+		{name: "expired", issuer: testIssuer, subject: "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7", audience: jwt.Audience{"spire-server"}, expiry: time.Now().Add(-time.Minute), wantErr: true},
+		{name: "VM", issuer: testIssuer, subject: "spiffe://operator-1.ds9.dsx.nvid.id/vm/vm-7", audience: jwt.Audience{"spire-server"}, expiry: time.Now().Add(time.Minute), wantErr: true},
+		{name: "host process", issuer: testIssuer, subject: "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7/process/agent", audience: jwt.Audience{"spire-server"}, expiry: time.Now().Add(time.Minute), wantErr: true},
 	}
 
 	for _, test := range tests {
@@ -134,13 +134,13 @@ func TestRemoteVerifierRejectsWrongSignature(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := jwksServer(t, wrongKey)
-	verifier, err := newRemoteVerifier(context.Background(), server.URL, "spire-server",
-		spiffeid.RequireTrustDomainFromString("k2.internal"), time.Second)
+	verifier, err := newRemoteVerifier(context.Background(), testIssuer, "spire-server",
+		spiffeid.RequireTrustDomainFromString("k2.internal"), server.URL, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
 	token := signToken(t, signingKey, jwt.Claims{
-		Issuer:   identity.Issuer,
+		Issuer:   testIssuer,
 		Subject:  "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7",
 		Audience: jwt.Audience{"spire-server"},
 		Expiry:   jwt.NewNumericDate(time.Now().Add(time.Minute)),
@@ -160,13 +160,13 @@ func TestRemoteVerifierVerifiesTLSCertificate(t *testing.T) {
 		writeJWKS(t, w, key)
 	}))
 	t.Cleanup(server.Close)
-	verifier, err := newRemoteVerifier(context.Background(), server.URL, "spire-server",
-		spiffeid.RequireTrustDomainFromString("k2.internal"), time.Second)
+	verifier, err := newRemoteVerifier(context.Background(), testIssuer, "spire-server",
+		spiffeid.RequireTrustDomainFromString("k2.internal"), server.URL, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
 	token := signToken(t, key, jwt.Claims{
-		Issuer:   identity.Issuer,
+		Issuer:   testIssuer,
 		Subject:  "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7",
 		Audience: jwt.Audience{"spire-server"},
 		Expiry:   jwt.NewNumericDate(time.Now().Add(time.Minute)),
@@ -238,13 +238,13 @@ func TestRemoteVerifierTimeoutRecovers(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	verifier, err := newRemoteVerifier(context.Background(), server.URL, "spire-server",
-		spiffeid.RequireTrustDomainFromString("k2.internal"), 50*time.Millisecond)
+	verifier, err := newRemoteVerifier(context.Background(), testIssuer, "spire-server",
+		spiffeid.RequireTrustDomainFromString("k2.internal"), server.URL, 50*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
 	token := signToken(t, key, jwt.Claims{
-		Issuer:   identity.Issuer,
+		Issuer:   testIssuer,
 		Subject:  "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7",
 		Audience: jwt.Audience{"spire-server"},
 		Expiry:   jwt.NewNumericDate(time.Now().Add(time.Minute)),

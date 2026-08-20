@@ -27,9 +27,9 @@ import (
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
-
-	"dsx-identity/internal/identity"
 )
+
+const testIssuer = "https://ds9.dsx.nvid.id"
 
 func TestServeHTTPStopsWhenContextIsAlreadyCanceled(t *testing.T) {
 	t.Parallel()
@@ -61,7 +61,7 @@ func TestStaticSigningKeysetAndClaims(t *testing.T) {
 		}
 	}
 
-	server := &identityKeysServer{signer: signer}
+	server := &identityKeysServer{signer: signer, issuer: testIssuer}
 	original := map[string]any{
 		"iss":    "spiffe://k2.internal",
 		"sub":    "spiffe://k2.internal/original",
@@ -90,7 +90,7 @@ func TestStaticSigningKeysetAndClaims(t *testing.T) {
 		"aud": original["aud"],
 		"exp": original["exp"],
 		"iat": original["iat"],
-		"iss": identity.Issuer,
+		"iss": testIssuer,
 		"sub": subject.String(),
 	})
 	if err != nil {
@@ -120,7 +120,7 @@ func TestStaticSigningKeysetAndClaims(t *testing.T) {
 	if err := otherParsed.Claims(active.Public().Key, &otherClaims); err != nil {
 		t.Fatalf("verify second tenant token: %v", err)
 	}
-	if otherClaims["iss"] != identity.Issuer || otherClaims["sub"] != otherSubject.String() {
+	if otherClaims["iss"] != testIssuer || otherClaims["sub"] != otherSubject.String() {
 		t.Fatalf("second tenant claims = %#v", otherClaims)
 	}
 
@@ -361,6 +361,7 @@ func TestJWKSAndDiscoveryAreConfiguredNotHostScoped(t *testing.T) {
 	server := &identityKeysServer{
 		registry: readyKeyRegistry{keyRegistry: registry},
 		jwksURL:  "https://exchange.example/.well-known/jwks.json",
+		issuer:   testIssuer,
 	}
 
 	var previous string
@@ -384,7 +385,7 @@ func TestJWKSAndDiscoveryAreConfiguredNotHostScoped(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&cfg); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.IssuerURL != identity.Issuer || cfg.JWKSURL != server.jwksURL ||
+	if cfg.IssuerURL != testIssuer || cfg.JWKSURL != server.jwksURL ||
 		!reflect.DeepEqual(cfg.Algorithms, []string{"ES256", "ES384"}) {
 		t.Fatalf("unexpected discovery: %#v", cfg)
 	}
@@ -669,7 +670,7 @@ func signTestToken(t *testing.T, key jose.JSONWebKey) string {
 		t.Fatal(err)
 	}
 	token, err := jwt.Signed(signer).Claims(jwt.Claims{
-		Issuer:   identity.Issuer,
+		Issuer:   testIssuer,
 		Subject:  "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-1",
 		Audience: jwt.Audience{"spiffe://ds9.dsx.nvid.id/openbao"},
 		Expiry:   jwt.NewNumericDate(time.Now().Add(time.Minute)),

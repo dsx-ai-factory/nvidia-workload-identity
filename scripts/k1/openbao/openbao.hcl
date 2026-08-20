@@ -140,7 +140,7 @@ initialize "jwt" {
     path      = "auth/jwt/config"
     data = {
       jwks_url             = "http://dsx-identity-keys.dsx-identity.svc.cluster.local:8080/.well-known/jwks.json"
-      bound_issuer         = "spiffe://ds9.dsx.nvid.id"
+      bound_issuer         = "https://ds9.dsx.nvid.id"
       jwt_supported_algs   = ["ES256"]
       skip_jwks_validation = true
     }

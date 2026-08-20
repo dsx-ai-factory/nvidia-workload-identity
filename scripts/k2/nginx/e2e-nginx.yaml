@@ -11,6 +11,8 @@ kind: Pod
 metadata:
   name: e2e-nginx
   namespace: dsx-identity-e2e
+  annotations:
+    spiffe.nvidia.com/inject-dsx-token-fetcher: "true"
   labels:
     app: e2e-nginx
     spiffe.nvidia.com/service: dsx

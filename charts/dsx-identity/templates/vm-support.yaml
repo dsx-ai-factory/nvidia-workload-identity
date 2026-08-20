@@ -26,7 +26,7 @@ spec:
     metadata:
       labels:
         {{- include "dsx-identity.labels" (dict "root" . "name" "dsx-identity-keys-proxy-csi") | nindent 8 }}
-        {{- include "dsx-identity.dsxWorkloadLabel" . | nindent 8 }}
+        spiffe.nvidia.com/service: {{ include "dsx-identity.defaultServiceName" . | quote }}
       {{- with (include "dsx-identity.observabilityPodAnnotations" (dict "root" . "containerNames" "dsx-identity-keys-proxy-csi")) }}
       annotations:
         {{- . | nindent 8 }}

@@ -13,7 +13,7 @@ GATEWAY_HOST="gateway.sjc-1.nvidia.com"
 OPENBAO_URL="http://${GATEWAY_HOST}:8200"
 NATS_SERVER="nats://${GATEWAY_HOST}:4222"
 AUDIENCE="spiffe://ds9.dsx.nvid.id/openbao"
-ISSUER="spiffe://ds9.dsx.nvid.id"
+ISSUER="https://ds9.dsx.nvid.id"
 SIGNING_SECRET="dsx-identity-keys-signing-keyset"
 ACTIVE_KID_SECRET="dsx-identity-keys-active-kid"
 IDENTITY_NAMESPACE="dsx-identity"
@@ -84,6 +84,13 @@ assert_nats_kv() {
     done
     printf '%s\n' "${output}" >&2
     return 1
+}
+
+assert_no_token_fetcher_injection() {
+    local context="$1" pod="$2" namespace="$3"
+    kubectl get pod "${pod}" --namespace "${namespace}" --context "${context}" -o json | jq -e '
+        [.spec.initContainers[]?.name] | index("dsx-token-fetcher") | not
+    ' >/dev/null
 }
 
 read_pod_token() {
@@ -181,7 +188,7 @@ internal_pod_subject() {
     local pod="$3"
     local namespace="${4:-${FIXTURE_NAMESPACE}}"
     local tenant="${5:-}"
-    local node uid role
+    local node uid role service
     [[ -n "${tenant}" ]] || tenant="${OPERATOR_TENANT}"
     node=$(kubectl get pod "${pod}" --namespace "${namespace}" \
         --context "${context}" -o jsonpath='{.spec.nodeName}')
@@ -189,7 +196,10 @@ internal_pod_subject() {
         --context "${context}" -o jsonpath='{.metadata.uid}')
     role=$(kubectl get pod "${pod}" --namespace "${namespace}" \
         --context "${context}" -o jsonpath='{.metadata.labels.spiffe\.nvidia\.com/role}')
-    printf 'spiffe://%s/tenant/%s/service/dsx/bm/%s/pod/%s' "${trust_domain}" "${tenant}" "${node}" "${uid}"
+    service=$(kubectl get pod "${pod}" --namespace "${namespace}" \
+        --context "${context}" -o jsonpath='{.metadata.labels.spiffe\.nvidia\.com/service}')
+    printf 'spiffe://%s/tenant/%s/service/%s/bm/%s/pod/%s' \
+        "${trust_domain}" "${tenant}" "${service}" "${node}" "${uid}"
     [[ -z "${role}" ]] || printf '/role/%s' "${role}"
 }
 
@@ -353,6 +363,7 @@ main() {
     log_timing "Pod token delivery" "${stage_started}"
 
     stage_started=${SECONDS}
+    assert_no_token_fetcher_injection "${K2_CONTEXT}" "${K2_SPIRE_POD}" "${K2_SPIRE_NAMESPACE}"
     k1_spire_id=$(internal_pod_subject "${K1_CONTEXT}" "${K1_TRUST_DOMAIN}" "${K1_POD}")
     k2_spire_id=$(internal_pod_subject \
         "${K2_CONTEXT}" "${K2_TRUST_DOMAIN}" "${K2_SPIRE_POD}" "${K2_SPIRE_NAMESPACE}")

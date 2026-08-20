@@ -9,7 +9,7 @@ metadata:
   name: e2e-spire-client
   namespace: dsx-identity-spire-e2e
   labels:
-    spiffe.nvidia.com/service: dsx
+    spiffe.nvidia.com/service: identity-probe
 spec:
   automountServiceAccountToken: false
   restartPolicy: Never

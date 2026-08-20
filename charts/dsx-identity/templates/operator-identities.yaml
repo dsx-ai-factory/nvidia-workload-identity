@@ -1,5 +1,6 @@
 {{- if .Values.spire.enabled }}
 {{- $className := printf "%s-%s" .Release.Namespace .Release.Name -}}
+{{- $tenant := include "dsx-identity.operatorTenant" . -}}
 apiVersion: spire.spiffe.io/v1alpha1
 kind: ClusterSPIFFEID
 metadata:
@@ -9,8 +10,9 @@ metadata:
 spec:
   className: {{ $className | quote }}
   hint: dsx-pod
-  spiffeIDTemplate: {{ include "dsx-identity.operatorPodSPIFFEIDTemplate" . | quote }}
+  spiffeIDTemplate: {{ printf "spiffe://{{ .TrustDomain }}/tenant/%s/service/{{ index .PodMeta.Labels \"spiffe.nvidia.com/service\" }}/bm/{{ .NodeMeta.Name }}/pod/{{ .PodMeta.UID }}{{ with index .PodMeta.Labels \"spiffe.nvidia.com/role\" }}/role/{{ . }}{{ end }}" $tenant | quote }}
   podSelector:
-    matchLabels:
-      spiffe.nvidia.com/service: dsx
+    matchExpressions:
+      - key: spiffe.nvidia.com/service
+        operator: Exists
 {{- end }}

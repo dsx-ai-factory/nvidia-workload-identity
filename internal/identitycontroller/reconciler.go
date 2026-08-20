@@ -39,6 +39,7 @@ const (
 // is placed on every entry.
 type Config struct {
 	TrustDomain          string
+	Service              string
 	OperatorTenant       string
 	ClassName            string
 	DPUMetadataSelectors []string
@@ -48,6 +49,9 @@ type Config struct {
 func (c Config) Validate() error {
 	if _, err := c.trustDomain(); err != nil {
 		return err
+	}
+	if !identity.ValidService(c.Service) {
+		return fmt.Errorf("invalid service %q", c.Service)
 	}
 	if !identity.ValidTenant(c.OperatorTenant) {
 		return fmt.Errorf("invalid operator tenant %q", c.OperatorTenant)
@@ -135,6 +139,8 @@ func reconcileSource(
 }
 
 func validateEntryConflicts(ctx context.Context, c client.Client, desired *spirev1alpha1.ClusterStaticEntry) error {
+	// A SPIFFE ID must have one source. VM selectors must also be unique because
+	// two entries for one virt-launcher Pod would make SVID selection ambiguous.
 	var entries spirev1alpha1.ClusterStaticEntryList
 	if err := c.List(ctx, &entries, client.MatchingLabels{"app.kubernetes.io/managed-by": fieldOwner}); err != nil {
 		return fmt.Errorf("list managed identities: %w", err)
@@ -156,6 +162,8 @@ func validateEntryConflicts(ctx context.Context, c client.Client, desired *spire
 }
 
 func vmPodUIDsOverlap(a, b []string) bool {
+	// Other selector types do not identify the one concrete VM workload and are
+	// irrelevant to this conflict check.
 	selector := func(selectors []string, prefix string) string {
 		for _, value := range selectors {
 			if suffix, ok := strings.CutPrefix(value, prefix); ok {

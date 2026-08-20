@@ -21,9 +21,9 @@ import (
 )
 
 type Config struct {
-	JWKSURL     string `hcl:"jwks_url"`
-	Audience    string `hcl:"audience"`
-	TrustDomain string `hcl:"trust_domain"`
+	JWKSURL  string `hcl:"jwks_url"`
+	Issuer   string `hcl:"issuer"`
+	Audience string `hcl:"audience"`
 }
 
 type Plugin struct {
@@ -40,12 +40,16 @@ func (p *Plugin) Configure(_ context.Context, req *configv1.ConfigureRequest) (*
 	if err := hcl.Decode(config, req.HclConfiguration); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "decode configuration: %v", err)
 	}
-	trustDomain, err := spiffeid.TrustDomainFromString(config.TrustDomain)
+	core := req.GetCoreConfiguration()
+	if core == nil {
+		return nil, status.Error(codes.InvalidArgument, "core configuration is missing the trust domain")
+	}
+	trustDomain, err := spiffeid.TrustDomainFromString(core.GetTrustDomain())
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid trust_domain: %v", err)
+		return nil, status.Errorf(codes.InvalidArgument, "invalid trust domain: %v", err)
 	}
 	// The verifier and its JWKS cache outlive this Configure RPC.
-	verifier, err := dsximds.NewRemoteVerifier(context.Background(), config.JWKSURL, config.Audience, trustDomain)
+	verifier, err := dsximds.NewRemoteVerifier(context.Background(), config.Issuer, config.Audience, trustDomain, config.JWKSURL)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid configuration: %v", err)
 	}
