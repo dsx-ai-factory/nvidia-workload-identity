@@ -370,10 +370,13 @@ SPIRE chart.
 ```yaml
 global:
   operatorTenant: operator-1
+  dsx:
+    jwtIssuer: https://ds9.dsx.nvid.id
+    defaultServiceName: dsx
   spire:
     trustDomain: shard.example.com
     clusterName: shard-a
-    jwtIssuer: spiffe://shard.example.com
+    jwtIssuer: https://spire.shard.example.com
 
 spire:
   spire-server:
@@ -404,6 +407,9 @@ the external host agent's canonical socket through the single SPIFFE CSI
 driver. The plugin validates host bootstrap DSX JWTs against the shard's
 aggregate JWKS served by DSX Identity Keys.
 
+`global.dsx.jwtIssuer` is used intact. `global.dsx.defaultServiceName` applies
+to chart-owned and controller-managed identities.
+
 ```yaml
 spire:
   spire-agent:
@@ -419,7 +425,7 @@ spire:
           plugin_cmd: /opt/spire/plugins/dsx-imds-node-attestor-server
           plugin_checksum: ""
           plugin_data:
-            trust_domain: shard.example.com
+            issuer: https://ds9.dsx.nvid.id
             audience: spiffe://shard.example.com/spire/server
             jwks_url: https://identity-keys.shard.example.com/.well-known/jwks.json
   spiffe-csi-driver:
@@ -500,17 +506,17 @@ mounting the Workload API or DSX Identity Keys Proxy sockets.
 DSX JWT subjects use:
 
 ```text
-spiffe://<tenant>.ds9.dsx.nvid.id/<dpu|bm|vm>/<resource-id>
+spiffe://<tenant>.<issuer-host>/<dpu|bm|vm>/<resource-id>
   [/process/<name>][/role/<role>]
-spiffe://<operator-tenant>.ds9.dsx.nvid.id/bm/<node-name>/pod/<pod-uuid>
+spiffe://<operator-tenant>.<issuer-host>/bm/<node-name>/pod/<pod-uuid>
   [/role/<role>]
 ```
 
-Cluster-local SPIRE identities encode the same tenant, service, resource type,
-and resource ID under the shard trust domain.
+Cluster-local SPIRE identities encode the same fields under the shard trust
+domain. The issuer host supplies the DSX SPIFFE ID suffix.
 
 ```text
-spiffe://<local-trust-domain>/tenant/<tenant>/service/dsx/<resource-type>/<resource-id>[/...]
+spiffe://<local-trust-domain>/tenant/<tenant>/service/<service>/<resource-type>/<resource-id>[/...]
 ```
 
 | Resource | Tenant source | Subject resource path |
@@ -527,10 +533,9 @@ registration template derives the host ID directly from the Kubernetes node
 name. The DPU source supplies the BM resource ID through its
 `carbide.nvidia.com/dpu-machine-id` label.
 
-Every DSX Kubernetes Pod supplies the service label. One SPIRE
-controller-manager derives its operator tenant, BM resource type, node name,
-and Pod UID. Every worker is an operator-owned bare-metal host, so the fixed
-parent template identifies that worker's operator-tenant `dsx_imds` agent.
+Every DSX Kubernetes Pod supplies its service label. SPIRE uses its value for
+the service path segment. The fixed parent template identifies the worker's
+operator-tenant `dsx_imds` agent.
 
 ```yaml
 metadata:
@@ -646,9 +651,13 @@ metadata:
   labels:
     spiffe.nvidia.com/service: dsx
   annotations:
+    spiffe.nvidia.com/inject-dsx-token-fetcher: "true"
     instrumentation.opentelemetry.io/inject-sdk: "dsx-obs/default-instrumentation"
     sidecar.opentelemetry.io/inject: "dsx-obs/default-sidecar"
 ```
+
+The service label selects SPIRE registration. The injection annotation selects
+the token fetcher.
 
 For KubeVirt IMDS injection, put them on the VM Pod template:
 

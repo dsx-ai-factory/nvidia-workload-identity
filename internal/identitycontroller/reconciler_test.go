@@ -27,6 +27,7 @@ var testDPUMetadataSelectors = []string{
 
 var testConfig = Config{
 	TrustDomain:          "k2.sjc-1.nvidia.com",
+	Service:              "dsx",
 	OperatorTenant:       "operator-1",
 	ClassName:            "dsx-identity-dsx-identity",
 	DPUMetadataSelectors: testDPUMetadataSelectors,

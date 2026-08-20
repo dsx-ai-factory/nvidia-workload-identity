@@ -25,8 +25,12 @@ app.kubernetes.io/name: {{ .name }}
 app.kubernetes.io/instance: {{ .root.Release.Name }}
 {{- end -}}
 
-{{- define "dsx-identity.dsxWorkloadLabel" -}}
-spiffe.nvidia.com/service: dsx
+{{- define "dsx-identity.defaultServiceName" -}}
+{{- $service := required "global.dsx.defaultServiceName is required" .Values.global.dsx.defaultServiceName -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$" $service) -}}
+{{- fail "global.dsx.defaultServiceName must be a DNS label" -}}
+{{- end -}}
+{{- $service -}}
 {{- end -}}
 
 {{- define "dsx-identity.operatorTenant" -}}
@@ -45,11 +49,6 @@ spiffe.nvidia.com/service: dsx
 {{- fail "global.operatorTenant must match spire.spire-server.controllerManager.extraEnv OPERATOR_TENANT" -}}
 {{- end -}}
 {{- $tenant -}}
-{{- end -}}
-
-{{- define "dsx-identity.operatorPodSPIFFEIDTemplate" -}}
-{{- $tenant := include "dsx-identity.operatorTenant" . -}}
-{{- printf "spiffe://{{ .TrustDomain }}/tenant/%s/service/dsx/bm/{{ .NodeMeta.Name }}/pod/{{ .PodMeta.UID }}{{ with index .PodMeta.Labels \"spiffe.nvidia.com/role\" }}/role/{{ . }}{{ end }}" $tenant -}}
 {{- end -}}
 
 {{/*

@@ -2,10 +2,12 @@
 # Used by: make identities
 
 global:
+  dsx:
+    jwtIssuer: "https://ds9.dsx.nvid.id"
   spire:
     trustDomain: "sjc-1.nvidia.com"
     clusterName: "k1"
-    jwtIssuer: "spiffe://sjc-1.nvidia.com"
+    jwtIssuer: "https://sjc-1.nvidia.com"
 
 spire:
   spire-server:
@@ -14,7 +16,7 @@ spire:
         dsx_imds:
           plugin_data:
             audience: spiffe://sjc-1.nvidia.com/spire/server
-            trust_domain: sjc-1.nvidia.com
+            issuer: https://ds9.dsx.nvid.id
     controllerManager:
       # Kind's control-plane node emulates the external DPU boundary.
       parentIDTemplate: 'spiffe://{{ .TrustDomain }}/spire/agent/{{ if eq .NodeMeta.Name "k1-control-plane" }}k8s_psat/{{ .ClusterName }}/{{ .NodeMeta.UID }}{{ else }}dsx_imds/tenant/$OPERATOR_TENANT/bm/{{ .NodeMeta.Name }}{{ end }}'

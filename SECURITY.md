@@ -124,7 +124,10 @@ Keep Go modules, base images, Helm dependencies, and charted sidecar images upda
 ## Deployment Assumptions
 
 - Install `charts/dsx-identity` once per identity shard.
-- Provide `global.operatorTenant`, SPIRE trust domain, cluster name, shard ID, public JWKS URL, NATS server URL, signing keyset Secret, active KID Secret, and any NATS OAuth2 credentials before starting DSX Identity Keys.
+- Provide `global.operatorTenant`, the DSX and SPIRE JWT issuers, SPIRE trust
+  domain, cluster name, shard ID, public JWKS URL, NATS server URL, signing
+  keyset Secret, active KID Secret, and any NATS OAuth2 credentials before
+  starting DSX Identity Keys.
 - Use the external Gateway for TLS termination and request quotas in production.
 - Enable NATS OAuth2 or an equivalent Event Bus access-control mode in production.
 - Keep local fixture settings, unauthenticated NATS, direct HTTP endpoints, and example values out of production deployments.

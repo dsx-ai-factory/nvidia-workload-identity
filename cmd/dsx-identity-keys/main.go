@@ -62,9 +62,13 @@ type identityKeysServer struct {
 	registry  publicKeyRegistry
 	jwtSource *workloadapi.JWTSource
 	jwksURL   string
+	issuer    string
 }
 
-func newIdentityKeysServer(ctx context.Context, signer *tokenSigner, registry publicKeyRegistry, socketPath, jwksURL string) (*identityKeysServer, error) {
+func newIdentityKeysServer(ctx context.Context, issuer string, signer *tokenSigner, registry publicKeyRegistry, socketPath, jwksURL string) (*identityKeysServer, error) {
+	if err := identity.ValidateIssuer(issuer); err != nil {
+		return nil, err
+	}
 	clientOptions := []workloadapi.ClientOption{
 		workloadapi.WithDialOptions(grpc.WithStatsHandler(otelgrpc.NewClientHandler())),
 	}
@@ -75,7 +79,7 @@ func newIdentityKeysServer(ctx context.Context, signer *tokenSigner, registry pu
 	if err != nil {
 		return nil, fmt.Errorf("create JWT source: %w", err)
 	}
-	return &identityKeysServer{signer: signer, registry: registry, jwtSource: jwts, jwksURL: jwksURL}, nil
+	return &identityKeysServer{signer: signer, registry: registry, jwtSource: jwts, jwksURL: jwksURL, issuer: issuer}, nil
 }
 
 func (s *identityKeysServer) Close() error {
@@ -91,7 +95,7 @@ func (s *identityKeysServer) resignJWT(originalClaims map[string]any, newSubject
 		}
 	}
 	newClaims["sub"] = newSubject.String()
-	newClaims["iss"] = identity.Issuer
+	newClaims["iss"] = s.issuer
 
 	token, err := jwt.Signed(s.signer.signer).Claims(newClaims).Serialize()
 	if err != nil {
@@ -151,7 +155,7 @@ func (s *identityKeysServer) handleTokenExchange(w http.ResponseWriter, r *http.
 		writeTokenError(w, http.StatusUnauthorized, "invalid_grant", "subject_token validation failed")
 		return
 	}
-	newID, err := identity.ToDSXSPIFFEID(validatedSVID.ID)
+	newID, err := identity.ToDSXSPIFFEID(s.issuer, validatedSVID.ID)
 	if err != nil {
 		slog.WarnContext(r.Context(), "Rejected token exchange", "reason", "unsupported_subject", "error", err)
 		writeTokenError(w, http.StatusBadRequest, "invalid_request", "subject_token subject is not supported")
@@ -199,7 +203,7 @@ func (s *identityKeysServer) handleJWKS(w http.ResponseWriter, _ *http.Request) 
 
 func (s *identityKeysServer) handleOIDCDiscovery(w http.ResponseWriter, _ *http.Request) {
 	responseBody, err := json.Marshal(oidc.ProviderConfig{
-		IssuerURL:  identity.Issuer,
+		IssuerURL:  s.issuer,
 		JWKSURL:    s.jwksURL,
 		Algorithms: signingAlgorithms(s.registry.keyset()),
 	})
@@ -275,6 +279,7 @@ func run() (runErr error) {
 		listenAddr      = flag.String("listen", ":8080", "HTTP server listen address")
 		socketPath      = flag.String("socket", "", "SPIFFE Workload API socket path")
 		jwksURL         = flag.String("jwks-url", "", "public JWKS URL advertised through discovery")
+		issuer          = flag.String("issuer", "", "HTTPS issuer for exchanged DSX JWTs")
 		signingKeyset   = flag.String("signing-keyset", "/run/secrets/dsx-identity-keys/keyset.json", "private signing keyset file")
 		activeKID       = flag.String("active-kid", "/run/secrets/dsx-identity-keys-active-kid/active-kid.json", "JSON file containing the active signing kid and algorithm")
 		shardID         = flag.String("shard-id", "", "stable DSX Identity Keys shard identifier")
@@ -289,6 +294,9 @@ func run() (runErr error) {
 		natsScopes      = flag.String("nats-oauth-scopes", "nats", "comma-separated OAuth2 scopes for NATS; empty requests no scopes")
 	)
 	flag.Parse()
+	if *issuer == "" {
+		return fmt.Errorf("issuer is required")
+	}
 
 	sdk, err := telemetry.Setup(context.Background(), "dsx-identity-keys", os.Stdout, logLevel)
 	if err != nil {
@@ -329,7 +337,7 @@ func run() (runErr error) {
 	registryWithSync := &synchronizedKeyRegistry{keyRegistry: registry, natsKeySynchronizer: synchronizer}
 	defer registryWithSync.Close()
 
-	server, err := newIdentityKeysServer(ctx, signer, registryWithSync, *socketPath, *jwksURL)
+	server, err := newIdentityKeysServer(ctx, *issuer, signer, registryWithSync, *socketPath, *jwksURL)
 	if err != nil {
 		return fmt.Errorf("create DSX Identity Keys server: %w", err)
 	}
@@ -346,7 +354,7 @@ func run() (runErr error) {
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	slog.Info("Starting DSX Identity Keys", "listen_addr", *listenAddr, "issuer", identity.Issuer, "shard_id", *shardID, "active_kid", signer.keyID)
+	slog.Info("Starting DSX Identity Keys", "listen_addr", *listenAddr, "issuer", *issuer, "shard_id", *shardID, "active_kid", signer.keyID)
 	if err := serveHTTP(ctx, httpServer); err != nil {
 		return fmt.Errorf("serve HTTP: %w", err)
 	}

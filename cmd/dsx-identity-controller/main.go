@@ -30,6 +30,7 @@ func run() (runErr error) {
 	var logLevel slog.Level
 
 	flag.StringVar(&config.TrustDomain, "trust-domain", "", "local SPIRE trust domain")
+	flag.StringVar(&config.Service, "service", "", "service for controller-managed identities")
 	flag.StringVar(&config.OperatorTenant, "operator-tenant", "", "configured tenant for operator identities")
 	flag.StringVar(&config.ClassName, "class-name", "", "SPIRE controller manager class name")
 	flag.Func("dpu-metadata-selector", "SPIRE selector for DPU-side metadata-service, repeatable", func(value string) error {

@@ -1,6 +1,8 @@
-{{- $trustDomain := required "global.spire.trustDomain is required" .Values.global.spire.trustDomain -}}
-{{- $clusterName := required "global.spire.clusterName is required" .Values.global.spire.clusterName -}}
 {{- if .Values.identityKeys.enabled }}
+{{- $issuer := required "global.dsx.jwtIssuer is required" .Values.global.dsx.jwtIssuer -}}
+{{- if not (regexMatch "^https://([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\\.)+[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$" $issuer) -}}
+{{- fail "global.dsx.jwtIssuer must be an HTTPS URL containing only a DNS hostname" -}}
+{{- end -}}
 {{- $imageTag := .Values.identityKeys.image.tag | default .Values.global.imageTag | default .Chart.Version -}}
 {{- $natsAuth := .Values.identityKeys.nats.auth -}}
 {{- $natsAuthMode := required "identityKeys.nats.auth.mode is required" $natsAuth.mode -}}
@@ -34,7 +36,7 @@ spec:
     metadata:
       labels:
         {{- include "dsx-identity.labels" (dict "root" . "name" "dsx-identity-keys") | nindent 8 }}
-        {{- include "dsx-identity.dsxWorkloadLabel" . | nindent 8 }}
+        spiffe.nvidia.com/service: {{ include "dsx-identity.defaultServiceName" . | quote }}
       {{- with (include "dsx-identity.observabilityPodAnnotations" (dict "root" . "containerNames" "dsx-identity-keys")) }}
       annotations:
         {{- . | nindent 8 }}
@@ -85,6 +87,7 @@ spec:
             - --listen=:{{ .Values.identityKeys.service.port }}
             - --socket=unix:///var/run/secrets/spire.io/spire-agent.sock
             - --jwks-url={{ required "identityKeys.jwksURL is required" .Values.identityKeys.jwksURL }}
+            - --issuer={{ $issuer }}
             - --signing-keyset=/run/secrets/dsx-identity-keys/keyset.json
             - --active-kid=/run/secrets/dsx-identity-keys-active-kid/active-kid.json
             - --shard-id={{ required "identityKeys.shardID is required" .Values.identityKeys.shardID }}

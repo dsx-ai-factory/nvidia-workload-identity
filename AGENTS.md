@@ -101,6 +101,7 @@
   test signers, directly signed tokens, or test-only authentication paths.
 - CI-required validation and E2E jobs must not be manual or allowed to fail.
 - Run `make validate` and the full E2E lifecycle after code or configuration changes.
+- Keep the full E2E lifecycle last, after implementation and review work is complete.
 
 ## Primary commands
 

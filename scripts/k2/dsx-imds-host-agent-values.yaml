@@ -2,7 +2,7 @@ global:
   spire:
     clusterName: k2
     trustDomain: k2.sjc-1.nvidia.com
-    jwtIssuer: spiffe://k2.sjc-1.nvidia.com
+    jwtIssuer: https://k2.sjc-1.nvidia.com
 
 spire-agent:
   nodeSelector:

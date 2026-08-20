@@ -16,47 +16,28 @@ import (
 const defaultJWKSRequestTimeout = 10 * time.Second
 
 type Verifier struct {
-	audience    string
-	trustDomain spiffeid.TrustDomain
-	keySet      oidc.KeySet
+	issuer        string
+	trustDomain   spiffeid.TrustDomain
+	tokenVerifier *oidc.IDTokenVerifier
 }
 
-func NewVerifier(keySet oidc.KeySet, audience string, trustDomain spiffeid.TrustDomain) (*Verifier, error) {
+func NewVerifier(issuer, audience string, trustDomain spiffeid.TrustDomain, keySet oidc.KeySet) (*Verifier, error) {
 	if keySet == nil {
 		return nil, fmt.Errorf("key set is required")
 	}
 	if audience == "" {
 		return nil, fmt.Errorf("audience is required")
 	}
+	if err := identity.ValidateIssuer(issuer); err != nil {
+		return nil, err
+	}
 	if trustDomain.IsZero() {
 		return nil, fmt.Errorf("trust domain is required")
 	}
-	return &Verifier{
-		audience:    audience,
-		trustDomain: trustDomain,
-		keySet:      keySet,
-	}, nil
-}
-
-func NewRemoteVerifier(ctx context.Context, jwksURL, audience string, trustDomain spiffeid.TrustDomain) (*Verifier, error) {
-	return newRemoteVerifier(ctx, jwksURL, audience, trustDomain, defaultJWKSRequestTimeout)
-}
-
-func newRemoteHTTPClient(timeout time.Duration) *http.Client {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	return &http.Client{Transport: otelhttp.NewTransport(transport), Timeout: timeout}
-}
-
-func newRemoteVerifier(ctx context.Context, jwksURL, audience string, trustDomain spiffeid.TrustDomain, timeout time.Duration) (*Verifier, error) {
-	ctx = oidc.ClientContext(ctx, newRemoteHTTPClient(timeout))
-	return NewVerifier(oidc.NewRemoteKeySet(ctx, jwksURL), audience, trustDomain)
-}
-
-func (v *Verifier) Verify(ctx context.Context, rawToken string) (spiffeid.ID, error) {
-	// Accept only the asymmetric algorithms supported by go-oidc and DSX Identity Keys
-	// public JWKS. Symmetric algorithms cannot be verified from published keys.
-	verifier := oidc.NewVerifier(identity.Issuer, v.keySet, &oidc.Config{
-		ClientID: v.audience,
+	// Issuer, audience, accepted algorithms, and keys are invariant across tokens.
+	// Public JWKS can verify only the supported asymmetric algorithms listed here.
+	tokenVerifier := oidc.NewVerifier(issuer, keySet, &oidc.Config{
+		ClientID: audience,
 		SupportedSigningAlgs: []string{
 			oidc.RS256, oidc.RS384, oidc.RS512,
 			oidc.ES256, oidc.ES384, oidc.ES512,
@@ -64,7 +45,29 @@ func (v *Verifier) Verify(ctx context.Context, rawToken string) (spiffeid.ID, er
 			oidc.EdDSA,
 		},
 	})
-	token, err := verifier.Verify(ctx, rawToken)
+	return &Verifier{
+		issuer:        issuer,
+		trustDomain:   trustDomain,
+		tokenVerifier: tokenVerifier,
+	}, nil
+}
+
+func NewRemoteVerifier(ctx context.Context, issuer, audience string, trustDomain spiffeid.TrustDomain, jwksURL string) (*Verifier, error) {
+	return newRemoteVerifier(ctx, issuer, audience, trustDomain, jwksURL, defaultJWKSRequestTimeout)
+}
+
+func newRemoteHTTPClient(timeout time.Duration) *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	return &http.Client{Transport: otelhttp.NewTransport(transport), Timeout: timeout}
+}
+
+func newRemoteVerifier(ctx context.Context, issuer, audience string, trustDomain spiffeid.TrustDomain, jwksURL string, timeout time.Duration) (*Verifier, error) {
+	ctx = oidc.ClientContext(ctx, newRemoteHTTPClient(timeout))
+	return NewVerifier(issuer, audience, trustDomain, oidc.NewRemoteKeySet(ctx, jwksURL))
+}
+
+func (v *Verifier) Verify(ctx context.Context, rawToken string) (spiffeid.ID, error) {
+	token, err := v.tokenVerifier.Verify(ctx, rawToken)
 	if err != nil {
 		return spiffeid.ID{}, fmt.Errorf("verify attestation token: %w", err)
 	}
@@ -73,7 +76,7 @@ func (v *Verifier) Verify(ctx context.Context, rawToken string) (spiffeid.ID, er
 	if err != nil {
 		return spiffeid.ID{}, fmt.Errorf("parse host subject: %w", err)
 	}
-	parsedSubject, err := identity.ParseDSXID(subject)
+	parsedSubject, err := identity.ParseDSXID(v.issuer, subject)
 	if err != nil {
 		return spiffeid.ID{}, fmt.Errorf("parse host subject: %w", err)
 	}
