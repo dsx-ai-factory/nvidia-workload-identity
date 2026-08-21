@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 
 	"dsx-identity/internal/identity"
+	"dsx-identity/internal/spireidentity"
 )
 
 const OrgIDAnnotation = "launchlayer.nvidia.com/org-id"
@@ -98,11 +99,12 @@ func (r *LaunchLayerReconciler) virtualInstanceEntry(source *unstructured.Unstru
 	// Controller-managed DPU, VM, and bare-metal identities have no Pod service
 	// label, so their service comes from global.dsx.defaultServiceName. td
 	// supplies the trust domain and r.Config.Service supplies /service/<service>.
-	spiffeID, err := (identity.Subject{
+	spiffeID, err := spireidentity.ID(identity.Subject{
 		Tenant:       source.GetAnnotations()[OrgIDAnnotation],
+		Service:      r.Config.Service,
 		ResourceType: identity.ResourceVM,
 		ResourceID:   instance.Spec.InstanceID,
-	}).SPIFFEID(td, r.Config.Service)
+	}, td)
 	if err != nil {
 		return nil, err
 	}
@@ -155,11 +157,12 @@ func (r *LaunchLayerReconciler) bareMetalInstanceEntry(source *unstructured.Unst
 	// Controller-managed DPU, VM, and bare-metal identities have no Pod service
 	// label, so their service comes from global.dsx.defaultServiceName. td
 	// supplies the trust domain and r.Config.Service supplies /service/<service>.
-	spiffeID, err := (identity.Subject{
+	spiffeID, err := spireidentity.ID(identity.Subject{
 		Tenant:       source.GetAnnotations()[OrgIDAnnotation],
+		Service:      r.Config.Service,
 		ResourceType: identity.ResourceBM,
 		ResourceID:   instance.Spec.InstanceID,
-	}).SPIFFEID(td, r.Config.Service)
+	}, td)
 	if err != nil {
 		return nil, err
 	}

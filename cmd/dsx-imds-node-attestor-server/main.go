@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"sync/atomic"
+	"time"
 
 	"github.com/hashicorp/hcl"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
@@ -19,6 +20,8 @@ import (
 	"dsx-identity/internal/dsximds"
 	"dsx-identity/internal/telemetry"
 )
+
+const jwksRequestTimeout = 10 * time.Second
 
 type Config struct {
 	JWKSURL  string `hcl:"jwks_url"`
@@ -49,7 +52,9 @@ func (p *Plugin) Configure(_ context.Context, req *configv1.ConfigureRequest) (*
 		return nil, status.Errorf(codes.InvalidArgument, "invalid trust domain: %v", err)
 	}
 	// The verifier and its JWKS cache outlive this Configure RPC.
-	verifier, err := dsximds.NewRemoteVerifier(context.Background(), config.Issuer, config.Audience, trustDomain, config.JWKSURL)
+	verifier, err := dsximds.NewVerifier(
+		context.Background(), config.Issuer, config.Audience, trustDomain, config.JWKSURL, jwksRequestTimeout,
+	)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid configuration: %v", err)
 	}

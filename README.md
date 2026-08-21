@@ -372,6 +372,8 @@ global:
   operatorTenant: operator-1
   dsx:
     jwtIssuer: https://ds9.dsx.nvid.id
+    region: ds9
+    partition: nvid.id
     defaultServiceName: dsx
   spire:
     trustDomain: shard.example.com
@@ -407,8 +409,9 @@ the external host agent's canonical socket through the single SPIFFE CSI
 driver. The plugin validates host bootstrap DSX JWTs against the shard's
 aggregate JWKS served by DSX Identity Keys.
 
-`global.dsx.jwtIssuer` is used intact. `global.dsx.defaultServiceName` applies
-to chart-owned and controller-managed identities.
+The JWT issuer is independent of exchanged SPIFFE IDs, which use
+`<tenant>.<region>.<service>.<partition>`. Identities without a service label use
+`global.dsx.defaultServiceName`.
 
 ```yaml
 spire:
@@ -521,14 +524,15 @@ mounting the Workload API or DSX Identity Keys Proxy sockets.
 DSX JWT subjects use:
 
 ```text
-spiffe://<tenant>.<issuer-host>/<dpu|bm|vm>/<resource-id>
+spiffe://<tenant>.<region>.<service>.<partition>/<dpu|bm|vm>/<resource-id>
   [/process/<name>][/role/<role>]
-spiffe://<operator-tenant>.<issuer-host>/bm/<node-name>/pod/<pod-uuid>
+spiffe://<operator-tenant>.<region>.<service>.<partition>/bm/<node-name>/pod/<pod-uuid>
   [/role/<role>]
 ```
 
 Cluster-local SPIRE identities encode the same fields under the shard trust
-domain. The issuer host supplies the DSX SPIFFE ID suffix.
+domain. Exchange takes the region and partition from explicit configuration,
+the tenant and service from the local subject, and preserves the resource path.
 
 ```text
 spiffe://<local-trust-domain>/tenant/<tenant>/service/<service>/<resource-type>/<resource-id>[/...]

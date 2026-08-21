@@ -2,7 +2,6 @@ package dsximds
 
 import (
 	"context"
-	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -28,7 +27,7 @@ func TestAgentServerIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifier, err := newRemoteVerifier(context.Background(), testIssuer, "spire-server",
+	verifier, err := NewVerifier(context.Background(), testIssuer, "spire-server",
 		spiffeid.RequireTrustDomainFromString("k2.internal"), jwksServer(t, key).URL, time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -70,8 +69,8 @@ func TestVerifyHostAttestation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifier, err := NewVerifier(testIssuer, "spire-server", spiffeid.RequireTrustDomainFromString("k2.internal"),
-		&oidc.StaticKeySet{PublicKeys: []crypto.PublicKey{&key.PublicKey}})
+	verifier, err := NewVerifier(context.Background(), testIssuer, "spire-server",
+		spiffeid.RequireTrustDomainFromString("k2.internal"), jwksServer(t, key).URL, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +133,7 @@ func TestRemoteVerifierRejectsWrongSignature(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := jwksServer(t, wrongKey)
-	verifier, err := newRemoteVerifier(context.Background(), testIssuer, "spire-server",
+	verifier, err := NewVerifier(context.Background(), testIssuer, "spire-server",
 		spiffeid.RequireTrustDomainFromString("k2.internal"), server.URL, time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -160,7 +159,7 @@ func TestRemoteVerifierVerifiesTLSCertificate(t *testing.T) {
 		writeJWKS(t, w, key)
 	}))
 	t.Cleanup(server.Close)
-	verifier, err := newRemoteVerifier(context.Background(), testIssuer, "spire-server",
+	verifier, err := NewVerifier(context.Background(), testIssuer, "spire-server",
 		spiffeid.RequireTrustDomainFromString("k2.internal"), server.URL, time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -238,7 +237,7 @@ func TestRemoteVerifierTimeoutRecovers(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	verifier, err := newRemoteVerifier(context.Background(), testIssuer, "spire-server",
+	verifier, err := NewVerifier(context.Background(), testIssuer, "spire-server",
 		spiffeid.RequireTrustDomainFromString("k2.internal"), server.URL, 50*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
@@ -255,7 +254,7 @@ func TestRemoteVerifierTimeoutRecovers(t *testing.T) {
 	select {
 	case <-firstRequestDone:
 	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for the canceled JWKS request")
+		t.Fatal("timed out waiting for the first JWKS request")
 	}
 	got, err := verifier.Verify(context.Background(), token)
 	if err != nil {

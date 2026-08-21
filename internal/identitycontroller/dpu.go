@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 
 	"dsx-identity/internal/identity"
+	"dsx-identity/internal/spireidentity"
 )
 
 const (
@@ -82,11 +83,12 @@ func (r *DPUReconciler) desiredEntry(ctx context.Context, dpu *unstructured.Unst
 	// Controller-managed DPU, VM, and bare-metal identities have no Pod service
 	// label, so their service comes from global.dsx.defaultServiceName. td
 	// supplies the trust domain and r.Config.Service supplies /service/<service>.
-	spiffeID, err := (identity.Subject{
+	spiffeID, err := spireidentity.ID(identity.Subject{
 		Tenant:       r.Config.OperatorTenant,
+		Service:      r.Config.Service,
 		ResourceType: identity.ResourceBM,
 		ResourceID:   machineID,
-	}).SPIFFEID(td, r.Config.Service)
+	}, td)
 	if err != nil {
 		return nil, err
 	}

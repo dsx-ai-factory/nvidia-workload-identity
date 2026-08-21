@@ -121,6 +121,8 @@ do not expose parser or verifier details.
 | `--socket` | Workload API default | Local SPIFFE Workload API socket URL |
 | `--jwks-url` | required | Absolute public JWKS URL advertised by discovery |
 | `--issuer` | required | HTTPS DSX issuer with a DNS hostname |
+| `--region` | required | Region encoded in exchanged DSX identities |
+| `--partition` | required | Partition encoded in exchanged DSX identities |
 | `--signing-keyset` | `/run/secrets/dsx-identity-keys/keyset.json` | JSON file containing private PEM keys |
 | `--active-kid` | `/run/secrets/dsx-identity-keys-active-kid/active-kid.json` | JSON file containing the active signing `kid` and algorithm |
 | `--shard-id` | required | Globally unique shard ID in the Event Bus subject space |

@@ -10,33 +10,29 @@ import (
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	"dsx-identity/internal/dsxidentity"
 	"dsx-identity/internal/identity"
 )
 
-const defaultJWKSRequestTimeout = 10 * time.Second
-
 type Verifier struct {
-	issuer        string
 	trustDomain   spiffeid.TrustDomain
 	tokenVerifier *oidc.IDTokenVerifier
 }
 
-func NewVerifier(issuer, audience string, trustDomain spiffeid.TrustDomain, keySet oidc.KeySet) (*Verifier, error) {
-	if keySet == nil {
-		return nil, fmt.Errorf("key set is required")
-	}
+func NewVerifier(ctx context.Context, issuer, audience string, trustDomain spiffeid.TrustDomain, jwksURL string, timeout time.Duration) (*Verifier, error) {
 	if audience == "" {
 		return nil, fmt.Errorf("audience is required")
 	}
-	if err := identity.ValidateIssuer(issuer); err != nil {
+	if err := dsxidentity.ValidateIssuer(issuer); err != nil {
 		return nil, err
 	}
 	if trustDomain.IsZero() {
 		return nil, fmt.Errorf("trust domain is required")
 	}
+	ctx = oidc.ClientContext(ctx, newRemoteHTTPClient(timeout))
 	// Issuer, audience, accepted algorithms, and keys are invariant across tokens.
 	// Public JWKS can verify only the supported asymmetric algorithms listed here.
-	tokenVerifier := oidc.NewVerifier(issuer, keySet, &oidc.Config{
+	tokenVerifier := oidc.NewVerifier(issuer, oidc.NewRemoteKeySet(ctx, jwksURL), &oidc.Config{
 		ClientID: audience,
 		SupportedSigningAlgs: []string{
 			oidc.RS256, oidc.RS384, oidc.RS512,
@@ -46,24 +42,14 @@ func NewVerifier(issuer, audience string, trustDomain spiffeid.TrustDomain, keyS
 		},
 	})
 	return &Verifier{
-		issuer:        issuer,
 		trustDomain:   trustDomain,
 		tokenVerifier: tokenVerifier,
 	}, nil
 }
 
-func NewRemoteVerifier(ctx context.Context, issuer, audience string, trustDomain spiffeid.TrustDomain, jwksURL string) (*Verifier, error) {
-	return newRemoteVerifier(ctx, issuer, audience, trustDomain, jwksURL, defaultJWKSRequestTimeout)
-}
-
 func newRemoteHTTPClient(timeout time.Duration) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	return &http.Client{Transport: otelhttp.NewTransport(transport), Timeout: timeout}
-}
-
-func newRemoteVerifier(ctx context.Context, issuer, audience string, trustDomain spiffeid.TrustDomain, jwksURL string, timeout time.Duration) (*Verifier, error) {
-	ctx = oidc.ClientContext(ctx, newRemoteHTTPClient(timeout))
-	return NewVerifier(issuer, audience, trustDomain, oidc.NewRemoteKeySet(ctx, jwksURL))
 }
 
 func (v *Verifier) Verify(ctx context.Context, rawToken string) (spiffeid.ID, error) {
@@ -76,7 +62,7 @@ func (v *Verifier) Verify(ctx context.Context, rawToken string) (spiffeid.ID, er
 	if err != nil {
 		return spiffeid.ID{}, fmt.Errorf("parse host subject: %w", err)
 	}
-	parsedSubject, err := identity.ParseDSXID(v.issuer, subject)
+	parsedSubject, err := dsxidentity.Parse(subject)
 	if err != nil {
 		return spiffeid.ID{}, fmt.Errorf("parse host subject: %w", err)
 	}
