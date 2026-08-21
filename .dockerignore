@@ -1,5 +1,6 @@
 # Git
 .git/
+**/.git
 .gitignore
 .gitmodules
 
@@ -50,8 +51,10 @@ Makefile
 # Deployment scripts (not needed in container)
 scripts/
 
-# Third-party submodules
-third-party/
+# DPF supplies the dpu_hw server plugin source. Other submodules are not part
+# of this build context.
+third-party/*
+!third-party/doca-platform-foundation/
 
 # The Kata UDS proxy builds through kata-uds-proxy/Dockerfile and its own ignore file
 kata-uds-proxy/

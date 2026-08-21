@@ -13,13 +13,22 @@ ARG TARGETARCH
 
 FROM builder-base AS server-builder
 COPY cmd/dsx-imds-node-attestor-server/ ./cmd/dsx-imds-node-attestor-server/
-COPY cmd/dsx-dpu-node-attestor-server/ ./cmd/dsx-dpu-node-attestor-server/
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -o /out/dsx-imds-node-attestor-server ./cmd/dsx-imds-node-attestor-server && \
+    go build -o /out/dsx-imds-node-attestor-server ./cmd/dsx-imds-node-attestor-server
+
+FROM --platform=$BUILDPLATFORM ${BUILDER_IMG} AS dpu-server-builder
+
+WORKDIR /dpf
+COPY third-party/doca-platform-foundation/ ./
+ARG TARGETOS
+ARG TARGETARCH
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -o /out/dsx-dpu-node-attestor-server ./cmd/dsx-dpu-node-attestor-server
+    go build -buildvcs=false -trimpath -o /out/dpu-hw-server \
+    github.com/nvidia/doca-platform/cmd/dpu-hw-server
 
 FROM builder-base AS agent-builder
 COPY cmd/dsx-imds-node-attestor-agent/ ./cmd/dsx-imds-node-attestor-agent/
@@ -31,8 +40,10 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 FROM ${SPIRE_SERVER_IMG} AS dsx-spire-server
 COPY --from=server-builder --chown=1000:1000 \
     /out/dsx-imds-node-attestor-server \
-    /out/dsx-dpu-node-attestor-server \
     /opt/spire/plugins/
+COPY --from=dpu-server-builder --chown=1000:1000 \
+    /out/dpu-hw-server \
+    /opt/spire/plugins/dpu-hw-server
 
 FROM ${SPIRE_AGENT_IMG} AS dsx-spire-agent
 COPY --from=agent-builder --chown=1000:1000 \
