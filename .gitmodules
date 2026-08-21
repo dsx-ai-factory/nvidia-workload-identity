@@ -1,3 +1,6 @@
 [submodule "third-party/ovn-kubernetes"]
 	path = third-party/ovn-kubernetes
 	url = https://github.com/ovn-org/ovn-kubernetes.git
+[submodule "third-party/doca-platform-foundation"]
+	path = third-party/doca-platform-foundation
+	url = https://gitlab-master.nvidia.com/doca-platform-foundation/doca-platform-foundation.git

@@ -16,7 +16,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 
-	dpuidentity "dsx-identity/internal/dpu"
 	"dsx-identity/internal/identity"
 )
 
@@ -144,7 +143,7 @@ func (r *LaunchLayerReconciler) bareMetalInstanceEntry(source *unstructured.Unst
 	if !identity.ValidResourceID(instance.Status.PrimaryDPU.MachineID) {
 		return nil, fmt.Errorf("invalid BareMetalInstance status.primary_dpu.machine_id %q", instance.Status.PrimaryDPU.MachineID)
 	}
-	serial, err := dpuidentity.NormalizeSerial(instance.Status.PrimaryDPU.SerialNumber)
+	serial, err := normalizeDPUSerial(instance.Status.PrimaryDPU.SerialNumber)
 	if err != nil {
 		return nil, fmt.Errorf("BareMetalInstance status.primary_dpu.serial_number: %w", err)
 	}
@@ -165,7 +164,7 @@ func (r *LaunchLayerReconciler) bareMetalInstanceEntry(source *unstructured.Unst
 		return nil, err
 	}
 	// The BM identity is served by its primary DPU's dpu_hw-attested agent.
-	parentID, err := spiffeid.FromSegments(td, "spire", "agent", dpuidentity.PluginName, serial)
+	parentID, err := spiffeid.FromSegments(td, "spire", "agent", dpuPluginName, serial)
 	if err != nil {
 		return nil, fmt.Errorf("DPU parent ID: %w", err)
 	}

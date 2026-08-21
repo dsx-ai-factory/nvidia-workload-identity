@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	spirev1alpha1 "github.com/spiffe/spire-controller-manager/api/v1alpha1"
@@ -14,11 +15,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 
-	dpuidentity "dsx-identity/internal/dpu"
 	"dsx-identity/internal/identity"
 )
 
-const dpuMachineIDLabel = "carbide.nvidia.com/dpu-machine-id"
+const (
+	dpuMachineIDLabel = "carbide.nvidia.com/dpu-machine-id"
+	dpuPluginName     = "dpu_hw"
+	maxDPUSerialLen   = 64
+)
 
 // DPUGVK identifies the externally owned hardware inventory source.
 var DPUGVK = schema.GroupVersionKind{
@@ -89,16 +93,33 @@ func (r *DPUReconciler) desiredEntry(ctx context.Context, dpu *unstructured.Unst
 	if !found {
 		return nil, fmt.Errorf("DPU spec.serialNumber is required")
 	}
-	serial, err := dpuidentity.NormalizeSerial(rawSerial)
+	serial, err := normalizeDPUSerial(rawSerial)
 	if err != nil {
 		return nil, fmt.Errorf("DPU spec.serialNumber: %w", err)
 	}
 	// The paired DPU agent is attested under dpu_hw with this hardware serial.
-	parentID, err := spiffeid.FromSegments(td, "spire", "agent", dpuidentity.PluginName, serial)
+	parentID, err := spiffeid.FromSegments(td, "spire", "agent", dpuPluginName, serial)
 	if err != nil {
 		return nil, fmt.Errorf("DPU parent ID: %w", err)
 	}
 	return newEntry(dpu, spiffeID, parentID, "dsx-imds", r.Config.ClassName, slices.Clone(r.Config.DPUMetadataSelectors))
+}
+
+// normalizeDPUSerial matches the DPF dpu_hw NodeAttestor identity contract.
+func normalizeDPUSerial(raw string) (string, error) {
+	serial := strings.ToLower(strings.TrimSpace(raw))
+	if serial == "" {
+		return "", fmt.Errorf("serial is empty after trimming")
+	}
+	if len(serial) > maxDPUSerialLen {
+		return "", fmt.Errorf("serial length %d exceeds maximum %d", len(serial), maxDPUSerialLen)
+	}
+	for _, r := range serial {
+		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || strings.ContainsRune("-._~", r)) {
+			return "", fmt.Errorf("serial contains invalid character %q (allowed: RFC 3986 unreserved)", r)
+		}
+	}
+	return serial, nil
 }
 
 func (r *DPUReconciler) hasTenantBareMetalInstance(ctx context.Context, dpuMachineID string) (bool, error) {

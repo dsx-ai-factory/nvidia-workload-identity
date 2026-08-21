@@ -34,7 +34,7 @@ This repository is primarily a Go service and Kubernetes Helm chart repository. 
 - `cmd/dsx-token-fetcher`: Pod sidecar that fetches SPIRE JWT-SVIDs from the SPIRE Workload API, exchanges them for DSX JWTs, and writes tokens to a configured file path.
 - `cmd/metadata-service`: tokenless metadata service for host and VM identity flows, serving `/latest/meta-data/identity` and `/2009-04-04/meta-data/identity`.
 - `cmd/dsx-imds-node-attestor-agent` and `cmd/dsx-imds-node-attestor-server`: SPIRE NodeAttestor plugins that bootstrap host agents using DSX JWTs obtained through IMDS.
-- `cmd/dsx-dpu-node-attestor-server` and `internal/dpu`: SPIRE NodeAttestor plugin for DPU node attestation.
+- `third-party/doca-platform-foundation/cmd/dpu-hw-server`: SPIRE NodeAttestor plugin for DPU node attestation.
 - `cmd/dsx-identity-controller` and `internal/identitycontroller`: Kubernetes controller that derives SPIRE `ClusterStaticEntry` resources from DPU and LaunchLayer source resources.
 - `cmd/dsx-identity-keys-proxy-csi`: CSI node plugin exposing a local socket path used by VM metadata sidecars to reach DSX Identity Keys.
 - `charts/dsx-identity`: Helm chart for the management-cluster identity shard and DPF DPUService registration.
