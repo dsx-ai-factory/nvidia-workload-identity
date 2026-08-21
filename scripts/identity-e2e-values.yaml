@@ -34,7 +34,7 @@ spire:
           plugin_data:
             jwks_url: http://dsx-identity-keys.dsx-identity.svc.cluster.local:8080/.well-known/jwks.json
         dpu_hw:
-          plugin_cmd: /opt/spire/plugins/dpu-hw-server
+          plugin_cmd: /opt/spire/plugins/dsx-dpu-node-attestor-server
           plugin_checksum: ""
           plugin_data: {}
     controllerManager:
