@@ -4,6 +4,8 @@
 global:
   dsx:
     jwtIssuer: "https://ds9.dsx.nvid.id"
+    region: ds9
+    partition: nvid.id
   spire:
     trustDomain: "k2.sjc-1.nvidia.com"
     clusterName: "k2"

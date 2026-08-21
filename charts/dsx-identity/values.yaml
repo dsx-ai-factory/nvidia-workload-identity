@@ -4,6 +4,9 @@ global:
   dsx:
     # HTTPS issuer placed in exchanged DSX JWTs and accepted for host attestation.
     jwtIssuer: ""
+    # Deployment coordinates encoded in exchanged DSX identity trust domains.
+    region: ""
+    partition: ""
     # Default service name for chart-owned and controller-managed identities.
     defaultServiceName: dsx
   # Tenant for operator DPUs, Kubernetes Pods, and bare-metal worker hosts.

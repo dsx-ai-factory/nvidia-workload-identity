@@ -88,6 +88,8 @@ spec:
             - --socket=unix:///var/run/secrets/spire.io/spire-agent.sock
             - --jwks-url={{ required "identityKeys.jwksURL is required" .Values.identityKeys.jwksURL }}
             - --issuer={{ $issuer }}
+            - --region={{ required "global.dsx.region is required" .Values.global.dsx.region }}
+            - --partition={{ required "global.dsx.partition is required" .Values.global.dsx.partition }}
             - --signing-keyset=/run/secrets/dsx-identity-keys/keyset.json
             - --active-kid=/run/secrets/dsx-identity-keys-active-kid/active-kid.json
             - --shard-id={{ required "identityKeys.shardID is required" .Values.identityKeys.shardID }}

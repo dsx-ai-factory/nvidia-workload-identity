@@ -170,7 +170,7 @@ pod_subject() {
     local pod="$2"
     local namespace="${3:-${FIXTURE_NAMESPACE}}"
     local tenant="${4:-}"
-    local node uid role
+    local node uid role service
     [[ -n "${tenant}" ]] || tenant="${OPERATOR_TENANT}"
     node=$(kubectl get pod "${pod}" --namespace "${namespace}" \
         --context "${context}" -o jsonpath='{.spec.nodeName}')
@@ -178,7 +178,9 @@ pod_subject() {
         --context "${context}" -o jsonpath='{.metadata.uid}')
     role=$(kubectl get pod "${pod}" --namespace "${namespace}" \
         --context "${context}" -o jsonpath='{.metadata.labels.spiffe\.nvidia\.com/role}')
-    printf 'spiffe://%s.ds9.dsx.nvid.id/bm/%s/pod/%s' "${tenant}" "${node}" "${uid}"
+    service=$(kubectl get pod "${pod}" --namespace "${namespace}" \
+        --context "${context}" -o jsonpath='{.metadata.labels.spiffe\.nvidia\.com/service}')
+    printf 'spiffe://%s.ds9.%s.nvid.id/bm/%s/pod/%s' "${tenant}" "${service}" "${node}" "${uid}"
     [[ -z "${role}" ]] || printf '/role/%s' "${role}"
 }
 

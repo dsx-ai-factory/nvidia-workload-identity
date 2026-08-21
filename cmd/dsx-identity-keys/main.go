@@ -28,7 +28,8 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
-	"dsx-identity/internal/identity"
+	"dsx-identity/internal/dsxidentity"
+	"dsx-identity/internal/spireidentity"
 	"dsx-identity/internal/telemetry"
 )
 
@@ -63,10 +64,15 @@ type identityKeysServer struct {
 	jwtSource *workloadapi.JWTSource
 	jwksURL   string
 	issuer    string
+	region    string
+	partition string
 }
 
-func newIdentityKeysServer(ctx context.Context, issuer string, signer *tokenSigner, registry publicKeyRegistry, socketPath, jwksURL string) (*identityKeysServer, error) {
-	if err := identity.ValidateIssuer(issuer); err != nil {
+func newIdentityKeysServer(ctx context.Context, issuer, region, partition string, signer *tokenSigner, registry publicKeyRegistry, socketPath, jwksURL string) (*identityKeysServer, error) {
+	if err := dsxidentity.ValidateIssuer(issuer); err != nil {
+		return nil, err
+	}
+	if err := dsxidentity.ValidateDomain(region, partition); err != nil {
 		return nil, err
 	}
 	clientOptions := []workloadapi.ClientOption{
@@ -79,7 +85,10 @@ func newIdentityKeysServer(ctx context.Context, issuer string, signer *tokenSign
 	if err != nil {
 		return nil, fmt.Errorf("create JWT source: %w", err)
 	}
-	return &identityKeysServer{signer: signer, registry: registry, jwtSource: jwts, jwksURL: jwksURL, issuer: issuer}, nil
+	return &identityKeysServer{
+		signer: signer, registry: registry, jwtSource: jwts, jwksURL: jwksURL,
+		issuer: issuer, region: region, partition: partition,
+	}, nil
 }
 
 func (s *identityKeysServer) Close() error {
@@ -155,7 +164,7 @@ func (s *identityKeysServer) handleTokenExchange(w http.ResponseWriter, r *http.
 		writeTokenError(w, http.StatusUnauthorized, "invalid_grant", "subject_token validation failed")
 		return
 	}
-	newID, err := identity.ToDSXSPIFFEID(s.issuer, validatedSVID.ID)
+	newID, err := exchangeSubject(s.region, s.partition, validatedSVID.ID)
 	if err != nil {
 		slog.WarnContext(r.Context(), "Rejected token exchange", "reason", "unsupported_subject", "error", err)
 		writeTokenError(w, http.StatusBadRequest, "invalid_request", "subject_token subject is not supported")
@@ -185,6 +194,15 @@ func (s *identityKeysServer) handleTokenExchange(w http.ResponseWriter, r *http.
 	if _, err := w.Write(responseBody); err != nil {
 		slog.ErrorContext(r.Context(), "Failed to write response", "error", err)
 	}
+}
+
+func exchangeSubject(region, partition string, id spiffeid.ID) (spiffeid.ID, error) {
+	local, err := spireidentity.Parse(id)
+	if err != nil {
+		return spiffeid.ID{}, err
+	}
+
+	return dsxidentity.ID(local, region, partition)
 }
 
 func (s *identityKeysServer) handleJWKS(w http.ResponseWriter, _ *http.Request) {
@@ -280,6 +298,8 @@ func run() (runErr error) {
 		socketPath      = flag.String("socket", "", "SPIFFE Workload API socket path")
 		jwksURL         = flag.String("jwks-url", "", "public JWKS URL advertised through discovery")
 		issuer          = flag.String("issuer", "", "HTTPS issuer for exchanged DSX JWTs")
+		region          = flag.String("region", "", "region encoded in exchanged DSX identities")
+		partition       = flag.String("partition", "", "partition encoded in exchanged DSX identities")
 		signingKeyset   = flag.String("signing-keyset", "/run/secrets/dsx-identity-keys/keyset.json", "private signing keyset file")
 		activeKID       = flag.String("active-kid", "/run/secrets/dsx-identity-keys-active-kid/active-kid.json", "JSON file containing the active signing kid and algorithm")
 		shardID         = flag.String("shard-id", "", "stable DSX Identity Keys shard identifier")
@@ -296,6 +316,9 @@ func run() (runErr error) {
 	flag.Parse()
 	if *issuer == "" {
 		return fmt.Errorf("issuer is required")
+	}
+	if err := dsxidentity.ValidateDomain(*region, *partition); err != nil {
+		return err
 	}
 
 	sdk, err := telemetry.Setup(context.Background(), "dsx-identity-keys", os.Stdout, logLevel)
@@ -337,7 +360,7 @@ func run() (runErr error) {
 	registryWithSync := &synchronizedKeyRegistry{keyRegistry: registry, natsKeySynchronizer: synchronizer}
 	defer registryWithSync.Close()
 
-	server, err := newIdentityKeysServer(ctx, *issuer, signer, registryWithSync, *socketPath, *jwksURL)
+	server, err := newIdentityKeysServer(ctx, *issuer, *region, *partition, signer, registryWithSync, *socketPath, *jwksURL)
 	if err != nil {
 		return fmt.Errorf("create DSX Identity Keys server: %w", err)
 	}
