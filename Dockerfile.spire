@@ -43,7 +43,7 @@ COPY --from=server-builder --chown=1000:1000 \
     /opt/spire/plugins/
 COPY --from=dpu-server-builder --chown=1000:1000 \
     /out/dpu-hw-server \
-    /opt/spire/plugins/dpu-hw-server
+    /opt/spire/plugins/dsx-dpu-node-attestor-server
 
 FROM ${SPIRE_AGENT_IMG} AS dsx-spire-agent
 COPY --from=agent-builder --chown=1000:1000 \
