@@ -145,8 +145,11 @@ identityKeys:
   publicKeyTTL: 10m
   # Globally unique across every DSX Identity Keys instance sharing this NATS KV bucket.
   shardID: ""
-  # External secret automation owns both Secrets. This chart only mounts them.
+  # Existing Opaque Secret. keyset.json must contain
+  # {"keys":["<PEM-encoded asymmetric private key>", ...]}.
   signingKeysetSecret: dsx-identity-keys-signing-keyset
+  # Existing Opaque Secret. active-kid.json must contain
+  # {"active_kid":"<RFC 7638 public JWK thumbprint>","alg":"<JOSE algorithm>"}.
   activeKIDSecret: dsx-identity-keys-active-kid
   nats:
     serverURL: ""
@@ -156,7 +159,10 @@ identityKeys:
     auth:
       # Supported modes: none, oauth2.
       mode: none
+      # Existing Opaque Secret. The selected data key must contain
+      # {"client_id":"<non-empty>","client_secret":"<non-empty>"}.
       credentialsSecret: ""
+      # Secret data key mounted as credentials.json.
       credentialsKey: credentials.json
       issuerURL: ""
       scopes: [nats]
