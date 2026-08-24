@@ -172,6 +172,144 @@ mounting the Workload API or DSX Identity Keys Proxy sockets.
 
 ## Deploy
 
+### Secrets
+
+Create referenced Secrets in the release namespace before installing the chart.
+Keep secret values out of Helm values and source control.
+Secrets may be managed by any provider, provided they use the data keys and
+decoded contents below.
+
+| Value | Secret data key | Decoded contents |
+|---|---|---|
+| `identityKeys.signingKeysetSecret` | `keyset.json` | `{"keys":["<PEM-encoded private key>", ...]}` |
+| `identityKeys.activeKIDSecret` | `active-kid.json` | `{"active_kid":"<RFC 7638 public JWK thumbprint>","alg":"<JOSE algorithm>"}` |
+| `identityKeys.nats.auth.credentialsSecret` | `identityKeys.nats.auth.credentialsKey` | `{"client_id":"<non-empty>","client_secret":"<non-empty>"}` |
+
+Signing keys may be SEC 1 EC, PKCS#1 RSA, or PKCS#8 asymmetric private keys.
+Every key must support the algorithm selected by `active-kid.json`, and
+`active_kid` must identify one key in `keyset.json`. Supported algorithms are
+`EdDSA`, `ES256`, `ES384`, `ES512`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`,
+and `PS512`.
+
+Identity Keys reads `keyset.json` and `active-kid.json` only at process start.
+It rereads OAuth2 credentials when its cached access token expires.
+
+#### Vault Secrets Operator example
+
+The following example exports every version of an
+[exportable Vault Transit signing key](https://developer.hashicorp.com/vault/api-docs/secret/transit#export-key)
+and transforms Vault values into the three Kubernetes Secret payloads:
+
+```yaml
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultDynamicSecret
+metadata:
+  name: dsx-identity-keys-signing-keyset
+  namespace: dsx-identity
+spec:
+  vaultAuthRef: <vault-auth-name>
+  mount: transit
+  path: export/signing-key/<transit-key>
+  requestHTTPMethod: GET
+  refreshAfter: 1m
+  rolloutRestartTargets:
+    - kind: Deployment
+      name: dsx-identity-keys
+  destination:
+    name: dsx-identity-keys-signing-keyset
+    create: true
+    overwrite: true
+    type: Opaque
+    transformation:
+      excludeRaw: true
+      excludes:
+        - .*
+      templates:
+        keyset.json:
+          text: '{{ dict "keys" (values (get .Secrets "keys")) | mustToJson }}'
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultStaticSecret
+metadata:
+  name: dsx-identity-keys-active-kid
+  namespace: dsx-identity
+spec:
+  type: kv-v2
+  vaultAuthRef: <vault-auth-name>
+  mount: <kv-mount>
+  path: <active-kid-path>
+  refreshAfter: 1m
+  rolloutRestartTargets:
+    - kind: Deployment
+      name: dsx-identity-keys
+  destination:
+    name: dsx-identity-keys-active-kid
+    create: true
+    overwrite: true
+    type: Opaque
+    transformation:
+      excludeRaw: true
+      excludes:
+        - .*
+      templates:
+        active-kid.json:
+          text: '{{ dict "active_kid" (get .Secrets "active_kid") "alg" (get .Secrets "alg") | mustToJson }}'
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultStaticSecret
+metadata:
+  name: dsx-identity-keys-nats-oauth
+  namespace: dsx-identity
+spec:
+  type: kv-v1
+  vaultAuthRef: <vault-auth-name>
+  mount: <oauth-client-mount>
+  path: <oauth-client-path>
+  refreshAfter: 1m
+  destination:
+    name: dsx-identity-keys-nats-oauth
+    create: true
+    overwrite: true
+    type: Opaque
+    transformation:
+      excludeRaw: true
+      excludes:
+        - .*
+      templates:
+        credentials.json:
+          text: '{{ dict "client_id" (get .Secrets "client_id") "client_secret" (get .Secrets "secret") | mustToJson }}'
+```
+
+Set the chart Secret references to the three `destination.name` values. Adapt
+Vault mounts, paths, authentication, and source field names to the deployment.
+
+#### Rotation
+
+Signing-key rotation keeps old and new public keys available while issued JWTs
+remain valid:
+
+1. Add the new private key to the exported keyset without changing the active
+   key.
+2. Wait for Secret synchronization, a completed rolling restart, and the new
+   `kid` in `/.well-known/jwks.json`.
+3. Change `active_kid` and `alg`, then wait for another completed rolling
+   restart.
+4. Wait for JWTs signed by the old key to expire and downstream JWKS caches to
+   refresh.
+5. Remove the old private key from the exported keyset, then complete the final
+   rolling restart.
+
+External secret controllers without restart targeting must trigger a rolling
+restart of `Deployment/dsx-identity-keys` after signing keyset or active-key
+changes.
+
+OAuth2 credential rotation does not require a restart. Create the replacement
+credential at the issuer, update Vault, wait for the mounted Secret to change and
+for Identity Keys to obtain a token with the replacement, then revoke the old
+credential.
+
+### Install
+
 ```bash
 helm upgrade --install dsx-identity <oci-chart-reference> \
   --version <release-version> \
