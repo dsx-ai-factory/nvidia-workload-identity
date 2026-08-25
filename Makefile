@@ -38,6 +38,11 @@ test-shell:
 
 test-chart: chart-dependencies
 	@$(MISE_EXEC) helm lint charts/dsx-identity $(IDENTITY_E2E_VALUES) -f scripts/k1-values.yaml
+	@$(MISE_EXEC) helm lint charts/dsx-identity $(IDENTITY_E2E_VALUES) -f scripts/k1-values.yaml \
+		--set identityKeys.nats.enabled=false \
+		--set identityKeys.shardID= \
+		--set identityKeys.nats.serverURL= \
+		--set identityKeys.nats.auth.mode=
 	@$(MISE_EXEC) helm lint charts/dsx-imds --set metadataService.identityKeysURL=http://identity-keys.example/v1/exchange
 	@$(MISE_EXEC) helm lint charts/dsx-spiffe-csi
 	@$(MISE_EXEC) helm lint charts/nats-2.14.2.tgz -f scripts/k1/nats/values.yaml

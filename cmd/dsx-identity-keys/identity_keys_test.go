@@ -359,7 +359,7 @@ func TestJWKSAndDiscoveryAreConfiguredNotHostScoped(t *testing.T) {
 	registerTestKey(t, registry, testJWK(t, "one", true))
 	registerTestKey(t, registry, testJWKForAlgorithm(t, "two", jose.ES384, true))
 	server := &identityKeysServer{
-		registry: readyKeyRegistry{keyRegistry: registry},
+		registry: registry,
 		jwksURL:  "https://exchange.example/.well-known/jwks.json",
 		issuer:   testIssuer,
 	}
@@ -410,11 +410,17 @@ func TestJWKSAndDiscoveryAreConfiguredNotHostScoped(t *testing.T) {
 	}
 }
 
-type readyKeyRegistry struct {
-	*keyRegistry
-}
+func TestLocalRegistryIsReadyWithoutNATS(t *testing.T) {
+	t.Parallel()
 
-func (readyKeyRegistry) isReady() bool { return true }
+	registry := newTestKeyRegistry(t, []jose.JSONWebKey{testJWK(t, "local", true)})
+	server := &identityKeysServer{registry: registry}
+	response := httptest.NewRecorder()
+	server.handleReady(response, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("ready status = %d, want %d", response.Code, http.StatusOK)
+	}
+}
 
 func TestTokenExchangeRequestContract(t *testing.T) {
 	t.Parallel()

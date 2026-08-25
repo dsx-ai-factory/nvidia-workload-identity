@@ -152,6 +152,7 @@ identityKeys:
   # {"active_kid":"<RFC 7638 public JWK thumbprint>","alg":"<JOSE algorithm>"}.
   activeKIDSecret: dsx-identity-keys-active-kid
   nats:
+    enabled: true
     serverURL: ""
     kv:
       bucket: DSX_IDENTITY_KEYS

@@ -316,9 +316,9 @@ flowchart LR
 
   Local -->|"local SPIRE JWT-SVID"| IdentityKeys
   IdentityKeys -->|"DSX JWT"| Consumers
-  IdentityKeys <-->|"NATS KV updates and watch replay"| Bus["External DSX Event Bus"]
+  IdentityKeys <-->|"Optional NATS KV updates and watch replay"| Bus["External DSX Event Bus"]
   Bus <-->|"NATS KV updates and watch replay"| Peers["Peer shard DSX Identity Keys instances"]
-  RelyingParty["External relying party"] -->|"aggregate JWKS"| IdentityKeys
+  RelyingParty["External relying party"] -->|"public JWKS"| IdentityKeys
 ```
 
 A SPIRE JWT-SVID is a cluster-local credential obtained from the local SPIRE
@@ -327,9 +327,10 @@ SPIRE JWT-SVIDs never establish trust between shards.
 
 Install the identity chart once per shard. Each regular management cluster that
 owns DPU or LaunchLayer source CRs runs the Identity Controller for its shard.
-Every DSX Identity Keys instance validates only local SPIRE JWT-SVIDs through its node-local
-Workload API and serves the aggregate public keys received through the Event
-Bus.
+Every DSX Identity Keys instance validates only local SPIRE JWT-SVIDs through
+its node-local Workload API. It serves aggregate public keys received through
+the Event Bus when NATS is enabled, or only local public keys when NATS is
+disabled.
 
 The Event Bus, OAuth2 provider, Kyverno runtime, and relying parties are
 external to the identity chart.
@@ -439,8 +440,9 @@ Controller owns SPIFFE IDs, selectors, hints, and class names.
 ## DSX Identity Keys and Event Bus
 
 [DSX Identity Keys](cmd/dsx-identity-keys/README.md) validates
-local SPIRE JWT-SVIDs, issues DSX JWTs, publishes public signing keys to the
-Event Bus, and serves aggregate JWKS. The external Gateway terminates TLS and
+local SPIRE JWT-SVIDs and issues DSX JWTs. By default it publishes public
+signing keys to the Event Bus and serves aggregate JWKS. With NATS disabled it
+serves only local public signing keys. The external Gateway terminates TLS and
 applies source-aware request quotas. Clients configure the Gateway HTTPS
 endpoint. Local fixtures configure their HTTP endpoints directly.
 

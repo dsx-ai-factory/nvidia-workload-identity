@@ -4,16 +4,20 @@
 {{- fail "global.dsx.jwtIssuer must be an HTTPS URL containing only a DNS hostname" -}}
 {{- end -}}
 {{- $imageTag := .Values.identityKeys.image.tag | default .Values.global.imageTag | default .Chart.Version -}}
+{{- $natsEnabled := .Values.identityKeys.nats.enabled -}}
 {{- $natsAuth := .Values.identityKeys.nats.auth -}}
-{{- $natsAuthMode := required "identityKeys.nats.auth.mode is required" $natsAuth.mode -}}
+{{- $natsAuthMode := "" -}}
+{{- $natsCredentialsSecret := "" -}}
+{{- $natsCredentialsKey := "" -}}
+{{- if $natsEnabled -}}
+{{- $natsAuthMode = required "identityKeys.nats.auth.mode is required" $natsAuth.mode -}}
 {{- if not (has $natsAuthMode (list "none" "oauth2")) -}}
 {{- fail "identityKeys.nats.auth.mode must be none or oauth2" -}}
 {{- end -}}
-{{- $natsCredentialsSecret := "" -}}
-{{- $natsCredentialsKey := "" -}}
 {{- if eq $natsAuthMode "oauth2" -}}
 {{- $natsCredentialsSecret = required "identityKeys.nats.auth.credentialsSecret is required for oauth2" $natsAuth.credentialsSecret -}}
 {{- $natsCredentialsKey = required "identityKeys.nats.auth.credentialsKey is required for oauth2" $natsAuth.credentialsKey -}}
+{{- end -}}
 {{- end -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -92,6 +96,7 @@ spec:
             - --partition={{ required "global.dsx.partition is required" .Values.global.dsx.partition }}
             - --signing-keyset=/run/secrets/dsx-identity-keys/keyset.json
             - --active-kid=/run/secrets/dsx-identity-keys-active-kid/active-kid.json
+            {{- if $natsEnabled }}
             - --shard-id={{ required "identityKeys.shardID is required" .Values.identityKeys.shardID }}
             - --nats-server={{ required "identityKeys.nats.serverURL is required" .Values.identityKeys.nats.serverURL }}
             - --nats-client-name=dsx-identity-keys-$(POD_NAME)
@@ -103,6 +108,9 @@ spec:
             - --nats-credentials-file=/run/secrets/dsx-identity-keys-nats/credentials.json
             - --nats-oauth-issuer-url={{ required "identityKeys.nats.auth.issuerURL is required" $natsAuth.issuerURL }}
             - --nats-oauth-scopes={{ join "," $natsAuth.scopes }}
+            {{- end }}
+            {{- else }}
+            - --disable-nats
             {{- end }}
             - --log-level={{ .Values.observability.logLevel }}
           securityContext:
@@ -122,7 +130,7 @@ spec:
             - name: active-kid
               mountPath: /run/secrets/dsx-identity-keys-active-kid
               readOnly: true
-            {{- if eq $natsAuthMode "oauth2" }}
+            {{- if and $natsEnabled (eq $natsAuthMode "oauth2") }}
             - name: nats-auth
               mountPath: /run/secrets/dsx-identity-keys-nats
               readOnly: true
@@ -172,7 +180,7 @@ spec:
             items:
               - key: active-kid.json
                 path: active-kid.json
-        {{- if eq $natsAuthMode "oauth2" }}
+        {{- if and $natsEnabled (eq $natsAuthMode "oauth2") }}
         - name: nats-auth
           secret:
             secretName: {{ $natsCredentialsSecret }}

@@ -303,6 +303,7 @@ func run() (runErr error) {
 		signingKeyset   = flag.String("signing-keyset", "/run/secrets/dsx-identity-keys/keyset.json", "private signing keyset file")
 		activeKID       = flag.String("active-kid", "/run/secrets/dsx-identity-keys-active-kid/active-kid.json", "JSON file containing the active signing kid and algorithm")
 		shardID         = flag.String("shard-id", "", "stable DSX Identity Keys shard identifier")
+		disableNATS     = flag.Bool("disable-nats", false, "disable NATS public key synchronization")
 		natsServer      = flag.String("nats-server", "", "NATS server URL")
 		natsClientName  = flag.String("nats-client-name", "", "NATS client name (defaults to dsx-identity-keys-<shard-id>)")
 		publicKeyTTL    = flag.Duration("public-key-ttl", 10*time.Minute, "public key NATS KV entry TTL")
@@ -329,38 +330,43 @@ func run() (runErr error) {
 		runErr = errors.Join(runErr, sdk.Shutdown(context.Background()))
 	}()
 
-	if *natsClientName == "" {
-		*natsClientName = "dsx-identity-keys-" + *shardID
-	}
-
 	signer, publicKeys, err := loadSigningKeys(*signingKeyset, *activeKID)
 	if err != nil {
 		return fmt.Errorf("load signing keyset: %w", err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	var scopes []string
-	if *natsScopes != "" {
-		scopes = strings.Split(*natsScopes, ",")
-	}
-	natsAuth := natsAuthConfig{
-		mode:            *natsAuthMode,
-		credentialsFile: *natsCredentials,
-		oauthIssuerURL:  *natsIssuerURL,
-		oauthScopes:     scopes,
-	}
 	registry := newKeyRegistry(publicKeys)
-	synchronizer, err := newNATSKeySynchronizer(ctx, *natsServer, *natsClientName, *shardID, publicKeys, *publicKeyTTL, natsKVConfig{
-		bucket: *natsKVBucket, replicas: *natsKVReplicas,
-	}, registry, natsAuth)
-	if err != nil {
-		registry.Close()
-		return fmt.Errorf("start public key synchronization: %w", err)
+	var publicRegistry publicKeyRegistry = registry
+	if *disableNATS {
+		defer registry.Close()
+	} else {
+		if *natsClientName == "" {
+			*natsClientName = "dsx-identity-keys-" + *shardID
+		}
+		var scopes []string
+		if *natsScopes != "" {
+			scopes = strings.Split(*natsScopes, ",")
+		}
+		natsAuth := natsAuthConfig{
+			mode:            *natsAuthMode,
+			credentialsFile: *natsCredentials,
+			oauthIssuerURL:  *natsIssuerURL,
+			oauthScopes:     scopes,
+		}
+		synchronizer, err := newNATSKeySynchronizer(ctx, *natsServer, *natsClientName, *shardID, publicKeys, *publicKeyTTL, natsKVConfig{
+			bucket: *natsKVBucket, replicas: *natsKVReplicas,
+		}, registry, natsAuth)
+		if err != nil {
+			registry.Close()
+			return fmt.Errorf("start public key synchronization: %w", err)
+		}
+		registryWithSync := &synchronizedKeyRegistry{keyRegistry: registry, natsKeySynchronizer: synchronizer}
+		defer registryWithSync.Close()
+		publicRegistry = registryWithSync
 	}
-	registryWithSync := &synchronizedKeyRegistry{keyRegistry: registry, natsKeySynchronizer: synchronizer}
-	defer registryWithSync.Close()
 
-	server, err := newIdentityKeysServer(ctx, *issuer, *region, *partition, signer, registryWithSync, *socketPath, *jwksURL)
+	server, err := newIdentityKeysServer(ctx, *issuer, *region, *partition, signer, publicRegistry, *socketPath, *jwksURL)
 	if err != nil {
 		return fmt.Errorf("create DSX Identity Keys server: %w", err)
 	}
@@ -377,7 +383,13 @@ func run() (runErr error) {
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	slog.Info("Starting DSX Identity Keys", "listen_addr", *listenAddr, "issuer", *issuer, "shard_id", *shardID, "active_kid", signer.keyID)
+	slog.Info("Starting DSX Identity Keys",
+		"listen_addr", *listenAddr,
+		"issuer", *issuer,
+		"shard_id", *shardID,
+		"active_kid", signer.keyID,
+		"nats_enabled", !*disableNATS,
+	)
 	if err := serveHTTP(ctx, httpServer); err != nil {
 		return fmt.Errorf("serve HTTP: %w", err)
 	}

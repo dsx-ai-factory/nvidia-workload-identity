@@ -9,7 +9,7 @@ the Identity Controller, Kata support, and DPF child-chart resources.
 |---|---|---|
 | All installs | Kubernetes 1.21+, Helm 3, matching `spire-crds` chart | Helm deployment and SPIRE APIs |
 | External agent (default) | SPIRE Workload API socket on each selected node | SPIFFE CSI mounts |
-| Identity Keys (default) | NATS JetStream and signing-key Secrets. OAuth2 issuer and credentials when configured | Key exchange and token signing |
+| Identity Keys (default) | Signing-key Secrets. NATS JetStream, OAuth2 issuer, and credentials when NATS is enabled and configured | Key exchange and token signing |
 | Pod tokens or VM support | Kyverno. KubeVirt for VM support | Sidecar injection and VM identity |
 | Service monitors (default) | Prometheus Operator CRDs | `ServiceMonitor` and `PodMonitor` |
 | DPU services | DPF `DPUService` CRD and controller | IMDS and optional CSI child charts |
@@ -55,6 +55,8 @@ identityKeys:
   signingKeysetSecret: dsx-identity-keys-signing-keyset
   activeKIDSecret: dsx-identity-keys-active-kid
   nats:
+    # Disable to serve only this shard's public signing keys.
+    enabled: true
     # Event Bus endpoint used to exchange public keys between shards.
     serverURL: tls://event-bus.example.com:4222
     kv:
