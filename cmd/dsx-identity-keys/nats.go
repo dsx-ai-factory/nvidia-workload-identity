@@ -64,6 +64,10 @@ type synchronizedKeyRegistry struct {
 	*natsKeySynchronizer
 }
 
+func (r *synchronizedKeyRegistry) isReady() bool {
+	return r.natsKeySynchronizer.isReady()
+}
+
 func (r *synchronizedKeyRegistry) Close() {
 	r.natsKeySynchronizer.Close()
 	r.keyRegistry.Close()

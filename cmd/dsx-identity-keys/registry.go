@@ -33,6 +33,10 @@ func (r *keyRegistry) Close() {
 	r.remote.Stop()
 }
 
+func (r *keyRegistry) isReady() bool {
+	return true
+}
+
 func (r *keyRegistry) replaceRemote(keyID string, key jose.JSONWebKey, expiresAt time.Time) error {
 	if key.KeyID != keyID {
 		return fmt.Errorf("KV key kid %q does not match JWK kid %q", keyID, key.KeyID)

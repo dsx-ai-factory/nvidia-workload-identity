@@ -10,14 +10,19 @@ registration determines the tenant in the local subject, and DSX Identity Keys
 preserves it while validating the common identity grammar. It obtains local
 JWT verification bundles through the node-local SPIFFE Workload API.
 
-Each DSX Identity Keys instance writes only its local public keys to one shared
-NATS KV bucket and watches the complete bucket. It retains one aggregate keyed
-by globally unique `kid`, and its JWKS endpoint serves every valid local and
-remote public key. Startup requires the Event Bus connection, KV bucket, and
-initial history. Later connection failures leave DSX Identity Keys live but not
-ready while it reconnects. Instances using the same bucket converge on the same
-aggregate, so relying parties can use the JWKS from any reachable DSX Identity
-Keys.
+By default, each DSX Identity Keys instance writes only its local public keys to
+one shared NATS KV bucket and watches the complete bucket. It retains one
+aggregate keyed by globally unique `kid`, and its JWKS endpoint serves every
+valid local and remote public key. Startup requires the Event Bus connection,
+KV bucket, and initial history. Later connection failures leave DSX Identity
+Keys live but not ready while it reconnects. Instances using the same bucket
+converge on the same aggregate, so relying parties can use the JWKS from any
+reachable DSX Identity Keys.
+
+`--disable-nats` skips the Event Bus connection and serves only the local public
+signing keys. Readiness then depends only on the local key registry. This mode
+does not distribute keys between shards, so each relying party must use the
+JWKS endpoint for the shard that issued its tokens.
 
 ## Flat key distribution
 
@@ -98,10 +103,10 @@ responses.
 | Endpoint | Purpose |
 | --- | --- |
 | `POST /v1/exchange` | Unauthenticated RFC 8693 exchange of a local SPIRE JWT-SVID |
-| `GET /.well-known/jwks.json` | Aggregate JWKS for all valid public keys |
-| `GET /.well-known/openid-configuration` | Issuer, JWKS URL, and aggregate signing algorithms |
+| `GET /.well-known/jwks.json` | Public JWKS. Aggregate with NATS enabled, local-only with NATS disabled |
+| `GET /.well-known/openid-configuration` | Issuer, JWKS URL, and advertised signing algorithms |
 | `GET /live` | Process liveness |
-| `GET /ready` | NATS connection, KV watch replay, and local-key cache readiness |
+| `GET /ready` | Public-key registry readiness. Includes NATS connection and KV replay when enabled |
 
 The exchange endpoint is intentionally unauthenticated because the submitted
 local SPIRE JWT-SVID is the credential being exchanged.
@@ -125,8 +130,9 @@ do not expose parser or verifier details.
 | `--partition` | required | Partition encoded in exchanged DSX identities |
 | `--signing-keyset` | `/run/secrets/dsx-identity-keys/keyset.json` | JSON file containing private PEM keys |
 | `--active-kid` | `/run/secrets/dsx-identity-keys-active-kid/active-kid.json` | JSON file containing the active signing `kid` and algorithm |
-| `--shard-id` | required | Globally unique shard ID in the Event Bus subject space |
-| `--nats-server` | required | NATS server URL |
+| `--shard-id` | NATS enabled | Globally unique shard ID in the Event Bus subject space |
+| `--disable-nats` | `false` | Serve local public keys without NATS synchronization |
+| `--nats-server` | NATS enabled | NATS server URL |
 | `--nats-client-name` | `dsx-identity-keys-<shard-id>` | NATS connection name |
 | `--public-key-ttl` | `10m` | NATS KV entry TTL |
 | `--nats-kv-bucket` | `DSX_IDENTITY_KEYS` | Shared NATS KV bucket |
