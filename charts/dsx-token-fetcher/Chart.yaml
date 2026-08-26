@@ -1,0 +1,10 @@
+apiVersion: v2
+name: dsx-token-fetcher
+description: DSX token-fetcher admission policy for DPU service Pods
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+# TODO: Raise this to >=1.36 when DPF Kamaji reaches Kubernetes 1.36.
+kubeVersion: ">=1.35.0-0"
+sources:
+  - https://gitlab-master.nvidia.com/ncp/vmaas/dsx-identity

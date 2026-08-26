@@ -24,6 +24,8 @@
 - Keep supplied values exact. Do not trim, normalize, case-fold, or coerce input.
 - Keep comments concise and explain only non-obvious behavior, ordering, ownership,
   security constraints, or workarounds.
+- In Helm templates and YAML, use a low bar for inline comments around non-obvious
+  templating, merge semantics, ordering, compatibility, and cross-resource behavior.
 - Keep documentation factual and current. Do not add revision narrative,
   meta-documentation, marketing language, or future design speculation.
 - Use plain punctuation. Do not use em dashes, en dashes, curly quotes, or semicolons

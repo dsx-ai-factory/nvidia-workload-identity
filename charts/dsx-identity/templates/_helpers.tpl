@@ -86,9 +86,21 @@ the Service. Injected processes do not open metrics listeners in shared Pods.
 {{- /* Native and injected processes must not start a second shared listener. */ -}}
 {{- $_ := set $environment "OTEL_METRICS_EXPORTER" "none" -}}
 {{- end -}}
+{{- /* objectType selects typed CEL output; ordinary workloads receive YAML. */ -}}
 {{- /* Stable ordering keeps rendered manifests and diffs deterministic. */ -}}
+{{- if .objectType }}
+[
+{{- range $index, $name := keys $environment | sortAlpha }}{{ if $index }},{{ end }}
+{{ $.objectType }}{
+  name: {{ $name | quote }},
+  value: {{ index $environment $name | quote }}
+}
+{{- end }}
+]
+{{- else }}
 {{- range $name := keys $environment | sortAlpha }}
 - name: {{ $name }}
   value: {{ index $environment $name | quote }}
+{{- end -}}
 {{- end -}}
 {{- end -}}

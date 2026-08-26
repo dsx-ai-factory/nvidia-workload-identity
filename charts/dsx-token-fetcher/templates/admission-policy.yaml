@@ -1,0 +1,160 @@
+{{- $apiVersion := "admissionregistration.k8s.io/v1beta1" -}}
+{{- $imageTag := .Values.tokenFetcher.image.tag | default .Chart.AppVersion -}}
+{{- /* TODO: Remove the beta fallback when DPF Kamaji reaches Kubernetes 1.36. */ -}}
+{{- if semverCompare ">=1.36-0" .Capabilities.KubeVersion.Version -}}
+{{- $apiVersion = "admissionregistration.k8s.io/v1" -}}
+{{- end }}
+apiVersion: {{ $apiVersion }}
+kind: MutatingAdmissionPolicy
+metadata:
+  name: dsx-token-fetcher
+  labels:
+    {{- include "dsx-token-fetcher.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  # Re-evaluate after other DPU-cluster admission mutators change the Pod.
+  reinvocationPolicy: IfNeeded
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+  matchConditions:
+    - name: requests-dsx-token-fetcher
+      expression: >-
+        has(object.metadata.annotations) &&
+        "spiffe.nvidia.com/inject-dsx-token-fetcher" in object.metadata.annotations &&
+        object.metadata.annotations["spiffe.nvidia.com/inject-dsx-token-fetcher"] == "true"
+    - name: does-not-already-have-token-fetcher
+      expression: >-
+        !has(object.spec.initContainers) ||
+        !object.spec.initContainers.exists(container, container.name == "dsx-token-fetcher")
+  mutations:
+    # ApplyConfiguration merges Kubernetes map-like lists without replacing
+    # volumes, mounts, or pull secrets already owned by the workload. It also
+    # adds the read-only token mount to every application container.
+    - patchType: ApplyConfiguration
+      applyConfiguration:
+        expression: >-
+          Object{
+            spec: Object.spec{
+              {{- with .Values.imagePullSecrets }}
+              imagePullSecrets: [
+                {{- range $index, $secret := . }}{{ if $index }},{{ end }}
+                Object.spec.imagePullSecrets{name: {{ $secret.name | quote }}}
+                {{- end }}
+              ],
+              {{- end }}
+              containers: object.spec.containers.map(container,
+                Object.spec.containers{
+                  name: container.name,
+                  volumeMounts: [
+                    Object.spec.containers.volumeMounts{
+                      name: "dsx-token",
+                      mountPath: "/run/secrets/nvidia.com/dsx",
+                      readOnly: true
+                    }
+                  ]
+                }
+              ),
+              volumes: [
+                Object.spec.volumes{
+                  name: "spiffe-csi",
+                  csi: Object.spec.volumes.csi{
+                    driver: {{ required "tokenFetcher.spiffeCsiDriver is required" .Values.tokenFetcher.spiffeCsiDriver | quote }},
+                    readOnly: true
+                  }
+                },
+                Object.spec.volumes{
+                  name: "dsx-token",
+                  emptyDir: Object.spec.volumes.emptyDir{}
+                }
+              ]
+            }
+          }
+    # A native sidecar is an ordered init container, so append it explicitly.
+    - patchType: JSONPatch
+      jsonPatch:
+        expression: >-
+          (!has(object.spec.initContainers)
+            ? [JSONPatch{
+                op: "add",
+                path: "/spec/initContainers",
+                value: []
+              }]
+            : []) +
+            [JSONPatch{
+              op: "add",
+              path: "/spec/initContainers/-",
+              value: Object.spec.initContainers{
+                name: "dsx-token-fetcher",
+                image: {{ printf "%s:%s" .Values.tokenFetcher.image.repository $imageTag | quote }},
+                imagePullPolicy: {{ .Values.tokenFetcher.image.pullPolicy | quote }},
+                restartPolicy: "Always",
+                command: ["/usr/local/bin/dsx-token-fetcher"],
+                args: [
+                  {{ printf "--socket=unix://%s" (required "tokenFetcher.spireSocketPath is required" .Values.tokenFetcher.spireSocketPath) | quote }},
+                  {{ printf "--audience=%s" .Values.tokenFetcher.audience | quote }},
+                  "--svid-hint=dsx-pod",
+                  {{ printf "--output=%s" .Values.tokenFetcher.outputPath | quote }},
+                  {{ printf "--identity-keys-url=%s" (required "tokenFetcher.identityKeysURL is required" .Values.tokenFetcher.identityKeysURL) | quote }},
+                  {{ printf "--log-level=%s" .Values.tokenFetcher.logLevel | quote }}
+                ],
+                {{- with .Values.tokenFetcher.env }}
+                env: [
+                  {{- $environment := . }}
+                  {{- range $index, $name := keys $environment | sortAlpha }}{{ if $index }},{{ end }}
+                  Object.spec.initContainers.env{
+                    name: {{ $name | quote }},
+                    value: {{ index $environment $name | quote }}
+                  }
+                  {{- end }}
+                ],
+                {{- end }}
+                securityContext: Object.spec.initContainers.securityContext{
+                  allowPrivilegeEscalation: false,
+                  capabilities: Object.spec.initContainers.securityContext.capabilities{
+                    drop: ["ALL"]
+                  },
+                  readOnlyRootFilesystem: true,
+                  runAsGroup: 0,
+                  runAsNonRoot: false,
+                  runAsUser: 0
+                },
+                startupProbe: Object.spec.initContainers.startupProbe{
+                  httpGet: Object.spec.initContainers.startupProbe.httpGet{
+                    path: {{ .Values.tokenFetcher.startupProbe.httpGet.path | quote }},
+                    port: {{ .Values.tokenFetcher.startupProbe.httpGet.port }}
+                  },
+                  periodSeconds: {{ .Values.tokenFetcher.startupProbe.periodSeconds }},
+                  failureThreshold: {{ .Values.tokenFetcher.startupProbe.failureThreshold }}
+                },
+                resources: Object.spec.initContainers.resources{
+                  requests: {{ .Values.tokenFetcher.resources.requests | toJson }},
+                  limits: {{ .Values.tokenFetcher.resources.limits | toJson }}
+                },
+                volumeMounts: [
+                  Object.spec.initContainers.volumeMounts{
+                    name: "spiffe-csi",
+                    mountPath: {{ dir .Values.tokenFetcher.spireSocketPath | quote }},
+                    readOnly: true
+                  },
+                  Object.spec.initContainers.volumeMounts{
+                    name: "dsx-token",
+                    mountPath: "/run/secrets/nvidia.com/dsx"
+                  }
+                ]
+              }
+            }]
+---
+apiVersion: {{ $apiVersion }}
+kind: MutatingAdmissionPolicyBinding
+metadata:
+  name: dsx-token-fetcher
+  labels:
+    {{- include "dsx-token-fetcher.labels" . | nindent 4 }}
+spec:
+  policyName: dsx-token-fetcher
+  # The Pod annotation is the opt-in boundary, so the binding is cluster-scoped.
+  matchResources: {}

@@ -3,188 +3,155 @@
 {{- end }}
 {{- if .Values.podTokenFetcher.enabled }}
 {{- $imageTag := .Values.podTokenFetcher.image.tag | default .Values.global.imageTag | default .Chart.Version -}}
-apiVersion: kyverno.io/v1
-kind: ClusterPolicy
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicy
 metadata:
   name: inject-dsx-token-fetcher
   labels:
     {{- include "dsx-identity.labels" (dict "name" "pod-token-fetcher-policy" "root" .) | nindent 4 }}
-  annotations:
-    meta.helm.sh/release-name: {{ .Release.Name | quote }}
-    meta.helm.sh/release-namespace: {{ .Release.Namespace | quote }}
-    policies.kyverno.io/title: Inject DSX Token Fetcher
-    policies.kyverno.io/category: SPIFFE
 spec:
-  background: false
-  rules:
-    - name: add-token-fetcher
-      match:
-        any:
-          - resources:
-              kinds:
-                - Pod
-              operations:
-                - CREATE
-                - UPDATE
-              annotations:
-                spiffe.nvidia.com/inject-dsx-token-fetcher: "true"
-              namespaceSelector:
-                {{- toYaml .Values.podTokenFetcher.policy.namespaceLabelSelector | nindent 16 }}
-      mutate:
-        patchStrategicMerge:
-          spec:
-            {{- with .Values.imagePullSecrets }}
-            imagePullSecrets:
-              {{- toYaml . | nindent 14 }}
-            {{- end }}
-            # Only the exchanged token is shared with application containers.
-            containers:
-              - (name): "*"
-                volumeMounts:
-                  - name: dsx-token
-                    mountPath: /run/secrets/nvidia.com/dsx
-                    readOnly: true
-            # Native sidecar: start before app containers and keep refreshing the token.
-            initContainers:
-              - name: dsx-token-fetcher
-                image: "{{ .Values.podTokenFetcher.image.repository }}:{{ $imageTag }}"
-                imagePullPolicy: {{ .Values.podTokenFetcher.image.pullPolicy }}
-                restartPolicy: Always
-                command:
-                  - /usr/local/bin/dsx-token-fetcher
-                args:
-                  - --socket=unix:///var/run/secrets/spire.io/spire-agent.sock
-                  - --audience={{ .Values.podTokenFetcher.audience }}
-                  - --svid-hint=dsx-pod
-                  - --output={{ .Values.podTokenFetcher.outputPath }}
-                  - --identity-keys-url={{ required "podTokenFetcher.identityKeysURL is required" .Values.podTokenFetcher.identityKeysURL }}
-                  - --log-level={{ .Values.observability.logLevel }}
-                # The consumer owns Pod annotations and the shared network namespace.
-                env:
-                  {{- include "dsx-identity.observabilityEnv" (dict
-                        "root" .
-                        "serviceName" "dsx-token-fetcher"
-                        "metricsExporter" "none") | nindent 18 }}
-                securityContext:
-                  allowPrivilegeEscalation: false
-                  capabilities:
-                    drop: ["ALL"]
-                  readOnlyRootFilesystem: true
-                  runAsGroup: 0
-                  runAsNonRoot: false
-                  runAsUser: 0
-                {{- with .Values.podTokenFetcher.startupProbe }}
-                startupProbe:
-                  {{- toYaml . | nindent 18 }}
+  failurePolicy: Fail
+  # Re-evaluate if an independent policy, such as Kata, changes the Pod later.
+  reinvocationPolicy: IfNeeded
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+  matchConditions:
+    - name: requests-dsx-token-fetcher
+      expression: >-
+        has(object.metadata.annotations) &&
+        "spiffe.nvidia.com/inject-dsx-token-fetcher" in object.metadata.annotations &&
+        object.metadata.annotations["spiffe.nvidia.com/inject-dsx-token-fetcher"] == "true"
+    - name: does-not-already-have-token-fetcher
+      expression: >-
+        !has(object.spec.initContainers) ||
+        !object.spec.initContainers.exists(container, container.name == "dsx-token-fetcher")
+  mutations:
+    # ApplyConfiguration merges map-like lists by their Kubernetes merge keys,
+    # preserving consumer entries. It mounts the token in every app container,
+    # while Kata may already own the spiffe-csi volume.
+    - patchType: ApplyConfiguration
+      applyConfiguration:
+        expression: >-
+          Object{
+            spec: Object.spec{
+              {{- with .Values.imagePullSecrets }}
+              imagePullSecrets: [
+                {{- range $index, $secret := . }}{{ if $index }},{{ end }}
+                Object.spec.imagePullSecrets{name: {{ $secret.name | quote }}}
                 {{- end }}
-                resources:
-                  {{- toYaml .Values.podTokenFetcher.resources | nindent 18 }}
-                volumeMounts:
-                  - name: spiffe-csi
-                    mountPath: /var/run/secrets/spire.io
-                    readOnly: true
-                  - name: dsx-token
-                    mountPath: /run/secrets/nvidia.com/dsx
-            volumes:
-              - name: spiffe-csi
-                csi:
-                  driver: csi.spiffe.io
+              ],
+              {{- end }}
+              containers: object.spec.containers.map(container,
+                Object.spec.containers{
+                  name: container.name,
+                  volumeMounts: [
+                    Object.spec.containers.volumeMounts{
+                      name: "dsx-token",
+                      mountPath: "/run/secrets/nvidia.com/dsx",
+                      readOnly: true
+                    }
+                  ]
+                }
+              ),
+              volumes:
+                (!has(object.spec.volumes) ||
+                  !object.spec.volumes.exists(volume, volume.name == "spiffe-csi")
+                  ? [Object.spec.volumes{
+                    name: "spiffe-csi",
+                    csi: Object.spec.volumes.csi{
+                      driver: "csi.spiffe.io",
+                      readOnly: true
+                    }
+                  }]
+                  : []) + [Object.spec.volumes{
+                name: "dsx-token",
+                emptyDir: Object.spec.volumes.emptyDir{}
+              }]
+            }
+          }
+    # JSONPatch preserves init-container order and handles Pods with no list yet.
+    - patchType: JSONPatch
+      jsonPatch:
+        expression: >-
+          (!has(object.spec.initContainers)
+            ? [JSONPatch{
+                op: "add",
+                path: "/spec/initContainers",
+                value: []
+              }]
+            : []) +
+          [JSONPatch{
+            op: "add",
+            path: "/spec/initContainers/-",
+            value: Object.spec.initContainers{
+              name: "dsx-token-fetcher",
+              image: {{ printf "%s:%s" .Values.podTokenFetcher.image.repository $imageTag | quote }},
+              imagePullPolicy: {{ .Values.podTokenFetcher.image.pullPolicy | quote }},
+              restartPolicy: "Always",
+              command: ["/usr/local/bin/dsx-token-fetcher"],
+              args: [
+                "--socket=unix:///var/run/secrets/spire.io/spire-agent.sock",
+                {{ printf "--audience=%s" .Values.podTokenFetcher.audience | quote }},
+                "--svid-hint=dsx-pod",
+                {{ printf "--output=%s" .Values.podTokenFetcher.outputPath | quote }},
+                {{ printf "--identity-keys-url=%s" (required "podTokenFetcher.identityKeysURL is required" .Values.podTokenFetcher.identityKeysURL) | quote }},
+                {{ printf "--log-level=%s" .Values.observability.logLevel | quote }}
+              ],
+              env: {{ include "dsx-identity.observabilityEnv" (dict
+                  "root" .
+                  "serviceName" "dsx-token-fetcher"
+                  "metricsExporter" "none"
+                  "objectType" "Object.spec.initContainers.env") | nindent 14 }},
+              securityContext: Object.spec.initContainers.securityContext{
+                allowPrivilegeEscalation: false,
+                capabilities: Object.spec.initContainers.securityContext.capabilities{
+                  drop: ["ALL"]
+                },
+                readOnlyRootFilesystem: true,
+                runAsGroup: 0,
+                runAsNonRoot: false,
+                runAsUser: 0
+              },
+              {{- with .Values.podTokenFetcher.startupProbe }}
+              startupProbe: Object.spec.initContainers.startupProbe{
+                httpGet: Object.spec.initContainers.startupProbe.httpGet{
+                  path: {{ .httpGet.path | quote }},
+                  port: {{ .httpGet.port }}
+                },
+                periodSeconds: {{ .periodSeconds }},
+                failureThreshold: {{ .failureThreshold }}
+              },
+              {{- end }}
+              resources: Object.spec.initContainers.resources{
+                requests: {{ .Values.podTokenFetcher.resources.requests | toJson }},
+                limits: {{ .Values.podTokenFetcher.resources.limits | toJson }}
+              },
+              volumeMounts: [
+                Object.spec.initContainers.volumeMounts{
+                  name: "spiffe-csi",
+                  mountPath: "/var/run/secrets/spire.io",
                   readOnly: true
-              - name: dsx-token
-                emptyDir: {}
-    {{- if .Values.kataSupport.enabled }}
-    # When Kata is enabled, tweak the token fetcher flow. In particular,
-    # replace the SPIFFE CSI bind mount with the kata-uds-proxy sidecar.
-    - name: add-kata-guest-proxy
-      match:
-        any:
-          - resources:
-              kinds:
-                - Pod
-              annotations:
-                spiffe.nvidia.com/inject-dsx-token-fetcher: "true"
-              namespaceSelector:
-                {{- toYaml .Values.podTokenFetcher.policy.namespaceLabelSelector | nindent 16 }}
-      preconditions:
-        all:
-          - key: "{{ `{{ request.object.spec.runtimeClassName || '' }}` }}"
-            operator: AnyIn
-            value:
-              {{- toYaml .Values.kataSupport.runtimeClassNames | nindent 14 }}
-      mutate:
-        patchStrategicMerge:
-          spec:
-            initContainers:
-              # The token fetcher retries the Workload API every
-              # second, so it tolerates this socket appearing after it starts.
-              - name: dsx-kata-guest-proxy
-                image: "{{ .Values.kataSupport.image.repository }}:{{ .Values.kataSupport.image.tag | default .Values.global.imageTag | default .Chart.Version }}"
-                imagePullPolicy: {{ .Values.kataSupport.image.pullPolicy }}
-                restartPolicy: Always
-                command:
-                  - /usr/local/bin/guest-entrypoint.sh
-                env:
-                  - name: SOCK_PATH
-                    value: /var/run/secrets/spire.io/spire-agent.sock
-                  - name: VSOCK_PORT
-                    value: {{ .Values.kataSupport.vsockPort | quote }}
-                # MKNOD creates /dev/vsock, which a Kata guest exposes in sysfs
-                # but leaves out of the container image. Both writes target tmpfs
-                # and the shared volume, so the root filesystem stays read-only.
-                securityContext:
-                  allowPrivilegeEscalation: false
-                  capabilities:
-                    drop: ["ALL"]
-                    add: ["MKNOD"]
-                  readOnlyRootFilesystem: true
-                  runAsGroup: 0
-                  runAsNonRoot: false
-                  runAsUser: 0
-                resources:
-                  {{- toYaml .Values.kataSupport.resources.guestProxy | nindent 18 }}
-                volumeMounts:
-                  # Read-write, unlike the token fetcher: this container creates
-                  # the socket that the fetcher then dials.
-                  - name: kata-workload-api
-                    mountPath: /var/run/secrets/spire.io
-              # volumeMounts merges on mountPath, so naming the same path here
-              # repoints the existing mount at the emptyDir below.
-              - name: dsx-token-fetcher
-                volumeMounts:
-                  - name: kata-workload-api
-                    mountPath: /var/run/secrets/spire.io
-                    readOnly: true
-            volumes:
-              # Rather than SPIFFE CSI, which won't work with Kata (the host unix socket
-              # isn't accessible), use an emptyDir shared with the proxy sidecar.
-              - name: spiffe-csi
-                $patch: delete
-              - name: kata-workload-api
-                emptyDir:
-                  medium: Memory
-                  sizeLimit: 1Mi
-    {{- end }}
-    - name: validate-operator-pod-labels
-      match:
-        any:
-          - resources:
-              kinds:
-                - Pod
-              selector:
-                matchExpressions:
-                  - key: spiffe.nvidia.com/service
-                    operator: Exists
-              namespaceSelector:
-                {{- toYaml .Values.podTokenFetcher.policy.namespaceLabelSelector | nindent 16 }}
-      validate:
-        failureAction: Enforce
-        cel:
-          expressions:
-            - expression: >-
-                object.metadata.labels['spiffe.nvidia.com/service'].matches('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$')
-              message: The service label must be a DNS label.
-            - expression: >-
-                !('spiffe.nvidia.com/role' in object.metadata.labels) ||
-                object.metadata.labels['spiffe.nvidia.com/role'].matches('^[a-z0-9][a-z0-9_-]{0,62}$')
-              message: The optional operator Pod role must be one valid DSX role path segment.
+                },
+                Object.spec.initContainers.volumeMounts{
+                  name: "dsx-token",
+                  mountPath: "/run/secrets/nvidia.com/dsx"
+                }
+              ]
+            }
+          }]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicyBinding
+metadata:
+  name: inject-dsx-token-fetcher
+  labels:
+    {{- include "dsx-identity.labels" (dict "name" "pod-token-fetcher-policy" "root" .) | nindent 4 }}
+spec:
+  policyName: inject-dsx-token-fetcher
+  # The Pod annotation is the explicit opt-in boundary.
+  matchResources: {}
 {{- end }}

@@ -1,0 +1,44 @@
+{{- if .Values.podTokenFetcher.enabled }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: validate-operator-pod-labels
+  labels:
+    {{- include "dsx-identity.labels" (dict "name" "pod-label-policy" "root" .) | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  validations:
+    - expression: >-
+        object.metadata.labels["spiffe.nvidia.com/service"].matches(
+          "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"
+        )
+      message: The service label must be a DNS label.
+    - expression: >-
+        !("spiffe.nvidia.com/role" in object.metadata.labels) ||
+        object.metadata.labels["spiffe.nvidia.com/role"].matches(
+          "^[a-z0-9][a-z0-9_-]{0,62}$"
+        )
+      message: The optional operator Pod role must be one valid DSX role path segment.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: validate-operator-pod-labels
+  labels:
+    {{- include "dsx-identity.labels" (dict "name" "pod-label-policy" "root" .) | nindent 4 }}
+spec:
+  policyName: validate-operator-pod-labels
+  validationActions: [Deny]
+  matchResources:
+    objectSelector:
+      # Selection guarantees the required service label exists before CEL reads it.
+      matchExpressions:
+        - key: spiffe.nvidia.com/service
+          operator: Exists
+{{- end }}
