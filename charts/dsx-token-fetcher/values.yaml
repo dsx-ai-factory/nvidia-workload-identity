@@ -1,0 +1,29 @@
+imagePullSecrets: []
+
+tokenFetcher:
+  # This cluster-scoped driver must already exist in the target DPU cluster.
+  spiffeCsiDriver: csi.spiffe.io
+  # DPF's CSI mount preserves the DPU agent socket filename.
+  spireSocketPath: /var/run/secrets/spire.io/agent.sock
+  image:
+    repository: nvcr.io/0837451325059433/components-dev/dsx-token-fetcher
+    tag: ""
+    pullPolicy: IfNotPresent
+  audience: spiffe://ds9.dsx.nvid.id/openbao
+  identityKeysURL: ""
+  outputPath: /run/secrets/nvidia.com/dsx/token
+  logLevel: info
+  env: {}
+  startupProbe:
+    httpGet:
+      path: /healthz
+      port: 8080
+    periodSeconds: 1
+    failureThreshold: 30
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      cpu: 50m
+      memory: 128Mi

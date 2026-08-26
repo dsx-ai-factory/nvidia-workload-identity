@@ -152,50 +152,6 @@ deploy:
 apiVersion: skaffold/v4beta14
 kind: Config
 metadata:
-  name: kyverno-k2
-requires:
-  - configs:
-      - ovn-k2-release
-deploy:
-  kubeContext: kind-k2
-  statusCheckDeadlineSeconds: 180
-  tolerateFailuresUntilDeadline: true
-  helm:
-    hooks:
-      after:
-        - host:
-            command:
-              - kubectl
-              - wait
-              - --for=condition=Established
-              - --context=kind-k2
-              - --timeout=120s
-              - crd/clusterpolicies.kyverno.io
-        - host:
-            command:
-              - kubectl
-              - wait
-              - --for=jsonpath={.subsets[0].addresses[0].ip}
-              - --context=kind-k2
-              - --namespace=kyverno
-              - --timeout=120s
-              - endpoints/kyverno-svc
-    releases:
-      - name: kyverno
-        remoteChart: kyverno
-        repo: https://kyverno.github.io/kyverno/
-        version: 3.6.1
-        namespace: kyverno
-        createNamespace: true
-        setValues:
-          admissionController.replicas: 1
-          backgroundController.enabled: false
-          cleanupController.enabled: false
-          reportsController.enabled: false
----
-apiVersion: skaffold/v4beta14
-kind: Config
-metadata:
   name: spire-crds-k2
 deploy:
   kubeContext: kind-k2
@@ -236,7 +192,8 @@ requires:
       - identity-secrets-k2
   - configs:
       - k2-source-apis
-      - kyverno-k2
+      # Native admission needs no deployment, so retain the direct network dependency.
+      - ovn-k2-release
   - path: k1.yaml
     configs:
       - nats-route-k1
@@ -256,15 +213,6 @@ deploy:
               - --namespace=dsx-identity
               - --timeout=120s
               - endpoints/dsx-identity-controller-manager-webhook
-        - host:
-            command:
-              - kubectl
-              - wait
-              - --for=condition=Ready
-              - --context=kind-k2
-              - --timeout=120s
-              - clusterpolicy/inject-dsx-token-fetcher
-              - clusterpolicy/inject-dsx-imds-sidecars
     releases:
       - name: dsx-identity
         chartPath: ../charts/dsx-identity

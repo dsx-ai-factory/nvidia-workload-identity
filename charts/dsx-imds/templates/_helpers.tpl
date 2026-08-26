@@ -9,14 +9,3 @@ app.kubernetes.io/managed-by: {{ .root.Release.Service }}
 app.kubernetes.io/name: {{ .name }}
 app.kubernetes.io/instance: {{ .root.Release.Name }}
 {{- end }}
-
-{{- define "dsx-imds.resources" -}}
-{{- if .serviceDaemonSet }}
-limits:
-  {{- toYaml .serviceDaemonSet | nindent 2 }}
-requests:
-  {{- toYaml .serviceDaemonSet | nindent 2 }}
-{{- else }}
-{{- toYaml .defaults }}
-{{- end }}
-{{- end }}

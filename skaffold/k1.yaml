@@ -141,47 +141,6 @@ deploy:
 apiVersion: skaffold/v4beta14
 kind: Config
 metadata:
-  name: kyverno-k1
-deploy:
-  kubeContext: kind-k1
-  statusCheckDeadlineSeconds: 180
-  tolerateFailuresUntilDeadline: true
-  helm:
-    hooks:
-      after:
-        - host:
-            command:
-              - kubectl
-              - wait
-              - --for=condition=Established
-              - --context=kind-k1
-              - --timeout=120s
-              - crd/clusterpolicies.kyverno.io
-        - host:
-            command:
-              - kubectl
-              - wait
-              - --for=jsonpath={.subsets[0].addresses[0].ip}
-              - --context=kind-k1
-              - --namespace=kyverno
-              - --timeout=120s
-              - endpoints/kyverno-svc
-    releases:
-      - name: kyverno
-        remoteChart: kyverno
-        repo: https://kyverno.github.io/kyverno/
-        version: 3.6.1
-        namespace: kyverno
-        createNamespace: true
-        setValues:
-          admissionController.replicas: 1
-          backgroundController.enabled: false
-          cleanupController.enabled: false
-          reportsController.enabled: false
----
-apiVersion: skaffold/v4beta14
-kind: Config
-metadata:
   name: nats-k1
 requires:
   # The dependency hook downloads the pinned chart before Skaffold renders this release.
@@ -236,7 +195,6 @@ requires:
       - identity-secrets-k1
   - configs:
       - nats-route-k1
-      - kyverno-k1
       - spire-crds-k1
 deploy:
   kubeContext: kind-k1

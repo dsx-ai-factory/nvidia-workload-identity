@@ -1,0 +1,135 @@
+{{- if .Values.kataSupport.enabled }}
+{{- $imageTag := .Values.kataSupport.image.tag | default .Values.global.imageTag | default .Chart.Version -}}
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicy
+metadata:
+  name: inject-dsx-kata-guest-proxy
+  labels:
+    {{- include "dsx-identity.labels" (dict "name" "kata-guest-proxy-policy" "root" .) | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  # Token-fetcher injection is a separate policy with unspecified execution order.
+  reinvocationPolicy: IfNeeded
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+  matchConditions:
+    - name: uses-kata-runtime
+      expression: >-
+        has(object.spec.runtimeClassName) &&
+        object.spec.runtimeClassName in {{ toJson .Values.kataSupport.runtimeClassNames }}
+    - name: does-not-already-have-guest-proxy
+      expression: >-
+        !has(object.spec.initContainers) ||
+        !object.spec.initContainers.exists(container, container.name == "dsx-kata-guest-proxy")
+  variables:
+    # Array indexes make both replacements safe regardless of which policy runs first.
+    - name: workloadAPIVolumeIndex
+      expression: >-
+        has(object.spec.volumes)
+          ? object.spec.volumes.map(volume, volume.name).indexOf("spiffe-csi")
+          : -1
+    - name: tokenFetcherIndex
+      expression: >-
+        has(object.spec.initContainers)
+          ? object.spec.initContainers.map(container, container.name).indexOf("dsx-token-fetcher")
+          : -1
+  mutations:
+    # Kata cannot use the host CSI bind mount. The guest proxy owns an emptyDir
+    # under the same volume name and recreates the socket at the same mount path.
+    - patchType: JSONPatch
+      jsonPatch:
+        expression: >-
+          (!has(object.spec.volumes)
+            ? [JSONPatch{
+                op: "add",
+                path: "/spec/volumes",
+                value: []
+              }]
+            : []) +
+          [JSONPatch{
+            op: variables.workloadAPIVolumeIndex >= 0 ? "replace" : "add",
+            path: variables.workloadAPIVolumeIndex >= 0
+              ? "/spec/volumes/" + string(variables.workloadAPIVolumeIndex)
+              : "/spec/volumes/-",
+            value: Object.spec.volumes{
+              name: "spiffe-csi",
+              emptyDir: Object.spec.volumes.emptyDir{
+                medium: "Memory",
+                sizeLimit: "1Mi"
+              }
+            }
+          }]
+    # The guest proxy recreates the host Workload API socket inside the VM.
+    - patchType: JSONPatch
+      jsonPatch:
+        # Admission policy order is unspecified. Insert before an existing token
+        # fetcher, or append so a later token-fetcher mutation follows the proxy.
+        expression: >-
+          (!has(object.spec.initContainers)
+            ? [JSONPatch{
+                op: "add",
+                path: "/spec/initContainers",
+                value: []
+              }]
+            : []) +
+          [JSONPatch{
+            op: "add",
+            path: variables.tokenFetcherIndex >= 0
+              ? "/spec/initContainers/" + string(variables.tokenFetcherIndex)
+              : "/spec/initContainers/-",
+            value: Object.spec.initContainers{
+              name: "dsx-kata-guest-proxy",
+              image: {{ printf "%s:%s" .Values.kataSupport.image.repository $imageTag | quote }},
+              imagePullPolicy: {{ .Values.kataSupport.image.pullPolicy | quote }},
+              restartPolicy: "Always",
+              command: ["/usr/local/bin/guest-entrypoint.sh"],
+              env: [
+                Object.spec.initContainers.env{
+                  name: "SOCK_PATH",
+                  value: "/var/run/secrets/spire.io/spire-agent.sock"
+                },
+                Object.spec.initContainers.env{
+                  name: "VSOCK_PORT",
+                  value: {{ .Values.kataSupport.vsockPort | quote }}
+                }
+              ],
+              {{/* MKNOD lets the entrypoint create /dev/vsock when the Kata guest omits it. */}}
+              securityContext: Object.spec.initContainers.securityContext{
+                allowPrivilegeEscalation: false,
+                capabilities: Object.spec.initContainers.securityContext.capabilities{
+                  drop: ["ALL"],
+                  add: ["MKNOD"]
+                },
+                readOnlyRootFilesystem: true,
+                runAsGroup: 0,
+                runAsNonRoot: false,
+                runAsUser: 0
+              },
+              resources: Object.spec.initContainers.resources{
+                requests: {{ .Values.kataSupport.resources.guestProxy.requests | toJson }},
+                limits: {{ .Values.kataSupport.resources.guestProxy.limits | toJson }}
+              },
+              volumeMounts: [
+                Object.spec.initContainers.volumeMounts{
+                  name: "spiffe-csi",
+                  mountPath: "/var/run/secrets/spire.io"
+                }
+              ]
+            }
+          }]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicyBinding
+metadata:
+  name: inject-dsx-kata-guest-proxy
+  labels:
+    {{- include "dsx-identity.labels" (dict "name" "kata-guest-proxy-policy" "root" .) | nindent 4 }}
+spec:
+  policyName: inject-dsx-kata-guest-proxy
+  # Configured Kata RuntimeClasses are the mutation boundary.
+  matchResources: {}
+{{- end }}

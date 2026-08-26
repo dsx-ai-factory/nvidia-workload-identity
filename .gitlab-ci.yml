@@ -46,6 +46,20 @@ include:
       ngc-force: true
       ngc-key: $NGC_DSX_COMPONENTS_PUSH_KEY
       extends: [.helm-push-ngc, .helm-push-ngc-rule]
+  - component: $CI_SERVER_FQDN/cds/cds-components/helm-package@0.14.1
+    inputs:
+      job-name: helm-package-dsx-token-fetcher
+      chart-path: charts/dsx-token-fetcher
+      chart-version: $NEXT_VERSION
+      extends: [.helm-package, .helm-package-rule]
+  - component: $CI_SERVER_FQDN/cds/cds-components/helm-push-ngc@0.14.1
+    inputs:
+      job-name: helm-push-ngc-dsx-token-fetcher
+      package-job: helm-package-dsx-token-fetcher
+      ngc-path: $NGC_HELM_PATH
+      ngc-force: true
+      ngc-key: $NGC_DSX_COMPONENTS_PUSH_KEY
+      extends: [.helm-push-ngc, .helm-push-ngc-rule]
 
 variables:
   VAULT_ADDR: https://prod.vault.nvidia.com
@@ -102,6 +116,8 @@ commitlint:
       yq -i '.appVersion = strenv(HELM_CHART_VERSION)' charts/dsx-identity/Chart.yaml
       yq -i '.spire."spire-server".image.tag = strenv(HELM_CHART_VERSION)' charts/dsx-identity/values.yaml
       yq -i '.appVersion = strenv(HELM_CHART_VERSION)' charts/dsx-imds/Chart.yaml
+      # The DPUService installs this chart independently of dsx-identity.
+      yq -i '.appVersion = strenv(HELM_CHART_VERSION)' charts/dsx-token-fetcher/Chart.yaml
       yq -i '.appVersion = strenv(HELM_CHART_VERSION)' charts/dsx-spiffe-csi/Chart.yaml
 
 .helm-package-rule:

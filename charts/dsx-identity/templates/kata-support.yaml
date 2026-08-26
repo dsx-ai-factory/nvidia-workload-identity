@@ -1,9 +1,6 @@
 {{- if and .Values.kataSupport.enabled (not .Values.spire.enabled) }}
 {{- fail "kataSupport.enabled requires spire.enabled so the host proxy can reach a Workload API socket" }}
 {{- end }}
-{{- if and .Values.kataSupport.enabled (not .Values.podTokenFetcher.enabled) }}
-{{- fail "kataSupport.enabled requires podTokenFetcher.enabled because its policy injects the guest proxy" }}
-{{- end }}
 {{- if .Values.kataSupport.enabled }}
 {{- $imageTag := .Values.kataSupport.image.tag | default .Values.global.imageTag | default .Chart.Version -}}
 apiVersion: apps/v1

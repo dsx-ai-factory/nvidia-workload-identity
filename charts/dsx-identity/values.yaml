@@ -197,11 +197,6 @@ podTokenFetcher:
     limits:
       cpu: 50m
       memory: 128Mi
-  policy:
-    namespaceLabelSelector:
-      matchLabels:
-        spiffe.nvidia.com/enabled: "true"
-
 vmSupport:
   enabled: false
   tolerations: []
@@ -259,6 +254,16 @@ vmSupport:
 
 # DPF deploys this service into each selected DPU cluster.
 dpuService:
+  tokenFetcher:
+    # Install native token-fetcher admission in selected DPU clusters.
+    enabled: false
+    # DPF provides this cluster-scoped CSI driver to DPU workloads.
+    spiffeCsiDriver: csi.spiffe.io
+    # DPF's CSI mount preserves the DPU agent socket filename.
+    spireSocketPath: /var/run/secrets/spire.io/agent.sock
+    helmChart:
+      repoURL: https://helm.ngc.nvidia.com/0837451325059433/components-dev/
+      version: ""
   imds:
     enabled: true
     helmChart:
@@ -296,7 +301,7 @@ dpuService:
 # Kata Containers support. A Kata Pod runs inside a VM, so the SPIFFE CSI driver
 # cannot carry the Workload API socket across the VM boundary. The host proxy
 # serves that socket over vsock and the guest proxy re-serves it as a unix socket
-# at the path the token fetcher already expects.
+# at the standard SPIRE Workload API path inside each selected Kata Pod.
 kataSupport:
   enabled: false
   image:
@@ -304,7 +309,7 @@ kataSupport:
     tag: ""
     pullPolicy: IfNotPresent
   # Pods with one of these runtime classes receive the guest proxy in place of
-  # the SPIFFE CSI volume.
+  # the SPIFFE CSI volume, independently of token-fetcher injection.
   runtimeClassNames:
     - kata-qemu-nvidia-cpu-runtime-rs
     - kata-qemu-runtime-rs

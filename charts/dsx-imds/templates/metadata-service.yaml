@@ -79,9 +79,15 @@ spec:
               path: /health
               port: http
           resources:
-            {{- include "dsx-imds.resources" (dict
-                  "serviceDaemonSet" .Values.serviceDaemonSet.resources
-                  "defaults" .Values.metadataService.resources) | nindent 12 }}
+            {{- if .Values.serviceDaemonSet.resources }}
+            # DPF accounts one service resource budget for both limits and requests.
+            limits:
+              {{- toYaml .Values.serviceDaemonSet.resources | nindent 14 }}
+            requests:
+              {{- toYaml .Values.serviceDaemonSet.resources | nindent 14 }}
+            {{- else }}
+            {{- toYaml .Values.metadataService.resources | nindent 12 }}
+            {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

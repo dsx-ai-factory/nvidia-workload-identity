@@ -7,10 +7,11 @@ the Identity Controller, Kata support, and DPF child-chart resources.
 
 | When enabled | Requires | Used for |
 |---|---|---|
-| All installs | Kubernetes 1.21+, Helm 3, matching `spire-crds` chart | Helm deployment and SPIRE APIs |
+| All installs | Kubernetes 1.36+, Helm 3, matching `spire-crds` chart | Helm deployment and SPIRE APIs |
 | External agent (default) | SPIRE Workload API socket on each selected node | SPIFFE CSI mounts |
 | Identity Keys (default) | Signing-key Secrets. NATS JetStream, OAuth2 issuer, and credentials when NATS is enabled and configured | Key exchange and token signing |
-| Pod tokens or VM support | Kyverno. KubeVirt for VM support | Sidecar injection and VM identity |
+| Pod tokens or VM support | KubeVirt for VM support | Native sidecar injection and VM identity |
+| DPU Pod tokens | DPF `DPUService` CRD and controller | Native token-fetcher injection in DPU clusters |
 | Service monitors (default) | Prometheus Operator CRDs | `ServiceMonitor` and `PodMonitor` |
 | DPU services | DPF `DPUService` CRD and controller | IMDS and optional CSI child charts |
 | Identity controller | DPU, LaunchLayer, and SPIRE CRDs | Source-to-SPIRE reconciliation |
@@ -131,6 +132,11 @@ identityController:
   # Reconcile DPU and LaunchLayer sources into SPIRE entries.
   enabled: true
 dpuService:
+  tokenFetcher:
+    # Deploy the native admission policy to supported DPU clusters.
+    enabled: true
+    # Socket filename preserved by DPF's CSI mount.
+    spireSocketPath: /var/run/secrets/spire.io/agent.sock
   imds:
     # Deploy the DSX IMDS child chart to selected DPU clusters.
     enabled: true
@@ -141,6 +147,9 @@ dpuService:
   identityKeysURL: https://identity-keys.shard.example.com/v1/exchange
 ```
 
+Keep the token-fetcher policy in a standalone `DPUService`. A policy-only
+service in a `DPUDeployment` blocks `DPUNodeMaintenance`.
+
 When `dpuService.imds` is enabled, the identity controller derives selectors
 from the release namespace and `dpuService.workload`. An explicit
 `identityController.dpuMetadataSelectors` list replaces those defaults. DPF's
@@ -148,7 +157,7 @@ SPIFFE CSI bind-mounts `/run/spire`, preserving `agent.sock` for DSX IMDS.
 
 ```yaml
 kataSupport:
-  # Add the host and guest socket proxies for Kata workloads.
+  # Add the host and guest socket proxies independently of the token fetcher.
   enabled: true
   # RuntimeClasses whose Pods receive the guest proxy.
   runtimeClassNames:
@@ -157,20 +166,20 @@ kataSupport:
 ```
 
 Kata Pods run inside VMs, so SPIFFE CSI cannot carry the Workload API socket
-across the boundary. The [host proxy](../../kata-uds-proxy/README.md) serves it
-over vsock and the guest proxy re-serves it at the path already used by the
-token fetcher.
+across the boundary. The [proxy](../../kata-uds-proxy/README.md) forwards it over
+vsock for selected Kata Pods, independently of token-fetcher injection.
 
 The host proxy uses `hostPID` and writes the host cgroup, so Kata support
 requires `privileged` Pod Security Admission, cgroup v2 with the systemd driver,
 and `sandbox_cgroup_only = true`. The default `nodeSelector` targets
 `katacontainers.io/kata-runtime=true`. List every enabled Kata RuntimeClass.
 
-`imagePullSecrets` applies to chart-owned and Kyverno-injected DSX images.
+`imagePullSecrets` applies to chart-owned and admission-injected DSX images.
 Each matched consumer namespace must contain Secrets with the same names.
 
-Kyverno injects identity sidecars and prevents application containers from
-mounting the Workload API or DSX Identity Keys Proxy sockets.
+Native Kubernetes admission policies inject identity sidecars and prevent
+application containers from mounting the Workload API or DSX Identity Keys
+Proxy sockets. Validation enforces operator Pod service and role label formats.
 
 ## Deploy
 

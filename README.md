@@ -332,25 +332,27 @@ its node-local Workload API. It serves aggregate public keys received through
 the Event Bus when NATS is enabled, or only local public keys when NATS is
 disabled.
 
-The Event Bus, OAuth2 provider, Kyverno runtime, and relying parties are
-external to the identity chart.
+The Event Bus, OAuth2 provider, and relying parties are external to the
+identity chart.
 
 ### Identity delivery
 
 | Consumer | SPIRE trust path | DSX JWT delivery |
 |---|---|---|
 | [Kubernetes Pod](cmd/dsx-token-fetcher/README.md) | Kubernetes WorkloadAttestor under the worker's `dsx_imds`-attested host agent. The registration uses the operator tenant and worker host subject | The `dsx-token-fetcher` sidecar selects `dsx-pod`, exchanges the local SPIRE JWT-SVID, and writes the DSX JWT to a Pod-private volume mounted read-only in application containers |
+| DPU service Pod | DPF exposes the DPU SPIRE agent through `csi.spiffe.io` | Native admission injects the standard token-fetcher sidecar and token volume |
 | DPU IMDS | The external DPU agent attests through the `dpu_hw` NodeAttestor agent and server. Its Kubernetes WorkloadAttestor binds the paired BM identity to the IMDS Pod | SPIFFE CSI exposes the DPU agent Workload API socket. DSX IMDS selects `dsx-imds`, exchanges the local SPIRE JWT-SVID, and serves the BM DSX JWT through IMDS |
 | [Bare-metal host process](cmd/dsx-imds-node-attestor-agent/README.md) | The DPU agent is attested through `dsx_dpu`. The host agent is attested through the repository `dsx_imds` NodeAttestor agent and server, then can serve local processes through the Unix WorkloadAttestor | The paired DPU intercept carries link-local IMDS to NICo or Carbide IMDS, which passes identity requests to DSX IMDS. DPU-hosted DSX IMDS exchanges directly with its reachable shard-local DSX Identity Keys. The host agent uses the returned DSX JWT for node attestation. A host-process-specific token delivery contract is not currently defined |
-| [Kata Containers Pod](kata-uds-proxy/README.md) | Identical to a Kubernetes Pod. The guest is a VM, so SPIFFE CSI cannot reach the agent socket. The `kata-uds-proxy` host DaemonSet forwards it over vsock into the sandbox instead | Unchanged from a Kubernetes Pod. A guest sidecar re-serves the forwarded socket at the same path, so the same `dsx-token-fetcher` sidecar applies |
+| [Kata Containers Pod](kata-uds-proxy/README.md) | The guest is a VM, so `kata-uds-proxy` forwards the host Workload API over vsock | A guest sidecar independently serves the standard Workload API socket path |
 | [KubeVirt VM](cmd/metadata-service/README.md) | The controller derives the VM subject from the dynamically supplied tenant ID and parents it to the operator-owned worker host's `dsx_imds` agent. The Kubernetes WorkloadAttestor serves the operator-owned virt-launcher Pod, and SPIFFE CSI exposes that same agent's Workload API socket | The DSX IMDS sidecar selects the VM SPIRE JWT-SVID by its exact `dsx-imds-vm` hint, exchanges it through DSX Identity Keys Proxy CSI, and serves the DSX JWT through IMDS |
 
 ## Deployment
 
 Install [`charts/dsx-identity`](charts/dsx-identity/README.md) once per identity
 shard with Helm. When enabled, the parent chart creates DPF DPUService resources
-that reference the [DSX IMDS](charts/dsx-imds/README.md) and optional [DSX
-SPIFFE CSI](charts/dsx-spiffe-csi/README.md) child charts.
+that reference the [DSX IMDS](charts/dsx-imds/README.md), [DSX SPIFFE
+CSI](charts/dsx-spiffe-csi/README.md), and [DPU token-fetcher
+admission](charts/dsx-token-fetcher/README.md) child charts.
 
 ## Identity contract
 
@@ -510,7 +512,7 @@ metadata:
 ```
 
 The service label selects SPIRE registration. The injection annotation selects
-the token fetcher.
+the token fetcher through native admission policy.
 
 For KubeVirt IMDS injection, put them on the VM Pod template:
 

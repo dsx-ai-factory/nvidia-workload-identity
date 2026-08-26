@@ -1,0 +1,42 @@
+{{- if .Values.dpuService.tokenFetcher.enabled }}
+{{- /* DPU Pods share a network namespace, so the injected process must not bind a metrics port. */ -}}
+{{- $environment := dict "OTEL_METRICS_EXPORTER" "none" "OTEL_SERVICE_NAME" "dsx-token-fetcher" -}}
+{{- $environment = mergeOverwrite $environment (deepCopy .Values.dpuService.observabilityEnv) -}}
+{{- /* Force the safety setting after user overrides are merged. */ -}}
+{{- $_ := set $environment "OTEL_METRICS_EXPORTER" "none" -}}
+apiVersion: svc.dpu.nvidia.com/v1alpha1
+kind: DPUService
+metadata:
+  name: dsx-token-fetcher
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dsx-identity.labels" (dict "root" . "name" "dsx-token-fetcher") | nindent 4 }}
+spec:
+  security:
+    privileged: false
+  helmChart:
+    source:
+      repoURL: {{ .Values.dpuService.tokenFetcher.helmChart.repoURL }}
+      chart: dsx-token-fetcher
+      version: {{ .Values.dpuService.tokenFetcher.helmChart.version | default .Chart.Version | quote }}
+      releaseName: dsx-token-fetcher
+    # DPUService passes this subtree directly to the standalone child chart.
+    values:
+      imagePullSecrets:
+        {{- toYaml .Values.imagePullSecrets | nindent 8 }}
+      tokenFetcher:
+        spiffeCsiDriver: {{ .Values.dpuService.tokenFetcher.spiffeCsiDriver | quote }}
+        spireSocketPath: {{ required "dpuService.tokenFetcher.spireSocketPath is required" .Values.dpuService.tokenFetcher.spireSocketPath | quote }}
+        image:
+          {{- toYaml .Values.podTokenFetcher.image | nindent 10 }}
+        audience: {{ .Values.podTokenFetcher.audience | quote }}
+        identityKeysURL: {{ required "dpuService.identityKeysURL is required" .Values.dpuService.identityKeysURL | quote }}
+        outputPath: {{ .Values.podTokenFetcher.outputPath | quote }}
+        logLevel: {{ .Values.observability.logLevel }}
+        env:
+          {{- toYaml $environment | nindent 10 }}
+        startupProbe:
+          {{- toYaml .Values.podTokenFetcher.startupProbe | nindent 10 }}
+        resources:
+          {{- toYaml .Values.podTokenFetcher.resources | nindent 10 }}
+{{- end }}
