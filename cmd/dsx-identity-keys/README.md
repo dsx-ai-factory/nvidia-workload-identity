@@ -10,6 +10,20 @@ registration determines the tenant in the local subject, and DSX Identity Keys
 preserves it while validating the common identity grammar. It obtains local
 JWT verification bundles through the node-local SPIFFE Workload API.
 
+Only tenant, service, resource type, and resource ID have fixed semantics. DSX
+Identity Keys preserves every path segment after the resource ID without
+interpreting it.
+
+For example, DPF can use this explicitly labelled DPUService suffix:
+
+```text
+local:     spiffe://<local-domain>/tenant/<tenant>/service/dsx/dpu/<serial>/dpuservice/<service-id>/namespace/<namespace>
+exchanged: spiffe://<tenant>.<region>.dsx.<partition>/dpu/<serial>/dpuservice/<service-id>/namespace/<namespace>
+```
+
+DPF includes the namespace because DPU service IDs are unique only within a
+Kubernetes namespace. DSX Identity Keys only preserves that suffix.
+
 By default, each DSX Identity Keys instance writes only its local public keys to
 one shared NATS KV bucket and watches the complete bucket. It retains one
 aggregate keyed by globally unique `kid`, and its JWKS endpoint serves every

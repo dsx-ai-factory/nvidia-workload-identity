@@ -365,6 +365,20 @@ spiffe://<operator-tenant>.<region>.<service>.<partition>/bm/<node-name>/pod/<po
   [/role/<role>]
 ```
 
+DPU service identities use:
+
+```text
+spiffe://<operator-tenant>.<region>.<service>.<partition>/dpu/<serial>/dpuservice/<service-id>/namespace/<namespace>
+```
+
+Only the resource type and resource ID have fixed parser semantics:
+
+```text
+spiffe://<tenant>.<region>.<service>.<partition>/<dpu|bm|vm>/<resource-id>[/...]
+```
+
+Exchange preserves every remaining path segment without interpreting it.
+
 Cluster-local SPIRE identities encode the same fields under the shard trust
 domain. Exchange takes the region and partition from explicit configuration,
 the tenant and service from the local subject, and preserves the resource path.

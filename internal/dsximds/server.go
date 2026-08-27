@@ -66,9 +66,9 @@ func (v *Verifier) Verify(ctx context.Context, rawToken string) (spiffeid.ID, er
 	if err != nil {
 		return spiffeid.ID{}, fmt.Errorf("parse host subject: %w", err)
 	}
-	// Process, Pod, and role identities are narrower than the host and must not
-	// gain the authority to attest a SPIRE node.
-	if parsedSubject.ResourceType != identity.ResourceBM || parsedSubject.WorkloadType != "" || parsedSubject.Role != "" {
+	// Any path after the BM resource narrows the identity and must not gain the
+	// authority to attest a SPIRE node.
+	if parsedSubject.ResourceType != identity.ResourceBM || len(parsedSubject.Path) != 0 {
 		return spiffeid.ID{}, fmt.Errorf("attestation subject must identify a base host")
 	}
 

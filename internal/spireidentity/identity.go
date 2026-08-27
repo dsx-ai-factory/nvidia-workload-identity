@@ -14,9 +14,9 @@ import (
 //
 //	spiffe://<trust-domain>/tenant/<tenant>/service/<service>/<resource>
 //
-// The resource is <dpu|bm|vm>/<id> with an optional process, Pod, or role
-// suffix. The trust domain is not constrained because local SPIRE validates the
-// JWT-SVID before this parser runs.
+// The resource starts with <dpu|bm|vm>/<id>. Any remaining path is preserved
+// without interpretation. The trust domain is not constrained because local
+// SPIRE validates the JWT-SVID before this parser runs.
 func Parse(id spiffeid.ID) (identity.Subject, error) {
 	segments, err := pathSegments(id)
 	if err != nil {
