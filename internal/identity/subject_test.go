@@ -9,20 +9,27 @@ import (
 func TestResourceRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	want := Subject{
-		Tenant: "tenant-2", Service: "identity-probe", ResourceType: ResourceBM, ResourceID: "worker-1",
-		WorkloadType: "pod", WorkloadID: "13c31c2c-2673-42d1-bdeb-241864db47f6", Role: "database",
-	}
-	segments, err := want.ResourceSegments()
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := ParseResource(want.Tenant, want.Service, segments)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("got %#v, want %#v", got, want)
+	for _, want := range []Subject{
+		{
+			Tenant: "tenant-2", Service: "identity-probe", ResourceType: ResourceBM, ResourceID: "worker-1",
+			Path: []string{"pod", "13c31c2c-2673-42d1-bdeb-241864db47f6", "role", "database"},
+		},
+		{
+			Tenant: "operator-1", Service: "dsx", ResourceType: ResourceDPU, ResourceID: "dpu-1",
+			Path: []string{"dpuservice", "storage_service", "namespace", "storage-system"},
+		},
+	} {
+		segments, err := want.ResourceSegments()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := ParseResource(want.Tenant, want.Service, segments)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got %#v, want %#v", got, want)
+		}
 	}
 }
 

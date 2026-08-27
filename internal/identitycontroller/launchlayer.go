@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
@@ -21,6 +22,8 @@ import (
 )
 
 const OrgIDAnnotation = "launchlayer.nvidia.com/org-id"
+
+var podUIDPattern = regexp.MustCompile(`^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$`)
 
 var (
 	VirtualInstanceGVK = schema.GroupVersionKind{
@@ -88,7 +91,7 @@ func (r *LaunchLayerReconciler) virtualInstanceEntry(source *unstructured.Unstru
 	if !identity.ValidResourceID(instance.Spec.NodeName) {
 		return nil, fmt.Errorf("invalid VirtualInstance spec.node_name %q", instance.Spec.NodeName)
 	}
-	if !identity.ValidPodUID(instance.Status.PodUID) {
+	if !podUIDPattern.MatchString(instance.Status.PodUID) {
 		return nil, fmt.Errorf("VirtualInstance status.pod_uid %q is not a canonical UUID", instance.Status.PodUID)
 	}
 

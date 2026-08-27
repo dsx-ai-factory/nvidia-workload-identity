@@ -23,16 +23,22 @@ func TestParse(t *testing.T) {
 			subject: identity.Subject{Tenant: "operator-1", Service: "dsx", ResourceType: identity.ResourceDPU, ResourceID: "dpu-1"},
 		},
 		{
+			name: "DPU service",
+			raw:  "spiffe://k2.internal/tenant/operator-1/service/dsx/dpu/dpu-1/dpuservice/storage_service/namespace/storage-system",
+			subject: identity.Subject{Tenant: "operator-1", Service: "dsx", ResourceType: identity.ResourceDPU, ResourceID: "dpu-1",
+				Path: []string{"dpuservice", "storage_service", "namespace", "storage-system"}},
+		},
+		{
 			name: "process with role",
 			raw:  "spiffe://k2.internal/tenant/tenant-2/service/dsx/bm/host-1/process/nke-agent/role/operator",
 			subject: identity.Subject{Tenant: "tenant-2", Service: "dsx", ResourceType: identity.ResourceBM, ResourceID: "host-1",
-				WorkloadType: "process", WorkloadID: "nke-agent", Role: "operator"},
+				Path: []string{"process", "nke-agent", "role", "operator"}},
 		},
 		{
 			name: "pod",
 			raw:  "spiffe://k2.internal/tenant/tenant-2/service/identity-probe/bm/worker-1/pod/13c31c2c-2673-42d1-bdeb-241864db47f6",
 			subject: identity.Subject{Tenant: "tenant-2", Service: "identity-probe", ResourceType: identity.ResourceBM, ResourceID: "worker-1",
-				WorkloadType: "pod", WorkloadID: "13c31c2c-2673-42d1-bdeb-241864db47f6"},
+				Path: []string{"pod", "13c31c2c-2673-42d1-bdeb-241864db47f6"}},
 		},
 	}
 
@@ -66,12 +72,7 @@ func TestRejectInvalidID(t *testing.T) {
 		"spiffe://k2.internal/dpu/dpu-1",
 		"spiffe://k2.internal/tenant/tenant_1/service/dsx/bm/host-1",
 		"spiffe://k2.internal/tenant/operator-1/service/dsx/pod/pod-1",
-		"spiffe://k2.internal/tenant/operator-1/service/dsx/bm/host-1/process",
-		"spiffe://k2.internal/tenant/operator-1/service/dsx/bm/host-1/pod/not-a-uuid",
-		"spiffe://k2.internal/tenant/operator-1/service/dsx/dpu/dpu-1/pod/13c31c2c-2673-42d1-bdeb-241864db47f6",
-		"spiffe://k2.internal/tenant/operator-1/service/dsx/vm/vm-1/pod/13c31c2c-2673-42d1-bdeb-241864db47f6",
-		"spiffe://k2.internal/tenant/operator-1/service/dsx/bm/host-1/role/BadRole",
-		"spiffe://k2.internal/tenant/operator-1/service/dsx/bm/host-1/extra/value",
+		"spiffe://k2.internal/tenant/operator-1/service/dsx/bm",
 	} {
 		t.Run(raw, func(t *testing.T) {
 			t.Parallel()

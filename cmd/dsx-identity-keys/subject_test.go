@@ -20,6 +20,11 @@ func TestExchangeSubject(t *testing.T) {
 			dsx:   "spiffe://tenant-2.ds9.dsx.nvid.id/dpu/dpu-1",
 		},
 		{
+			name:  "DPU service",
+			local: "spiffe://k2.internal/tenant/operator-1/service/dsx/dpu/dpu-1/dpuservice/storage_service/namespace/storage-system",
+			dsx:   "spiffe://operator-1.ds9.dsx.nvid.id/dpu/dpu-1/dpuservice/storage_service/namespace/storage-system",
+		},
+		{
 			name:  "operator bare metal host",
 			local: "spiffe://k2.internal/tenant/operator-1/service/dsx/bm/worker-1",
 			dsx:   "spiffe://operator-1.ds9.dsx.nvid.id/bm/worker-1",
