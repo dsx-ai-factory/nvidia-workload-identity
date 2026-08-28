@@ -66,25 +66,31 @@ spec:
               ]
             }
           }
-    # imagePullSecrets is atomic, so JSONPatch preserves existing entries while
-    # appending configured secrets. A native sidecar is an ordered init container.
+    # Create the atomic list when absent, then append only configured secrets
+    # missing by name. Existing pull secrets and init-container order stay intact.
     - patchType: JSONPatch
       jsonPatch:
         expression: >-
           {{- with .Values.imagePullSecrets }}
-          [JSONPatch{
+          (!has(object.spec.imagePullSecrets)
+            ? [JSONPatch{
+                op: "add",
+                path: "/spec/imagePullSecrets",
+                value: []
+              }]
+            : []) +
+          [
+            {{- range $index, $secret := . }}{{ if $index }},{{ end }}
+            Object.spec.imagePullSecrets{name: {{ $secret.name | quote }}}
+            {{- end }}
+          ].filter(secret,
+            !has(object.spec.imagePullSecrets) ||
+            !object.spec.imagePullSecrets.exists(existing, existing.name == secret.name)
+          ).map(secret, JSONPatch{
             op: "add",
-            path: "/spec/imagePullSecrets",
-            value: (has(object.spec.imagePullSecrets) ? object.spec.imagePullSecrets : []) +
-              [
-                {{- range $index, $secret := . }}{{ if $index }},{{ end }}
-                Object.spec.imagePullSecrets{name: {{ $secret.name | quote }}}
-                {{- end }}
-              ].filter(secret,
-                !has(object.spec.imagePullSecrets) ||
-                !object.spec.imagePullSecrets.exists(existing, existing.name == secret.name)
-              )
-          }] +
+            path: "/spec/imagePullSecrets/-",
+            value: secret
+          }) +
           {{- end }}
           (!has(object.spec.initContainers)
             ? [JSONPatch{
