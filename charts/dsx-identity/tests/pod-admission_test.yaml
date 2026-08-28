@@ -17,6 +17,10 @@ tests:
           path: spec.reinvocationPolicy
           value: IfNeeded
         documentIndex: 0
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: '"--svid-hint=dsx-pod"'
+        documentIndex: 0
       - isKind:
           of: MutatingAdmissionPolicyBinding
         documentIndex: 1
