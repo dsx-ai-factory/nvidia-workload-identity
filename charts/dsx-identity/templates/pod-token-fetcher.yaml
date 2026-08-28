@@ -112,7 +112,9 @@ spec:
                 "--socket=unix:///var/run/secrets/spire.io/spire-agent.sock",
                 {{- /* Each workload names its relying party. A missing annotation fails admission under failurePolicy: Fail. */}}
                 "--audience=" + object.metadata.annotations["spiffe.nvidia.com/token-audience"],
-                "--svid-hint=dsx-pod",
+                {{- with .Values.podTokenFetcher.svidHint }}
+                {{ printf "--svid-hint=%s" . | quote }},
+                {{- end }}
                 {{ printf "--output=%s" .Values.podTokenFetcher.outputPath | quote }},
                 {{ printf "--identity-keys-url=%s" (required "podTokenFetcher.identityKeysURL is required" .Values.podTokenFetcher.identityKeysURL) | quote }},
                 {{ printf "--log-level=%s" .Values.observability.logLevel | quote }}

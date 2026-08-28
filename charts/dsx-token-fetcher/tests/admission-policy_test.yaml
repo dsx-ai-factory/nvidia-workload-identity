@@ -85,9 +85,31 @@ tests:
           path: spec.mutations[1].jsonPatch.expression
           pattern: /spec/imagePullSecrets
 
-  - it: leaves DPU service SVID selection to the Workload API
+  - it: selects the default DPF DPU service SVID
     set:
       tokenFetcher.identityKeysURL: https://identity.example.com/v1/exchange
+    template: templates/admission-policy.yaml
+    documentIndex: 0
+    asserts:
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: '"--svid-hint=dpu-service"'
+
+  - it: renders the configured DPU service SVID hint
+    set:
+      tokenFetcher.identityKeysURL: https://identity.example.com/v1/exchange
+      tokenFetcher.svidHint: custom-dpu
+    template: templates/admission-policy.yaml
+    documentIndex: 0
+    asserts:
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: '"--svid-hint=custom-dpu"'
+
+  - it: omits DPU service SVID selection when the hint is empty
+    set:
+      tokenFetcher.identityKeysURL: https://identity.example.com/v1/exchange
+      tokenFetcher.svidHint: ""
     template: templates/admission-policy.yaml
     documentIndex: 0
     asserts:

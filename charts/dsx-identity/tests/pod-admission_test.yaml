@@ -25,6 +25,26 @@ tests:
           of: MutatingAdmissionPolicyBinding
         documentIndex: 1
 
+  - it: renders the configured host SVID hint
+    set:
+      podTokenFetcher.svidHint: custom-host
+    template: templates/pod-token-fetcher.yaml
+    documentIndex: 0
+    asserts:
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: '"--svid-hint=custom-host"'
+
+  - it: omits host SVID selection when the hint is empty
+    set:
+      podTokenFetcher.svidHint: ""
+    template: templates/pod-token-fetcher.yaml
+    documentIndex: 0
+    asserts:
+      - notMatchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: --svid-hint
+
   - it: appends every configured pull secret without replacing Pod secrets
     set:
       imagePullSecrets:
