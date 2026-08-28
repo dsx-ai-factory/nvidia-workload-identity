@@ -49,6 +49,8 @@ test-chart: chart-dependencies
 	@$(MISE_EXEC) helm lint charts/dsx-imds --set metadataService.identityKeysURL=http://identity-keys.example/v1/exchange
 	@$(MISE_EXEC) helm lint charts/dsx-token-fetcher \
 		--set tokenFetcher.identityKeysURL=http://identity-keys.example/v1/exchange
+	@$(MISE_EXEC) helm lint charts/dsx-token-fetcher-example \
+		--set audience=spiffe://ds9.dsx.nvid.id/openbao
 	@$(MISE_EXEC) helm lint charts/dsx-spiffe-csi
 	@$(MISE_EXEC) helm lint charts/nats-2.14.2.tgz -f scripts/k1/nats/values.yaml
 	@# Normal E2E values disable metrics, so lint the optional ServiceMonitor resources separately.

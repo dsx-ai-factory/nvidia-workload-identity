@@ -1,0 +1,65 @@
+{{- $audience := required "audience is required" .Values.audience -}}
+{{- /* Preserve DPF's service label while adding labels used only by this chart. */}}
+{{- $labels := mergeOverwrite (dict
+  "app.kubernetes.io/name" "dsx-token-fetcher-example"
+  "app.kubernetes.io/instance" .Release.Name
+) .Values.serviceDaemonSet.labels -}}
+{{- /* The workload opts into injection while retaining annotations supplied by DPF. */}}
+{{- $annotations := mergeOverwrite (dict) .Values.serviceDaemonSet.annotations (dict
+  "spiffe.nvidia.com/inject-dsx-token-fetcher" "true"
+  "spiffe.nvidia.com/token-audience" $audience
+) -}}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    {{- toYaml $labels | nindent 4 }}
+  annotations:
+    {{- toYaml $annotations | nindent 4 }}
+spec:
+  {{- with .Values.serviceDaemonSet.updateStrategy }}
+  updateStrategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dsx-token-fetcher-example
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- toYaml $labels | nindent 8 }}
+      annotations:
+        {{- toYaml $annotations | nindent 8 }}
+    spec:
+      {{- /* DPF supplies a NodeSelector, which DaemonSets consume as required node affinity. */}}
+      {{- if not (empty .Values.serviceDaemonSet.nodeSelector) }}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            {{- toYaml .Values.serviceDaemonSet.nodeSelector | nindent 12 }}
+      {{- end }}
+      containers:
+        - name: token-reader
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["sh", "-c", "while true; do sleep 3600; done"]
+          # Readiness proves the injected fetcher populated the shared volume.
+          readinessProbe:
+            exec:
+              command: ["test", "-s", "/run/secrets/nvidia.com/dsx/token"]
+            periodSeconds: 2
+          # DPF uses one resource map for both requests and limits.
+          resources:
+            limits:
+              {{- toYaml .Values.serviceDaemonSet.resources | nindent 14 }}
+            requests:
+              {{- toYaml .Values.serviceDaemonSet.resources | nindent 14 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532

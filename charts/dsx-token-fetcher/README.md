@@ -14,7 +14,6 @@ annotated DPU service Pods.
 ```yaml
 tokenFetcher:
   identityKeysURL: https://identity-keys.example.com/v1/exchange
-  audience: spiffe://ds9.dsx.nvid.id/openbao
   spiffeCsiDriver: csi.spiffe.io
   # DPF's CSI mount preserves the DPU agent socket filename.
   spireSocketPath: /var/run/secrets/spire.io/agent.sock
@@ -26,7 +25,11 @@ The policy mutates Pod creation requests with this annotation:
 metadata:
   annotations:
     spiffe.nvidia.com/inject-dsx-token-fetcher: "true"
+    spiffe.nvidia.com/token-audience: spiffe://ds9.dsx.nvid.id/openbao
 ```
+
+The audience annotation is required on every selected Pod. It names the relying
+party for the local SPIRE JWT-SVID and is preserved in the exchanged DSX JWT.
 
 It adds the token fetcher as a native sidecar, mounts the SPIFFE Workload API
 only into that sidecar, and mounts the exchanged token read-only into every

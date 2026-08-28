@@ -521,12 +521,14 @@ metadata:
     spiffe.nvidia.com/service: dsx
   annotations:
     spiffe.nvidia.com/inject-dsx-token-fetcher: "true"
+    spiffe.nvidia.com/token-audience: spiffe://ds9.dsx.nvid.id/openbao
     instrumentation.opentelemetry.io/inject-sdk: "dsx-obs/default-instrumentation"
     sidecar.opentelemetry.io/inject: "dsx-obs/default-sidecar"
 ```
 
 The service label selects SPIRE registration. The injection annotation selects
-the token fetcher through native admission policy.
+the token fetcher through native admission policy. The audience annotation names
+the relying party for the requested SPIRE JWT-SVID and exchanged DSX JWT.
 
 For KubeVirt IMDS injection, put them on the VM Pod template:
 

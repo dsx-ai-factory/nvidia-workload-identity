@@ -95,7 +95,8 @@ spec:
                 command: ["/usr/local/bin/dsx-token-fetcher"],
                 args: [
                   {{ printf "--socket=unix://%s" (required "tokenFetcher.spireSocketPath is required" .Values.tokenFetcher.spireSocketPath) | quote }},
-                  {{ printf "--audience=%s" .Values.tokenFetcher.audience | quote }},
+                  {{- /* Each workload names its relying party. A missing annotation fails admission under failurePolicy: Fail. */}}
+                  "--audience=" + object.metadata.annotations["spiffe.nvidia.com/token-audience"],
                   "--svid-hint=dsx-pod",
                   {{ printf "--output=%s" .Values.tokenFetcher.outputPath | quote }},
                   {{ printf "--identity-keys-url=%s" (required "tokenFetcher.identityKeysURL is required" .Values.tokenFetcher.identityKeysURL) | quote }},
