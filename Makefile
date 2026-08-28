@@ -37,6 +37,8 @@ test-shell:
 	@find scripts kata-uds-proxy -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
 
 test-chart: chart-dependencies
+	@$(MISE_EXEC) untt --strict charts/dsx-identity charts/dsx-imds \
+		charts/dsx-token-fetcher charts/dsx-token-fetcher-example charts/dsx-spiffe-csi
 	@$(MISE_EXEC) helm lint charts/dsx-identity $(IDENTITY_E2E_VALUES) -f scripts/k1-values.yaml
 	@$(MISE_EXEC) helm lint charts/dsx-identity $(IDENTITY_E2E_VALUES) -f scripts/k2-values.yaml \
 		--set podTokenFetcher.enabled=false \

@@ -1,0 +1,90 @@
+suite: Token fetcher example workload
+templates:
+  - templates/daemonset.yaml
+tests:
+  - it: renders the opted-in token reader
+    set:
+      audience: spiffe://ds9.dsx.nvid.id/openbao
+    template: templates/daemonset.yaml
+    asserts:
+      - isKind:
+          of: DaemonSet
+      - equal:
+          path: spec.template.metadata.annotations["spiffe.nvidia.com/inject-dsx-token-fetcher"]
+          value: "true"
+      - equal:
+          path: spec.template.metadata.annotations["spiffe.nvidia.com/token-audience"]
+          value: spiffe://ds9.dsx.nvid.id/openbao
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.exec.command[2]
+          value: /run/secrets/nvidia.com/dsx/token
+
+  - it: merges DPF metadata scheduling strategy and resources
+    set:
+      audience: spiffe://ds9.dsx.nvid.id/openbao
+      serviceDaemonSet:
+        labels:
+          dpu.nvidia.com/service: example
+        annotations:
+          example.com/source: dpf
+          spiffe.nvidia.com/token-audience: ignored
+        updateStrategy:
+          type: OnDelete
+        nodeSelector:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: kubernetes.io/arch
+                  operator: In
+                  values: [arm64]
+        resources:
+          cpu: 100m
+          memory: 128Mi
+    template: templates/daemonset.yaml
+    asserts:
+      - equal:
+          path: metadata.labels["dpu.nvidia.com/service"]
+          value: example
+      - equal:
+          path: metadata.annotations["example.com/source"]
+          value: dpf
+      - equal:
+          path: metadata.annotations["spiffe.nvidia.com/token-audience"]
+          value: spiffe://ds9.dsx.nvid.id/openbao
+      - equal:
+          path: spec.updateStrategy.type
+          value: OnDelete
+      - equal:
+          path: spec.template.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].values[0]
+          value: arm64
+      - equal:
+          path: spec.template.spec.containers[0].resources.requests.cpu
+          value: 100m
+      - equal:
+          path: spec.template.spec.containers[0].resources.limits.memory
+          value: 128Mi
+
+  - it: omits optional scheduling and strategy blocks by default
+    set:
+      audience: spiffe://ds9.dsx.nvid.id/openbao
+    template: templates/daemonset.yaml
+    asserts:
+      - notExists:
+          path: spec.updateStrategy
+      - notExists:
+          path: spec.template.spec.affinity
+
+  - it: applies the configured reader image
+    set:
+      audience: spiffe://ds9.dsx.nvid.id/openbao
+      image:
+        repository: registry.example.com/token-reader
+        tag: custom-tag
+        pullPolicy: Always
+    template: templates/daemonset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.example.com/token-reader:custom-tag
+      - equal:
+          path: spec.template.spec.containers[0].imagePullPolicy
+          value: Always

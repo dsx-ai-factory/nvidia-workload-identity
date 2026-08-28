@@ -1,0 +1,170 @@
+suite: DPF child chart resources
+values:
+  - values.yaml
+templates:
+  - templates/dpu-service.yaml
+  - templates/dpu-token-fetcher-service.yaml
+tests:
+  - it: renders only DSX IMDS by default
+    set:
+      dpuService.identityKeysURL: https://identity.example.com/v1/exchange
+    template: templates/dpu-service.yaml
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: DPUService
+      - equal:
+          path: metadata.name
+          value: dsx-imds
+      - equal:
+          path: spec.helmChart.source.chart
+          value: dsx-imds
+      - equal:
+          path: spec.helmChart.values.metadataService.identityKeysURL
+          value: https://identity.example.com/v1/exchange
+
+  - it: renders SPIFFE CSI independently of DSX IMDS
+    set:
+      dpuService.imds.enabled: false
+      dpuService.spiffeCsi.enabled: true
+    template: templates/dpu-service.yaml
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: metadata.name
+          value: dsx-spiffe-csi
+      - equal:
+          path: spec.security.privileged
+          value: true
+      - equal:
+          path: spec.helmChart.source.version
+          value: 0.1.0
+
+  - it: renders both DPU workloads with explicit versions and pull secrets
+    set:
+      dpuService:
+        imds:
+          enabled: true
+          helmChart:
+            repoURL: https://helm.example.com
+            version: 2.0.0
+        spiffeCsi:
+          enabled: true
+          helmChart:
+            repoURL: https://helm.example.com
+            version: 3.0.0
+      imagePullSecrets:
+        - name: registry-one
+        - name: registry-two
+    template: templates/dpu-service.yaml
+    asserts:
+      - hasDocuments:
+          count: 2
+      - equal:
+          path: spec.helmChart.source.version
+          value: 2.0.0
+        documentIndex: 0
+      - equal:
+          path: spec.helmChart.values.imagePullSecrets[1].name
+          value: registry-two
+        documentIndex: 0
+      - equal:
+          path: spec.helmChart.source.version
+          value: 3.0.0
+        documentIndex: 1
+      - equal:
+          path: spec.helmChart.values.imagePullSecrets[0].name
+          value: registry-one
+        documentIndex: 1
+
+  - it: omits the optional IMDS socket override when empty
+    set:
+      dpuService.imds.spireSocketPath: ""
+    template: templates/dpu-service.yaml
+    documentIndex: 0
+    asserts:
+      - notExists:
+          path: spec.helmChart.values.metadataService.spireSocketPath
+
+  - it: omits all DPU workload resources when both are disabled
+    set:
+      dpuService.imds.enabled: false
+      dpuService.spiffeCsi.enabled: false
+    template: templates/dpu-service.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: rejects DSX IMDS without an externally reachable Identity Keys endpoint
+    set:
+      dpuService.identityKeysURL: ""
+    template: templates/dpu-service.yaml
+    asserts:
+      - failedTemplate:
+          errorMessage: dpuService.identityKeysURL is required
+
+  - it: passes token fetcher settings to its standalone chart
+    set:
+      dpuService.tokenFetcher.enabled: true
+      dpuService.identityKeysURL: https://identity.example.com/v1/exchange
+      dpuService.observabilityEnv:
+        OTEL_EXPORTER_OTLP_ENDPOINT: http://collector.example.com:4318
+        OTEL_METRICS_EXPORTER: prometheus
+      imagePullSecrets:
+        - name: registry-credentials
+    template: templates/dpu-token-fetcher-service.yaml
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: metadata.name
+          value: dsx-token-fetcher
+      - equal:
+          path: spec.helmChart.values.imagePullSecrets[0].name
+          value: registry-credentials
+      - equal:
+          path: spec.helmChart.values.tokenFetcher.identityKeysURL
+          value: https://identity.example.com/v1/exchange
+      - equal:
+          path: spec.helmChart.values.tokenFetcher.env.OTEL_EXPORTER_OTLP_ENDPOINT
+          value: http://collector.example.com:4318
+      - equal:
+          path: spec.helmChart.values.tokenFetcher.env.OTEL_METRICS_EXPORTER
+          value: none
+
+  - it: passes an explicit token fetcher chart version and socket
+    set:
+      dpuService:
+        tokenFetcher:
+          enabled: true
+          spireSocketPath: /custom/spire/agent.sock
+          helmChart:
+            repoURL: https://helm.example.com
+            version: 4.0.0
+    template: templates/dpu-token-fetcher-service.yaml
+    asserts:
+      - equal:
+          path: spec.helmChart.source.version
+          value: 4.0.0
+      - equal:
+          path: spec.helmChart.values.tokenFetcher.spireSocketPath
+          value: /custom/spire/agent.sock
+
+  - it: rejects token fetcher admission without a SPIRE socket
+    set:
+      dpuService.tokenFetcher.enabled: true
+      dpuService.tokenFetcher.spireSocketPath: ""
+    template: templates/dpu-token-fetcher-service.yaml
+    asserts:
+      - failedTemplate:
+          errorMessage: dpuService.tokenFetcher.spireSocketPath is required
+
+  - it: omits the token fetcher service when disabled
+    set:
+      dpuService.imds.enabled: false
+    template: templates/dpu-token-fetcher-service.yaml
+    asserts:
+      - hasDocuments:
+          count: 0

@@ -1,5 +1,6 @@
 {{- if .Values.identityController.enabled }}
 {{- $name := include "dsx-identity.identityControllerFullname" . -}}
+{{- $serviceName := include "dsx-identity.defaultServiceName" . -}}
 {{- $values := .Values.identityController -}}
 {{- $dpuMetadataSelectors := $values.dpuMetadataSelectors -}}
 {{- if and .Values.dpuService.imds.enabled (empty $dpuMetadataSelectors) -}}
@@ -82,7 +83,7 @@ spec:
     metadata:
       labels:
         {{- include "dsx-identity.identityControllerLabels" . | nindent 8 }}
-        spiffe.nvidia.com/service: {{ include "dsx-identity.defaultServiceName" . | quote }}
+        spiffe.nvidia.com/service: {{ $serviceName | quote }}
       {{- with (include "dsx-identity.observabilityPodAnnotations" (dict "root" . "containerNames" "controller")) }}
       annotations:
         {{- . | nindent 8 }}
@@ -109,7 +110,7 @@ spec:
             - /usr/local/bin/dsx-identity-controller
           args:
             - --trust-domain={{ required "global.spire.trustDomain is required" $.Values.global.spire.trustDomain }}
-            - --service={{ include "dsx-identity.defaultServiceName" $ }}
+            - --service={{ $serviceName }}
             - --operator-tenant={{ include "dsx-identity.operatorTenant" $ }}
             # SPIRE controller-manager derives its class from this release identity.
             - --class-name={{ $.Release.Namespace }}-{{ $.Release.Name }}

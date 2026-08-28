@@ -1,0 +1,166 @@
+suite: Identity Controller resources
+values:
+  - values.yaml
+templates:
+  - templates/identity-controller.yaml
+tests:
+  - it: renders RBAC workload and disruption budget for multiple replicas
+    set:
+      identityController.enabled: true
+    template: templates/identity-controller.yaml
+    asserts:
+      - hasDocuments:
+          count: 5
+      - isKind:
+          of: ServiceAccount
+        documentIndex: 0
+      - isKind:
+          of: ClusterRole
+        documentIndex: 1
+      - isKind:
+          of: ClusterRoleBinding
+        documentIndex: 2
+      - isKind:
+          of: Deployment
+        documentIndex: 3
+      - isKind:
+          of: PodDisruptionBudget
+        documentIndex: 4
+
+  - it: derives DPU metadata selectors from the enabled IMDS service
+    set:
+      identityController.enabled: true
+      dpuService.workload:
+        serviceAccountName: custom-imds
+        containerName: custom-metadata
+    template: templates/identity-controller.yaml
+    documentIndex: 3
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --dpu-metadata-selector=k8s:ns:NAMESPACE
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --dpu-metadata-selector=k8s:sa:custom-imds
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --dpu-metadata-selector=k8s:container-name:custom-metadata
+
+  - it: uses explicit DPU metadata selectors without the IMDS service
+    set:
+      identityController:
+        enabled: true
+        dpuMetadataSelectors:
+          - k8s:ns:external
+          - k8s:sa:external-imds
+      dpuService.imds.enabled: false
+    template: templates/identity-controller.yaml
+    documentIndex: 3
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --dpu-metadata-selector=k8s:ns:external
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --dpu-metadata-selector=k8s:sa:external-imds
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --dpu-metadata-selector=k8s:ns:NAMESPACE
+
+  - it: omits DPU selector arguments when IMDS and explicit selectors are absent
+    set:
+      identityController.enabled: true
+      identityController.dpuMetadataSelectors: []
+      dpuService.imds.enabled: false
+    template: templates/identity-controller.yaml
+    documentIndex: 3
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --dpu-metadata-selector=k8s:ns:NAMESPACE
+
+  - it: enables metrics and exposes their port
+    set:
+      identityController.enabled: true
+      observability.metrics:
+        enabled: true
+        port: 19464
+    template: templates/identity-controller.yaml
+    documentIndex: 3
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --metrics-bind-address=:19464
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: metrics
+            containerPort: 19464
+
+  - it: disables the metrics listener and port
+    set:
+      identityController.enabled: true
+      observability.metrics.enabled: false
+    template: templates/identity-controller.yaml
+    documentIndex: 3
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --metrics-bind-address=0
+      - notContains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: metrics
+            containerPort: 9464
+
+  - it: applies pull secrets through the controller ServiceAccount
+    set:
+      identityController.enabled: true
+      imagePullSecrets:
+        - name: registry-one
+        - name: registry-two
+    template: templates/identity-controller.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: imagePullSecrets[0].name
+          value: registry-one
+      - equal:
+          path: imagePullSecrets[1].name
+          value: registry-two
+
+  - it: uses component global and chart image tags in precedence order
+    set:
+      identityController.enabled: true
+      global.imageTag: global-tag
+      identityController.image.tag: component-tag
+    template: templates/identity-controller.yaml
+    documentIndex: 3
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: nvcr.io/0837451325059433/components-dev/dsx-identity-controller:component-tag
+
+  - it: omits the disruption budget for one replica
+    set:
+      identityController.enabled: true
+      identityController.replicaCount: 1
+    template: templates/identity-controller.yaml
+    asserts:
+      - hasDocuments:
+          count: 4
+
+  - it: omits every controller resource when disabled
+    template: templates/identity-controller.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: rejects an invalid default service
+    set:
+      identityController.enabled: true
+      global.dsx.defaultServiceName: Invalid_Service
+    template: templates/identity-controller.yaml
+    asserts:
+      - failedTemplate:
+          errorMessage: global.dsx.defaultServiceName must be a DNS label

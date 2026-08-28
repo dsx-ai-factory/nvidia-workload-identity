@@ -1,0 +1,147 @@
+suite: DPU token fetcher admission
+templates:
+  - templates/admission-policy.yaml
+tests:
+  - it: renders the Kubernetes 1.35 beta admission resources
+    capabilities:
+      majorVersion: 1
+      minorVersion: 35
+    set:
+      tokenFetcher.identityKeysURL: https://identity.example.com/v1/exchange
+    template: templates/admission-policy.yaml
+    asserts:
+      - hasDocuments:
+          count: 2
+      - equal:
+          path: apiVersion
+          value: admissionregistration.k8s.io/v1beta1
+        documentIndex: 0
+      - isKind:
+          of: MutatingAdmissionPolicy
+        documentIndex: 0
+      - equal:
+          path: spec.failurePolicy
+          value: Fail
+        documentIndex: 0
+      - isKind:
+          of: MutatingAdmissionPolicyBinding
+        documentIndex: 1
+
+  - it: renders the Kubernetes 1.36 stable admission resources
+    capabilities:
+      majorVersion: 1
+      minorVersion: 36
+    set:
+      tokenFetcher.identityKeysURL: https://identity.example.com/v1/exchange
+    template: templates/admission-policy.yaml
+    asserts:
+      - equal:
+          path: apiVersion
+          value: admissionregistration.k8s.io/v1
+        documentIndex: 0
+      - equal:
+          path: apiVersion
+          value: admissionregistration.k8s.io/v1
+        documentIndex: 1
+
+  - it: carries configured image pull secrets into the JSON patch
+    set:
+      imagePullSecrets:
+        - name: registry-one
+        - name: registry-two
+      tokenFetcher.identityKeysURL: https://identity.example.com/v1/exchange
+    template: templates/admission-policy.yaml
+    documentIndex: 0
+    asserts:
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'Object\.spec\.imagePullSecrets\{name: "registry-one"\}'
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'Object\.spec\.imagePullSecrets\{name: "registry-two"\}'
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'path: "/spec/imagePullSecrets",\s+value: \[\]'
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'path: "/spec/imagePullSecrets/-"'
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'image: "nvcr\.io/0837451325059433/components-dev/dsx-token-fetcher:0\.1\.0"'
+
+  - it: does not create an empty pull secret list when none are configured
+    set:
+      tokenFetcher.identityKeysURL: https://identity.example.com/v1/exchange
+    template: templates/admission-policy.yaml
+    documentIndex: 0
+    asserts:
+      - notMatchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: /spec/imagePullSecrets
+
+  - it: renders explicit image environment probe and resources
+    set:
+      tokenFetcher:
+        identityKeysURL: https://identity.example.com/v1/exchange
+        image:
+          repository: registry.example.com/token-fetcher
+          tag: component-tag
+          pullPolicy: Always
+        env:
+          Z_LAST: z
+          A_FIRST: a
+        startupProbe:
+          httpGet:
+            path: /startup
+            port: 9090
+          periodSeconds: 2
+          failureThreshold: 10
+        resources:
+          requests:
+            cpu: 25m
+            memory: 32Mi
+          limits:
+            cpu: 75m
+            memory: 96Mi
+    template: templates/admission-policy.yaml
+    documentIndex: 0
+    asserts:
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'image: "registry\.example\.com/token-fetcher:component-tag"'
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'name: "A_FIRST",\s+value: "a"'
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'name: "Z_LAST",\s+value: "z"'
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'path: "/startup",\s+port: 9090'
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'requests: \{"cpu":"25m","memory":"32Mi"\}'
+
+  - it: rejects a missing Identity Keys endpoint
+    template: templates/admission-policy.yaml
+    asserts:
+      - failedTemplate:
+          errorMessage: tokenFetcher.identityKeysURL is required
+
+  - it: rejects a missing SPIFFE CSI driver
+    set:
+      tokenFetcher.identityKeysURL: https://identity.example.com/v1/exchange
+      tokenFetcher.spiffeCsiDriver: ""
+    template: templates/admission-policy.yaml
+    asserts:
+      - failedTemplate:
+          errorMessage: tokenFetcher.spiffeCsiDriver is required
+
+  - it: rejects a missing SPIRE socket
+    set:
+      tokenFetcher.identityKeysURL: https://identity.example.com/v1/exchange
+      tokenFetcher.spireSocketPath: ""
+    template: templates/admission-policy.yaml
+    asserts:
+      - failedTemplate:
+          errorMessage: tokenFetcher.spireSocketPath is required

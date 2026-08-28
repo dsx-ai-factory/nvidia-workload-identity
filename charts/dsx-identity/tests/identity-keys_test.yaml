@@ -1,0 +1,249 @@
+suite: Identity Keys resources
+values:
+  - values.yaml
+templates:
+  - templates/identity-keys-deployment.yaml
+  - templates/identity-keys-service.yaml
+  - templates/identity-keys-serviceaccount.yaml
+tests:
+  - it: renders the deployment and disruption budget
+    template: templates/identity-keys-deployment.yaml
+    asserts:
+      - hasDocuments:
+          count: 2
+      - isKind:
+          of: Deployment
+        documentIndex: 0
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: nvcr.io/0837451325059433/components-dev/dsx-identity-keys:0.1.0
+        documentIndex: 0
+      - isKind:
+          of: PodDisruptionBudget
+        documentIndex: 1
+
+  - it: applies pull secrets placement and custom scheduling
+    set:
+      imagePullSecrets:
+        - name: registry-one
+        - name: registry-two
+      identityKeys.nodeSelector:
+        kubernetes.io/os: linux
+      identityKeys.tolerations:
+        - key: dedicated
+          operator: Equal
+          value: identity
+          effect: NoSchedule
+    template: templates/identity-keys-deployment.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.template.spec.imagePullSecrets[0].name
+          value: registry-one
+      - equal:
+          path: spec.template.spec.imagePullSecrets[1].name
+          value: registry-two
+      - equal:
+          path: spec.template.spec.nodeSelector["kubernetes.io/os"]
+          value: linux
+      - equal:
+          path: spec.template.spec.tolerations[0].value
+          value: identity
+
+  - it: uses explicit component tags before the global tag
+    set:
+      global.imageTag: global-tag
+      identityKeys.image.tag: component-tag
+    template: templates/identity-keys-deployment.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: nvcr.io/0837451325059433/components-dev/dsx-identity-keys:component-tag
+
+  - it: uses the global image tag when the component tag is empty
+    set:
+      global.imageTag: global-tag
+    template: templates/identity-keys-deployment.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: nvcr.io/0837451325059433/components-dev/dsx-identity-keys:global-tag
+
+  - it: configures unauthenticated NATS and Prometheus metrics
+    set:
+      observability.metrics.port: 19464
+      observability.env:
+        OTEL_METRICS_EXPORTER: overridden
+    template: templates/identity-keys-deployment.yaml
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --nats-auth-mode=none
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: metrics
+            containerPort: 19464
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_METRICS_EXPORTER
+            value: prometheus
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_EXPORTER_PROMETHEUS_PORT
+            value: "19464"
+
+  - it: disables NATS and metrics without rendering their mounts or ports
+    set:
+      identityKeys.nats.enabled: false
+      observability.metrics.enabled: false
+    template: templates/identity-keys-deployment.yaml
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --disable-nats
+      - notContains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: metrics
+            containerPort: 9464
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: nats-auth
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_METRICS_EXPORTER
+            value: none
+
+  - it: configures OAuth2 NATS authentication and its secret mount
+    set:
+      identityKeys.nats.auth:
+        mode: oauth2
+        credentialsSecret: nats-oauth
+        credentialsKey: oauth.json
+        issuerURL: https://oauth.example.com
+        scopes: [nats, identity]
+    template: templates/identity-keys-deployment.yaml
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --nats-auth-mode=oauth2
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --nats-oauth-scopes=nats,identity
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: nats-auth
+            mountPath: /run/secrets/dsx-identity-keys-nats
+            readOnly: true
+      - equal:
+          path: spec.template.spec.volumes[3].secret.secretName
+          value: nats-oauth
+      - equal:
+          path: spec.template.spec.volumes[3].secret.items[0].key
+          value: oauth.json
+
+  - it: rejects unsupported NATS authentication modes
+    set:
+      identityKeys.nats.auth.mode: token
+    template: templates/identity-keys-deployment.yaml
+    asserts:
+      - failedTemplate:
+          errorMessage: identityKeys.nats.auth.mode must be none or oauth2
+
+  - it: rejects non-DNS JWT issuers
+    set:
+      global.dsx.jwtIssuer: https://identity.example.com/path
+    template: templates/identity-keys-deployment.yaml
+    asserts:
+      - failedTemplate:
+          errorMessage: global.dsx.jwtIssuer must be an HTTPS URL containing only a DNS hostname
+
+  - it: merges user annotations with required telemetry annotations
+    set:
+      observability.podAnnotations:
+        example.com/custom: retained
+        instrumentation.opentelemetry.io/inject-sdk: ignored
+    template: templates/identity-keys-deployment.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["example.com/custom"]
+          value: retained
+      - equal:
+          path: spec.template.metadata.annotations["instrumentation.opentelemetry.io/inject-sdk"]
+          value: dsx-obs/default-instrumentation
+
+  - it: renders the HTTP and metrics Service ports
+    set:
+      identityKeys.service:
+        type: NodePort
+        port: 8080
+        nodePort: 32080
+    template: templates/identity-keys-service.yaml
+    asserts:
+      - equal:
+          path: spec.type
+          value: NodePort
+      - equal:
+          path: spec.ports[0].nodePort
+          value: 32080
+      - equal:
+          path: spec.ports[1].name
+          value: metrics
+
+  - it: omits optional Service fields when metrics and node port are disabled
+    set:
+      identityKeys.service.nodePort: null
+      observability.metrics.enabled: false
+    template: templates/identity-keys-service.yaml
+    asserts:
+      - notExists:
+          path: spec.ports[0].nodePort
+      - hasDocuments:
+          count: 1
+      - notExists:
+          path: spec.ports[1]
+
+  - it: renders the Identity Keys ServiceAccount
+    template: templates/identity-keys-serviceaccount.yaml
+    asserts:
+      - isKind:
+          of: ServiceAccount
+      - equal:
+          path: metadata.name
+          value: dsx-identity-keys-sa
+
+  - it: omits every Identity Keys resource when disabled
+    set:
+      identityKeys.enabled: false
+    template: templates/identity-keys-deployment.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: omits the Identity Keys Service when disabled
+    set:
+      identityKeys.enabled: false
+    template: templates/identity-keys-service.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: omits the Identity Keys ServiceAccount when disabled
+    set:
+      identityKeys.enabled: false
+    template: templates/identity-keys-serviceaccount.yaml
+    asserts:
+      - hasDocuments:
+          count: 0

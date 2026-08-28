@@ -64,11 +64,34 @@ spec:
             }
           }]
     # The guest proxy recreates the host Workload API socket inside the VM.
+    # Create the atomic list when absent, then append only configured secrets
+    # missing by name. Existing pull secrets and init-container order stay intact.
     - patchType: JSONPatch
       jsonPatch:
         # Admission policy order is unspecified. Insert before an existing token
         # fetcher, or append so a later token-fetcher mutation follows the proxy.
         expression: >-
+          {{- with .Values.imagePullSecrets }}
+          (!has(object.spec.imagePullSecrets)
+            ? [JSONPatch{
+                op: "add",
+                path: "/spec/imagePullSecrets",
+                value: []
+              }]
+            : []) +
+          [
+            {{- range $index, $secret := . }}{{ if $index }},{{ end }}
+            Object.spec.imagePullSecrets{name: {{ $secret.name | quote }}}
+            {{- end }}
+          ].filter(secret,
+            !has(object.spec.imagePullSecrets) ||
+            !object.spec.imagePullSecrets.exists(existing, existing.name == secret.name)
+          ).map(secret, JSONPatch{
+            op: "add",
+            path: "/spec/imagePullSecrets/-",
+            value: secret
+          }) +
+          {{- end }}
           (!has(object.spec.initContainers)
             ? [JSONPatch{
                 op: "add",

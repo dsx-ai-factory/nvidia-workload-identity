@@ -1,0 +1,50 @@
+suite: SPIRE operator identities
+values:
+  - values.yaml
+templates:
+  - templates/operator-identities.yaml
+tests:
+  - it: renders the operator Pod registration template
+    template: templates/operator-identities.yaml
+    asserts:
+      - isKind:
+          of: ClusterSPIFFEID
+      - equal:
+          path: spec.className
+          value: NAMESPACE-RELEASE-NAME
+      - matchRegex:
+          path: spec.spiffeIDTemplate
+          pattern: '/tenant/operator-1/service/'
+
+  - it: omits operator identities when SPIRE is disabled
+    set:
+      spire.enabled: false
+    template: templates/operator-identities.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: rejects an invalid operator tenant
+    set:
+      global.operatorTenant: Invalid_Tenant
+      spire.spire-server.controllerManager.extraEnv[0].value: Invalid_Tenant
+    template: templates/operator-identities.yaml
+    asserts:
+      - failedTemplate:
+          errorMessage: global.operatorTenant must be a DNS label
+
+  - it: rejects a controller-manager tenant mismatch
+    set:
+      spire.spire-server.controllerManager.extraEnv[0].value: operator-2
+    template: templates/operator-identities.yaml
+    asserts:
+      - failedTemplate:
+          errorMessage: global.operatorTenant must match spire.spire-server.controllerManager.extraEnv OPERATOR_TENANT
+
+  - it: rejects a missing controller-manager tenant
+    set:
+      spire.spire-server.controllerManager.extraEnv: []
+    template: templates/operator-identities.yaml
+    asserts:
+      - failedTemplate:
+          errorMessage: global.operatorTenant must match spire.spire-server.controllerManager.extraEnv OPERATOR_TENANT
