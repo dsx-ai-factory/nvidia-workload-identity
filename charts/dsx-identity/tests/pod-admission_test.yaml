@@ -1,0 +1,122 @@
+suite: Pod identity admission
+values:
+  - values.yaml
+templates:
+  - templates/pod-token-fetcher.yaml
+  - templates/pod-label-validation-policy.yaml
+tests:
+  - it: renders token fetcher mutation and binding
+    template: templates/pod-token-fetcher.yaml
+    asserts:
+      - hasDocuments:
+          count: 2
+      - isKind:
+          of: MutatingAdmissionPolicy
+        documentIndex: 0
+      - equal:
+          path: spec.reinvocationPolicy
+          value: IfNeeded
+        documentIndex: 0
+      - isKind:
+          of: MutatingAdmissionPolicyBinding
+        documentIndex: 1
+
+  - it: appends every configured pull secret without replacing Pod secrets
+    set:
+      imagePullSecrets:
+        - name: registry-one
+        - name: registry-two
+    template: templates/pod-token-fetcher.yaml
+    documentIndex: 0
+    asserts:
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'path: "/spec/imagePullSecrets",\s+value: \[\]'
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'path: "/spec/imagePullSecrets/-"'
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'Object\.spec\.imagePullSecrets\{name: "registry-one"\}'
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'Object\.spec\.imagePullSecrets\{name: "registry-two"\}'
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: '!object\.spec\.imagePullSecrets\.exists'
+
+  - it: does not create an empty pull secret list when none are configured
+    template: templates/pod-token-fetcher.yaml
+    documentIndex: 0
+    asserts:
+      - notMatchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: /spec/imagePullSecrets
+
+  - it: uses the component image tag and optional startup probe
+    set:
+      global.imageTag: global-tag
+      podTokenFetcher.image.tag: component-tag
+    template: templates/pod-token-fetcher.yaml
+    documentIndex: 0
+    asserts:
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'image: "nvcr\.io/0837451325059433/components-dev/dsx-token-fetcher:component-tag"'
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'startupProbe:'
+
+  - it: uses the global tag and omits a disabled startup probe block
+    set:
+      global.imageTag: global-tag
+      podTokenFetcher.startupProbe: null
+    template: templates/pod-token-fetcher.yaml
+    documentIndex: 0
+    asserts:
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'image: "nvcr\.io/0837451325059433/components-dev/dsx-token-fetcher:global-tag"'
+      - notMatchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'startupProbe:'
+
+  - it: rejects token injection without SPIRE
+    set:
+      spire.enabled: false
+    template: templates/pod-token-fetcher.yaml
+    asserts:
+      - failedTemplate:
+          errorMessage: podTokenFetcher.enabled requires spire.enabled so selected Pods have a dsx-pod registration
+
+  - it: omits token injection when disabled
+    set:
+      podTokenFetcher.enabled: false
+    template: templates/pod-token-fetcher.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders service and role label validation
+    template: templates/pod-label-validation-policy.yaml
+    asserts:
+      - hasDocuments:
+          count: 2
+      - isKind:
+          of: ValidatingAdmissionPolicy
+        documentIndex: 0
+      - isKind:
+          of: ValidatingAdmissionPolicyBinding
+        documentIndex: 1
+      - equal:
+          path: spec.validationActions[0]
+          value: Deny
+        documentIndex: 1
+
+  - it: omits label validation with token injection
+    set:
+      podTokenFetcher.enabled: false
+    template: templates/pod-label-validation-policy.yaml
+    asserts:
+      - hasDocuments:
+          count: 0

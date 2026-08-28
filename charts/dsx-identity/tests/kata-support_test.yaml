@@ -1,0 +1,149 @@
+suite: Kata identity support
+values:
+  - values.yaml
+templates:
+  - templates/kata-support.yaml
+  - templates/kata-injection-policy.yaml
+tests:
+  - it: renders the privileged host proxy
+    set:
+      kataSupport.enabled: true
+    template: templates/kata-support.yaml
+    asserts:
+      - isKind:
+          of: DaemonSet
+      - equal:
+          path: spec.template.spec.hostPID
+          value: true
+      - equal:
+          path: spec.template.spec.hostNetwork
+          value: true
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.privileged
+          value: true
+
+  - it: applies pull secrets scheduling and explicit image tag to the host proxy
+    set:
+      kataSupport.enabled: true
+      kataSupport.image.tag: component-tag
+      kataSupport.nodeSelector:
+        example.com/kata: "true"
+      kataSupport.tolerations:
+        - key: dedicated
+          operator: Equal
+          value: kata
+          effect: NoSchedule
+      imagePullSecrets:
+        - name: registry-one
+        - name: registry-two
+    template: templates/kata-support.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.imagePullSecrets[0].name
+          value: registry-one
+      - equal:
+          path: spec.template.spec.imagePullSecrets[1].name
+          value: registry-two
+      - equal:
+          path: spec.template.spec.nodeSelector["example.com/kata"]
+          value: "true"
+      - equal:
+          path: spec.template.spec.tolerations[0].value
+          value: kata
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: nvcr.io/0837451325059433/components-dev/dsx-kata-uds-proxy:component-tag
+
+  - it: uses the global image tag for the host proxy
+    set:
+      kataSupport.enabled: true
+      global.imageTag: global-tag
+    template: templates/kata-support.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: nvcr.io/0837451325059433/components-dev/dsx-kata-uds-proxy:global-tag
+
+  - it: rejects Kata support without SPIRE
+    set:
+      kataSupport.enabled: true
+      spire.enabled: false
+    template: templates/kata-support.yaml
+    asserts:
+      - failedTemplate:
+          errorMessage: kataSupport.enabled requires spire.enabled so the host proxy can reach a Workload API socket
+
+  - it: renders the guest proxy mutation and binding
+    set:
+      kataSupport.enabled: true
+      kataSupport.runtimeClassNames: [kata-one, kata-two]
+    template: templates/kata-injection-policy.yaml
+    asserts:
+      - hasDocuments:
+          count: 2
+      - equal:
+          path: spec.matchConditions[0].expression
+          value: has(object.spec.runtimeClassName) && object.spec.runtimeClassName in ["kata-one","kata-two"]
+        documentIndex: 0
+      - isKind:
+          of: MutatingAdmissionPolicyBinding
+        documentIndex: 1
+
+  - it: appends configured pull secrets to Kata Pods
+    set:
+      kataSupport.enabled: true
+      imagePullSecrets:
+        - name: registry-one
+        - name: registry-two
+    template: templates/kata-injection-policy.yaml
+    documentIndex: 0
+    asserts:
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'Object\.spec\.imagePullSecrets\{name: "registry-one"\}'
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'Object\.spec\.imagePullSecrets\{name: "registry-two"\}'
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: '!object\.spec\.imagePullSecrets\.exists'
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'path: "/spec/imagePullSecrets",\s+value: \[\]'
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'path: "/spec/imagePullSecrets/-"'
+
+  - it: does not create an empty pull secret list when none are configured
+    set:
+      kataSupport.enabled: true
+    template: templates/kata-injection-policy.yaml
+    documentIndex: 0
+    asserts:
+      - notMatchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: /spec/imagePullSecrets
+
+  - it: uses component image tag before the global tag in the guest proxy
+    set:
+      kataSupport.enabled: true
+      global.imageTag: global-tag
+      kataSupport.image.tag: component-tag
+    template: templates/kata-injection-policy.yaml
+    documentIndex: 0
+    asserts:
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'dsx-kata-uds-proxy:component-tag'
+
+  - it: omits all Kata resources and admission when disabled
+    template: templates/kata-support.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: omits Kata admission when disabled
+    template: templates/kata-injection-policy.yaml
+    asserts:
+      - hasDocuments:
+          count: 0

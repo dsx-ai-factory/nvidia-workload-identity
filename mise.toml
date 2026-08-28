@@ -4,6 +4,7 @@ rust = "1.97.1"
 kind = "v0.32.0"
 kubectl = "v1.34.0"
 helm = "v3.21.2"
+"github:helm-unittest/helm-unittest" = { version = "1.0.3", bin = "untt" }
 skaffold = "v2.21.0"
 jq = "1.8.2"
 yq = "v4.52.5"

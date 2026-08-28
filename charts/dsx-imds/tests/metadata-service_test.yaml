@@ -1,0 +1,151 @@
+suite: DSX IMDS workload
+templates:
+  - templates/metadata-service.yaml
+tests:
+  - it: renders the metadata service with the standalone chart defaults
+    set:
+      metadataService.identityKeysURL: https://identity.example.com/v1/exchange
+    template: templates/metadata-service.yaml
+    documentIndex: 0
+    asserts:
+      - isKind:
+          of: DaemonSet
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: dsx-imds
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: nvcr.io/0837451325059433/components-dev/metadata-service:0.1.0
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --identity-keys-url=https://identity.example.com/v1/exchange
+      - equal:
+          path: spec.template.spec.volumes[0].csi.driver
+          value: csi.spiffe.io
+
+  - it: passes DPF scheduling metadata and resource budgets to the DaemonSet
+    set:
+      metadataService.identityKeysURL: https://identity.example.com/v1/exchange
+      imagePullSecrets:
+        - name: registry-credentials
+      serviceDaemonSet:
+        annotations:
+          dpu.nvidia.com/service: dsx-imds
+        labels:
+          app.nvidia.com/managed: "true"
+        nodeSelector:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: kubernetes.io/arch
+                  operator: In
+                  values: [arm64]
+        resources:
+          cpu: 250m
+          memory: 256Mi
+        updateStrategy:
+          type: OnDelete
+    template: templates/metadata-service.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: metadata.annotations["dpu.nvidia.com/service"]
+          value: dsx-imds
+      - equal:
+          path: spec.updateStrategy.type
+          value: OnDelete
+      - equal:
+          path: spec.template.spec.imagePullSecrets[0].name
+          value: registry-credentials
+      - equal:
+          path: spec.template.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].values[0]
+          value: arm64
+      - equal:
+          path: spec.template.spec.containers[0].resources.requests.cpu
+          value: 250m
+      - equal:
+          path: spec.template.spec.containers[0].resources.limits.memory
+          value: 256Mi
+
+  - it: keeps requests on the caller node
+    set:
+      metadataService.identityKeysURL: https://identity.example.com/v1/exchange
+    template: templates/metadata-service.yaml
+    documentIndex: 1
+    asserts:
+      - isKind:
+          of: Service
+      - equal:
+          path: spec.internalTrafficPolicy
+          value: Local
+
+  - it: uses component image tag environment and default resource maps
+    set:
+      metadataService:
+        identityKeysURL: https://identity.example.com/v1/exchange
+        image:
+          repository: registry.example.com/metadata-service
+          tag: component-tag
+          pullPolicy: Always
+        env:
+          Z_LAST: z
+          A_FIRST: a
+    template: templates/metadata-service.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.example.com/metadata-service:component-tag
+      - equal:
+          path: spec.template.spec.containers[0].env[0].name
+          value: A_FIRST
+      - equal:
+          path: spec.template.spec.containers[0].env[1].name
+          value: Z_LAST
+      - equal:
+          path: spec.template.spec.containers[0].resources.requests.cpu
+          value: 50m
+      - equal:
+          path: spec.template.spec.containers[0].resources.limits.memory
+          value: 128Mi
+
+  - it: rejects a missing Identity Keys endpoint
+    template: templates/metadata-service.yaml
+    asserts:
+      - failedTemplate:
+          errorMessage: metadataService.identityKeysURL is required
+
+  - it: rejects a missing workload ServiceAccount name
+    set:
+      workload.serviceAccountName: ""
+      metadataService.identityKeysURL: https://identity.example.com/v1/exchange
+    template: templates/metadata-service.yaml
+    asserts:
+      - failedTemplate:
+          errorMessage: workload.serviceAccountName is required
+
+  - it: rejects a missing container name
+    set:
+      workload.containerName: ""
+      metadataService.identityKeysURL: https://identity.example.com/v1/exchange
+    template: templates/metadata-service.yaml
+    asserts:
+      - failedTemplate:
+          errorMessage: workload.containerName is required
+
+  - it: rejects a missing SPIFFE CSI driver
+    set:
+      metadataService.identityKeysURL: https://identity.example.com/v1/exchange
+      spiffeCsiDriver: ""
+    template: templates/metadata-service.yaml
+    asserts:
+      - failedTemplate:
+          errorMessage: spiffeCsiDriver is required
+
+  - it: rejects a missing SPIRE socket
+    set:
+      metadataService.identityKeysURL: https://identity.example.com/v1/exchange
+      metadataService.spireSocketPath: ""
+    template: templates/metadata-service.yaml
+    asserts:
+      - failedTemplate:
+          errorMessage: metadataService.spireSocketPath is required

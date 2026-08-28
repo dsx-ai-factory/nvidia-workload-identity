@@ -1,0 +1,170 @@
+suite: VM identity support
+values:
+  - values.yaml
+templates:
+  - templates/vm-support.yaml
+  - templates/vm-injection-policy.yaml
+tests:
+  - it: renders the proxy ServiceAccount DaemonSet and CSI driver
+    set:
+      vmSupport.enabled: true
+    template: templates/vm-support.yaml
+    asserts:
+      - hasDocuments:
+          count: 3
+      - isKind:
+          of: ServiceAccount
+        documentIndex: 0
+      - isKind:
+          of: DaemonSet
+        documentIndex: 1
+      - isKind:
+          of: CSIDriver
+        documentIndex: 2
+
+  - it: applies pull secrets and tolerations to the proxy workload
+    set:
+      vmSupport.enabled: true
+      imagePullSecrets:
+        - name: registry-one
+        - name: registry-two
+      vmSupport.tolerations:
+        - key: dedicated
+          operator: Equal
+          value: vm
+          effect: NoSchedule
+    template: templates/vm-support.yaml
+    asserts:
+      - equal:
+          path: imagePullSecrets[0].name
+          value: registry-one
+        documentIndex: 0
+      - equal:
+          path: imagePullSecrets[1].name
+          value: registry-two
+        documentIndex: 0
+      - equal:
+          path: spec.template.spec.tolerations[0].value
+          value: vm
+        documentIndex: 1
+
+  - it: renders the proxy target custom tag and metrics listener
+    set:
+      vmSupport.enabled: true
+      global.imageTag: global-tag
+      vmSupport.identityKeysProxyCsi.image.tag: driver-tag
+      observability.metrics.port: 19464
+    template: templates/vm-support.yaml
+    documentIndex: 1
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].args[1]
+          value: TCP:dsx-identity-keys.default.svc.cluster.local:8080
+      - equal:
+          path: spec.template.spec.containers[1].image
+          value: nvcr.io/0837451325059433/components-dev/dsx-identity-keys-proxy-csi:driver-tag
+      - contains:
+          path: spec.template.spec.containers[1].ports
+          content:
+            name: metrics
+            containerPort: 19464
+
+  - it: omits the proxy metrics port when metrics are disabled
+    set:
+      vmSupport.enabled: true
+      observability.metrics.enabled: false
+    template: templates/vm-support.yaml
+    documentIndex: 1
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[1].ports
+      - contains:
+          path: spec.template.spec.containers[1].env
+          content:
+            name: OTEL_METRICS_EXPORTER
+            value: none
+
+  - it: rejects a missing Identity Keys proxy target
+    set:
+      vmSupport.enabled: true
+      vmSupport.identityKeysProxy.target: ""
+    template: templates/vm-support.yaml
+    asserts:
+      - failedTemplate:
+          errorMessage: vmSupport.identityKeysProxy.target is required
+
+  - it: renders the VM mutation and binding
+    set:
+      vmSupport.enabled: true
+    template: templates/vm-injection-policy.yaml
+    asserts:
+      - hasDocuments:
+          count: 2
+      - isKind:
+          of: MutatingAdmissionPolicy
+        documentIndex: 0
+      - isKind:
+          of: MutatingAdmissionPolicyBinding
+        documentIndex: 1
+
+  - it: appends configured pull secrets to virt-launcher Pods
+    set:
+      vmSupport.enabled: true
+      imagePullSecrets:
+        - name: registry-one
+        - name: registry-two
+    template: templates/vm-injection-policy.yaml
+    documentIndex: 0
+    asserts:
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'Object\.spec\.imagePullSecrets\{name: "registry-one"\}'
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'Object\.spec\.imagePullSecrets\{name: "registry-two"\}'
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: '!object\.spec\.imagePullSecrets\.exists'
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'path: "/spec/imagePullSecrets",\s+value: \[\]'
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'path: "/spec/imagePullSecrets/-"'
+
+  - it: does not create an empty pull secret list when none are configured
+    set:
+      vmSupport.enabled: true
+    template: templates/vm-injection-policy.yaml
+    documentIndex: 0
+    asserts:
+      - notMatchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: /spec/imagePullSecrets
+
+  - it: applies explicit and global image tag precedence to injected containers
+    set:
+      vmSupport.enabled: true
+      global.imageTag: global-tag
+      vmSupport.imdsNetworkSetup.image.tag: network-tag
+    template: templates/vm-injection-policy.yaml
+    documentIndex: 0
+    asserts:
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'dsx-imds-network-setup:network-tag'
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: 'metadata-service:global-tag'
+
+  - it: omits all VM resources and admission when disabled
+    template: templates/vm-support.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: omits VM admission when disabled
+    template: templates/vm-injection-policy.yaml
+    asserts:
+      - hasDocuments:
+          count: 0

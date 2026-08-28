@@ -1,0 +1,170 @@
+suite: DPU SPIFFE CSI workload
+templates:
+  - templates/spiffe-csi.yaml
+  - templates/serviceaccount.yaml
+tests:
+  - it: renders an ephemeral CSI driver and node plugin
+    template: templates/spiffe-csi.yaml
+    asserts:
+      - hasDocuments:
+          count: 2
+      - isKind:
+          of: CSIDriver
+        documentIndex: 0
+      - equal:
+          path: metadata.name
+          value: csi.spiffe.io
+        documentIndex: 0
+      - contains:
+          path: spec.volumeLifecycleModes
+          content: Ephemeral
+        documentIndex: 0
+      - isKind:
+          of: DaemonSet
+        documentIndex: 1
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.privileged
+          value: true
+        documentIndex: 1
+
+  - it: derives every kubelet host path from the configured root
+    set:
+      kubeletPath: /custom/kubelet
+      pluginName: dpu.csi.spiffe.io
+      agentSocketPath: /custom/spire/agent.sock
+    template: templates/spiffe-csi.yaml
+    documentIndex: 1
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].args[3]
+          value: /custom/kubelet/plugins/dpu.csi.spiffe.io/csi.sock
+      - equal:
+          path: spec.template.spec.volumes[0].hostPath.path
+          value: /custom/spire
+      - equal:
+          path: spec.template.spec.volumes[1].hostPath.path
+          value: /custom/kubelet/plugins/dpu.csi.spiffe.io
+      - equal:
+          path: spec.template.spec.volumes[2].hostPath.path
+          value: /custom/kubelet/pods
+      - equal:
+          path: spec.template.spec.volumes[3].hostPath.path
+          value: /custom/kubelet/plugins_registry
+
+  - it: applies the DPF resource budget to both containers
+    set:
+      serviceDaemonSet.resources:
+        cpu: 300m
+        memory: 384Mi
+    template: templates/spiffe-csi.yaml
+    documentIndex: 1
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].resources.requests.cpu
+          value: 300m
+      - equal:
+          path: spec.template.spec.containers[0].resources.limits.memory
+          value: 384Mi
+      - equal:
+          path: spec.template.spec.containers[1].resources.requests.cpu
+          value: 300m
+      - equal:
+          path: spec.template.spec.containers[1].resources.limits.memory
+          value: 384Mi
+
+  - it: uses distinct default resources for driver and registrar
+    template: templates/spiffe-csi.yaml
+    documentIndex: 1
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].resources.requests.cpu
+          value: 20m
+      - equal:
+          path: spec.template.spec.containers[0].resources.limits.memory
+          value: 64Mi
+      - equal:
+          path: spec.template.spec.containers[1].resources.requests.cpu
+          value: 10m
+      - equal:
+          path: spec.template.spec.containers[1].resources.limits.memory
+          value: 32Mi
+
+  - it: passes DPF metadata scheduling strategy and pull secrets
+    set:
+      imagePullSecrets:
+        - name: registry-one
+        - name: registry-two
+      serviceDaemonSet:
+        labels:
+          app.nvidia.com/managed: "true"
+        annotations:
+          dpu.nvidia.com/service: dsx-spiffe-csi
+        updateStrategy:
+          type: OnDelete
+        nodeSelector:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: kubernetes.io/arch
+                  operator: In
+                  values: [arm64]
+    template: templates/spiffe-csi.yaml
+    documentIndex: 1
+    asserts:
+      - equal:
+          path: metadata.annotations["dpu.nvidia.com/service"]
+          value: dsx-spiffe-csi
+      - equal:
+          path: spec.updateStrategy.type
+          value: OnDelete
+      - equal:
+          path: spec.template.spec.imagePullSecrets[0].name
+          value: registry-one
+      - equal:
+          path: spec.template.spec.imagePullSecrets[1].name
+          value: registry-two
+      - equal:
+          path: spec.template.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].values[0]
+          value: arm64
+
+  - it: omits optional DPF workload fields by default
+    template: templates/spiffe-csi.yaml
+    documentIndex: 1
+    asserts:
+      - notExists:
+          path: metadata.annotations
+      - notExists:
+          path: spec.updateStrategy
+      - notExists:
+          path: spec.template.spec.affinity
+      - notExists:
+          path: spec.template.spec.imagePullSecrets
+
+  - it: falls back to the chart app version for an empty driver tag
+    set:
+      image:
+        repository: registry.example.com/spiffe-csi
+        tag: ""
+        pullPolicy: IfNotPresent
+    template: templates/spiffe-csi.yaml
+    documentIndex: 1
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.example.com/spiffe-csi:0.2.7
+
+  - it: renders a tokenless ServiceAccount
+    template: templates/serviceaccount.yaml
+    asserts:
+      - isKind:
+          of: ServiceAccount
+      - equal:
+          path: automountServiceAccountToken
+          value: false
+
+  - it: rejects an empty CSI driver name
+    set:
+      pluginName: ""
+    template: templates/spiffe-csi.yaml
+    asserts:
+      - failedTemplate:
+          errorMessage: pluginName is required

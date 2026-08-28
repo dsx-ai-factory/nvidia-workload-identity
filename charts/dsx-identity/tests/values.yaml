@@ -1,0 +1,29 @@
+global:
+  dsx:
+    jwtIssuer: https://identity.example.com
+    region: region-1
+    partition: example.com
+    defaultServiceName: dsx
+  operatorTenant: operator-1
+  spire:
+    trustDomain: shard.example.com
+    clusterName: shard-a
+    jwtIssuer: https://spire.shard.example.com
+spire:
+  spire-server:
+    controllerManager:
+      extraEnv:
+        - name: OPERATOR_TENANT
+          value: operator-1
+identityKeys:
+  jwksURL: https://identity.example.com/.well-known/jwks.json
+  shardID: shard-a
+  nats:
+    serverURL: tls://nats.example.com:4222
+podTokenFetcher:
+  identityKeysURL: https://identity.example.com/v1/exchange
+vmSupport:
+  identityKeysProxy:
+    target: TCP:dsx-identity-keys.default.svc.cluster.local:8080
+dpuService:
+  identityKeysURL: https://identity.example.com/v1/exchange

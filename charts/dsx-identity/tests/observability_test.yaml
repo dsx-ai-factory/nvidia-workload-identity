@@ -1,0 +1,119 @@
+suite: Observability discovery resources
+values:
+  - values.yaml
+templates:
+  - templates/observability.yaml
+tests:
+  - it: renders SPIRE and Identity Keys monitors by default
+    template: templates/observability.yaml
+    asserts:
+      - hasDocuments:
+          count: 3
+      - isKind:
+          of: Service
+        documentIndex: 0
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-spire-metrics
+        documentIndex: 0
+      - isKind:
+          of: ServiceMonitor
+        documentIndex: 1
+      - equal:
+          path: metadata.name
+          value: dsx-identity-keys
+        documentIndex: 2
+
+  - it: keeps the SPIRE metrics Service without ServiceMonitor CRs
+    set:
+      observability.metrics.serviceMonitor.enabled: false
+    template: templates/observability.yaml
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: Service
+
+  - it: renders no discovery resources when metrics are disabled
+    set:
+      observability.metrics.enabled: false
+    template: templates/observability.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders a PodMonitor for the optional bundled SPIRE agent
+    set:
+      spire.spire-agent.enabled: true
+    template: templates/observability.yaml
+    asserts:
+      - hasDocuments:
+          count: 4
+      - isKind:
+          of: PodMonitor
+        documentIndex: 2
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-spire-agent
+        documentIndex: 2
+
+  - it: renders controller metrics Service and monitor
+    set:
+      spire.enabled: false
+      identityKeys.enabled: false
+      identityController.enabled: true
+    template: templates/observability.yaml
+    asserts:
+      - hasDocuments:
+          count: 2
+      - isKind:
+          of: Service
+        documentIndex: 0
+      - isKind:
+          of: ServiceMonitor
+        documentIndex: 1
+
+  - it: keeps only the controller metrics Service when monitors are disabled
+    set:
+      spire.enabled: false
+      identityKeys.enabled: false
+      identityController.enabled: true
+      observability.metrics.serviceMonitor.enabled: false
+    template: templates/observability.yaml
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: Service
+
+  - it: renders VM proxy headless Service and monitor
+    set:
+      spire.enabled: false
+      identityKeys.enabled: false
+      vmSupport.enabled: true
+    template: templates/observability.yaml
+    asserts:
+      - hasDocuments:
+          count: 2
+      - equal:
+          path: spec.clusterIP
+          value: None
+        documentIndex: 0
+      - isKind:
+          of: ServiceMonitor
+        documentIndex: 1
+
+  - it: applies configured labels to every monitor type
+    set:
+      observability.metrics.serviceMonitor.labels:
+        monitoring.nvidia.com/team: identity
+    template: templates/observability.yaml
+    asserts:
+      - equal:
+          path: metadata.labels["monitoring.nvidia.com/team"]
+          value: identity
+        documentIndex: 1
+      - equal:
+          path: metadata.labels["monitoring.nvidia.com/team"]
+          value: identity
+        documentIndex: 2
