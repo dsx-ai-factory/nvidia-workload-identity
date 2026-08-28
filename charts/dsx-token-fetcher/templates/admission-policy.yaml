@@ -31,21 +31,14 @@ spec:
         !has(object.spec.initContainers) ||
         !object.spec.initContainers.exists(container, container.name == "dsx-token-fetcher")
   mutations:
-    # ApplyConfiguration merges Kubernetes map-like lists without replacing
-    # volumes, mounts, or pull secrets already owned by the workload. It also
-    # adds the read-only token mount to every application container.
+    # ApplyConfiguration merges Kubernetes map-like mounts and volumes without
+    # replacing entries owned by the workload. It also adds the read-only token
+    # mount to every application container.
     - patchType: ApplyConfiguration
       applyConfiguration:
         expression: >-
           Object{
             spec: Object.spec{
-              {{- with .Values.imagePullSecrets }}
-              imagePullSecrets: [
-                {{- range $index, $secret := . }}{{ if $index }},{{ end }}
-                Object.spec.imagePullSecrets{name: {{ $secret.name | quote }}}
-                {{- end }}
-              ],
-              {{- end }}
               containers: object.spec.containers.map(container,
                 Object.spec.containers{
                   name: container.name,
@@ -73,10 +66,26 @@ spec:
               ]
             }
           }
-    # A native sidecar is an ordered init container, so append it explicitly.
+    # imagePullSecrets is atomic, so JSONPatch preserves existing entries while
+    # appending configured secrets. A native sidecar is an ordered init container.
     - patchType: JSONPatch
       jsonPatch:
         expression: >-
+          {{- with .Values.imagePullSecrets }}
+          [JSONPatch{
+            op: "add",
+            path: "/spec/imagePullSecrets",
+            value: (has(object.spec.imagePullSecrets) ? object.spec.imagePullSecrets : []) +
+              [
+                {{- range $index, $secret := . }}{{ if $index }},{{ end }}
+                Object.spec.imagePullSecrets{name: {{ $secret.name | quote }}}
+                {{- end }}
+              ].filter(secret,
+                !has(object.spec.imagePullSecrets) ||
+                !object.spec.imagePullSecrets.exists(existing, existing.name == secret.name)
+              )
+          }] +
+          {{- end }}
           (!has(object.spec.initContainers)
             ? [JSONPatch{
                 op: "add",
