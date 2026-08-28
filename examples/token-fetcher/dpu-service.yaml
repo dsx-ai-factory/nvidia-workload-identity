@@ -1,0 +1,25 @@
+apiVersion: svc.dpu.nvidia.com/v1alpha1
+kind: DPUService
+metadata:
+  name: dsx-token-fetcher-example
+  namespace: dpf-operator-system
+spec:
+  serviceID: dsx-token-fetcher-example
+  security:
+    privileged: false
+    # Presence opts the service into per-DPU SPIFFE registration.
+    spiffe: {}
+  serviceDaemonSet:
+    # DPF injects these resources into the chart's service DaemonSet.
+    resources:
+      cpu: 10m
+      memory: 16Mi
+  helmChart:
+    source:
+      repoURL: https://helm.ngc.nvidia.com/0837451325059433/components-dev/
+      chart: dsx-token-fetcher-example
+      # This rolling constraint is for testing. Pin a release in persistent environments.
+      version: ">=0.1.0-0"
+      releaseName: dsx-token-fetcher-example
+    values:
+      audience: spiffe://ds9.dsx.nvid.id/openbao

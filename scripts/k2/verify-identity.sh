@@ -260,7 +260,11 @@ verify_metadata_access() {
 
     local vm_ip response command
     local ssh_started
-    command="curl -fsS --max-time 10 -G -H 'Metadata: true' -H 'Accept: application/json' 'http://${IMDS_IP}/latest/meta-data/identity' --data-urlencode 'aud=${TEST_AUDIENCE}'"
+    # VMI and SSH readiness can precede guest IMDS readiness, so retry the IMDS request itself.
+    command="curl -fsS --max-time 10 "
+    command+="--retry 180 --retry-all-errors --retry-connrefused --retry-delay 1 --retry-max-time 180 "
+    command+="-G -H 'Metadata: true' -H 'Accept: application/json' "
+    command+="'http://${IMDS_IP}/latest/meta-data/identity' --data-urlencode 'aud=${TEST_AUDIENCE}'"
     run_timed "VM VMI readiness" kubectl wait \
         --for=condition=Ready \
         "vmi/${VM_NAME}" -n "${NAMESPACE}" --context "${CONTEXT}" \

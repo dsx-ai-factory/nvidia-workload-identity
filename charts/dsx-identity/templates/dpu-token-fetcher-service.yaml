@@ -29,7 +29,6 @@ spec:
         spireSocketPath: {{ required "dpuService.tokenFetcher.spireSocketPath is required" .Values.dpuService.tokenFetcher.spireSocketPath | quote }}
         image:
           {{- toYaml .Values.podTokenFetcher.image | nindent 10 }}
-        audience: {{ .Values.podTokenFetcher.audience | quote }}
         identityKeysURL: {{ required "dpuService.identityKeysURL is required" .Values.dpuService.identityKeysURL | quote }}
         outputPath: {{ .Values.podTokenFetcher.outputPath | quote }}
         logLevel: {{ .Values.observability.logLevel }}

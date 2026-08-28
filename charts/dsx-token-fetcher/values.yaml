@@ -9,7 +9,6 @@ tokenFetcher:
     repository: nvcr.io/0837451325059433/components-dev/dsx-token-fetcher
     tag: ""
     pullPolicy: IfNotPresent
-  audience: spiffe://ds9.dsx.nvid.id/openbao
   identityKeysURL: ""
   outputPath: /run/secrets/nvidia.com/dsx/token
   logLevel: info

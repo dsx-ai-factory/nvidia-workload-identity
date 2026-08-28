@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "DSX token-fetcher DPUService example values",
+  "type": "object",
+  "required": ["audience", "serviceDaemonSet"],
+  "properties": {
+    "audience": {
+      "type": "string",
+      "minLength": 1
+    },
+    "serviceDaemonSet": {
+      "type": "object",
+      "required": ["nodeSelector", "labels", "annotations", "updateStrategy", "resources"],
+      "properties": {
+        "nodeSelector": {
+          "type": ["object", "null"]
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "updateStrategy": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["RollingUpdate", "OnDelete"]
+            },
+            "rollingUpdate": {
+              "type": "object",
+              "properties": {
+                "maxUnavailable": {
+                  "oneOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "image": {
+      "type": "object",
+      "required": ["repository", "tag", "pullPolicy"],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tag": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"]
+        }
+      }
+    }
+  },
+  "additionalProperties": true
+}

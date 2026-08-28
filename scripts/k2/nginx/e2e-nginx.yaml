@@ -10,6 +10,7 @@ metadata:
   namespace: dsx-identity-e2e
   annotations:
     spiffe.nvidia.com/inject-dsx-token-fetcher: "true"
+    spiffe.nvidia.com/token-audience: spiffe://ds9.dsx.nvid.id/openbao
   labels:
     app: e2e-nginx
     spiffe.nvidia.com/service: dsx

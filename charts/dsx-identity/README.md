@@ -147,6 +147,12 @@ dpuService:
   identityKeysURL: https://identity-keys.shard.example.com/v1/exchange
 ```
 
+Each Pod selected for token-fetcher injection must set both
+`spiffe.nvidia.com/inject-dsx-token-fetcher: "true"` and its relying-party
+audience in `spiffe.nvidia.com/token-audience`. The
+[examples](../../examples/token-fetcher/README.md) cover ordinary Kubernetes
+Pods and DPUService deployment.
+
 Keep the token-fetcher policy in a standalone `DPUService`. A policy-only
 service in a `DPUDeployment` blocks `DPUNodeMaintenance`.
 

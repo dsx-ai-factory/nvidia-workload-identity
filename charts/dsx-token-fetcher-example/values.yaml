@@ -1,0 +1,14 @@
+audience: ""
+
+# DPF injects these values from DPUService.spec.serviceDaemonSet.
+serviceDaemonSet:
+  nodeSelector: null
+  labels: {}
+  annotations: {}
+  updateStrategy: {}
+  resources: {}
+
+image:
+  repository: busybox
+  tag: 1.37.0
+  pullPolicy: IfNotPresent
