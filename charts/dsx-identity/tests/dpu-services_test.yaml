@@ -42,7 +42,7 @@ tests:
           path: spec.helmChart.source.version
           value: 0.1.0
 
-  - it: renders both DPU workloads with explicit versions and pull secrets
+  - it: passes the ordered shared pull secrets to IMDS and SPIFFE CSI
     set:
       dpuService:
         imds:
@@ -67,16 +67,34 @@ tests:
           value: 2.0.0
         documentIndex: 0
       - equal:
-          path: spec.helmChart.values.imagePullSecrets[1].name
-          value: registry-two
+          path: spec.helmChart.values.imagePullSecrets
+          value:
+            - name: registry-one
+            - name: registry-two
         documentIndex: 0
       - equal:
           path: spec.helmChart.source.version
           value: 3.0.0
         documentIndex: 1
       - equal:
-          path: spec.helmChart.values.imagePullSecrets[0].name
-          value: registry-one
+          path: spec.helmChart.values.imagePullSecrets
+          value:
+            - name: registry-one
+            - name: registry-two
+        documentIndex: 1
+
+  - it: passes an empty shared pull secret list to IMDS and SPIFFE CSI
+    set:
+      dpuService.spiffeCsi.enabled: true
+    template: templates/dpu-service.yaml
+    asserts:
+      - equal:
+          path: spec.helmChart.values.imagePullSecrets
+          value: []
+        documentIndex: 0
+      - equal:
+          path: spec.helmChart.values.imagePullSecrets
+          value: []
         documentIndex: 1
 
   - it: omits the optional IMDS socket override when empty
@@ -105,7 +123,7 @@ tests:
       - failedTemplate:
           errorMessage: dpuService.identityKeysURL is required
 
-  - it: passes token fetcher settings to its standalone chart
+  - it: passes the ordered shared pull secrets and settings to token fetcher
     set:
       dpuService.tokenFetcher.enabled: true
       dpuService.identityKeysURL: https://identity.example.com/v1/exchange
@@ -113,7 +131,8 @@ tests:
         OTEL_EXPORTER_OTLP_ENDPOINT: http://collector.example.com:4318
         OTEL_METRICS_EXPORTER: prometheus
       imagePullSecrets:
-        - name: registry-credentials
+        - name: registry-one
+        - name: registry-two
     template: templates/dpu-token-fetcher-service.yaml
     asserts:
       - hasDocuments:
@@ -122,8 +141,10 @@ tests:
           path: metadata.name
           value: dsx-token-fetcher
       - equal:
-          path: spec.helmChart.values.imagePullSecrets[0].name
-          value: registry-credentials
+          path: spec.helmChart.values.imagePullSecrets
+          value:
+            - name: registry-one
+            - name: registry-two
       - equal:
           path: spec.helmChart.values.tokenFetcher.identityKeysURL
           value: https://identity.example.com/v1/exchange
@@ -133,6 +154,15 @@ tests:
       - equal:
           path: spec.helmChart.values.tokenFetcher.env.OTEL_METRICS_EXPORTER
           value: none
+
+  - it: passes an empty shared pull secret list to the token fetcher
+    set:
+      dpuService.tokenFetcher.enabled: true
+    template: templates/dpu-token-fetcher-service.yaml
+    asserts:
+      - equal:
+          path: spec.helmChart.values.imagePullSecrets
+          value: []
 
   - it: passes an explicit token fetcher chart version and socket
     set:
@@ -151,6 +181,8 @@ tests:
       - equal:
           path: spec.helmChart.values.tokenFetcher.spireSocketPath
           value: /custom/spire/agent.sock
+      - notExists:
+          path: spec.helmChart.values.tokenFetcher.svidHint
 
   - it: rejects token fetcher admission without a SPIRE socket
     set:

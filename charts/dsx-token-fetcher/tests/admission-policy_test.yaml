@@ -44,7 +44,7 @@ tests:
           value: admissionregistration.k8s.io/v1
         documentIndex: 1
 
-  - it: carries configured image pull secrets into the JSON patch
+  - it: handles absent and empty Pod pull secrets and preserves existing entries
     set:
       imagePullSecrets:
         - name: registry-one
@@ -67,6 +67,12 @@ tests:
           pattern: 'path: "/spec/imagePullSecrets/-"'
       - matchRegex:
           path: spec.mutations[1].jsonPatch.expression
+          pattern: '!has\(object\.spec\.imagePullSecrets\)'
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: '!object\.spec\.imagePullSecrets\.exists\(existing, existing\.name == secret\.name\)'
+      - matchRegex:
+          path: spec.mutations[1].jsonPatch.expression
           pattern: 'image: "nvcr\.io/0837451325059433/components-dev/dsx-token-fetcher:0\.1\.0"'
 
   - it: does not create an empty pull secret list when none are configured
@@ -78,6 +84,16 @@ tests:
       - notMatchRegex:
           path: spec.mutations[1].jsonPatch.expression
           pattern: /spec/imagePullSecrets
+
+  - it: leaves DPU service SVID selection to the Workload API
+    set:
+      tokenFetcher.identityKeysURL: https://identity.example.com/v1/exchange
+    template: templates/admission-policy.yaml
+    documentIndex: 0
+    asserts:
+      - notMatchRegex:
+          path: spec.mutations[1].jsonPatch.expression
+          pattern: --svid-hint
 
   - it: renders explicit image environment probe and resources
     set:
