@@ -27,6 +27,7 @@ spec:
       tokenFetcher:
         spiffeCsiDriver: {{ .Values.dpuService.tokenFetcher.spiffeCsiDriver | quote }}
         spireSocketPath: {{ required "dpuService.tokenFetcher.spireSocketPath is required" .Values.dpuService.tokenFetcher.spireSocketPath | quote }}
+        svidHint: {{ .Values.dpuService.tokenFetcher.svidHint | quote }}
         image:
           {{- toYaml .Values.podTokenFetcher.image | nindent 10 }}
         identityKeysURL: {{ required "dpuService.identityKeysURL is required" .Values.dpuService.identityKeysURL | quote }}

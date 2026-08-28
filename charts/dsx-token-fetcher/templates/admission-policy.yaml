@@ -112,6 +112,9 @@ spec:
                   {{ printf "--socket=unix://%s" (required "tokenFetcher.spireSocketPath is required" .Values.tokenFetcher.spireSocketPath) | quote }},
                   {{- /* Each workload names its relying party. A missing annotation fails admission under failurePolicy: Fail. */}}
                   "--audience=" + object.metadata.annotations["spiffe.nvidia.com/token-audience"],
+                  {{- with .Values.tokenFetcher.svidHint }}
+                  {{ printf "--svid-hint=%s" . | quote }},
+                  {{- end }}
                   {{ printf "--output=%s" .Values.tokenFetcher.outputPath | quote }},
                   {{ printf "--identity-keys-url=%s" (required "tokenFetcher.identityKeysURL is required" .Values.tokenFetcher.identityKeysURL) | quote }},
                   {{ printf "--log-level=%s" .Values.tokenFetcher.logLevel | quote }}

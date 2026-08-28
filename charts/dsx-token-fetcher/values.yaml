@@ -5,6 +5,8 @@ tokenFetcher:
   spiffeCsiDriver: csi.spiffe.io
   # DPF's CSI mount preserves the DPU agent socket filename.
   spireSocketPath: /var/run/secrets/spire.io/agent.sock
+  # Must match DPF's per-DPUService ClusterStaticEntry registration hint.
+  svidHint: dpu-service
   image:
     repository: nvcr.io/0837451325059433/components-dev/dsx-token-fetcher
     tag: ""

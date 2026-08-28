@@ -149,6 +149,9 @@ tests:
           path: spec.helmChart.values.tokenFetcher.identityKeysURL
           value: https://identity.example.com/v1/exchange
       - equal:
+          path: spec.helmChart.values.tokenFetcher.svidHint
+          value: dpu-service
+      - equal:
           path: spec.helmChart.values.tokenFetcher.env.OTEL_EXPORTER_OTLP_ENDPOINT
           value: http://collector.example.com:4318
       - equal:
@@ -164,12 +167,13 @@ tests:
           path: spec.helmChart.values.imagePullSecrets
           value: []
 
-  - it: passes an explicit token fetcher chart version and socket
+  - it: passes explicit token fetcher chart version socket and SVID hint
     set:
       dpuService:
         tokenFetcher:
           enabled: true
           spireSocketPath: /custom/spire/agent.sock
+          svidHint: custom-dpu
           helmChart:
             repoURL: https://helm.example.com
             version: 4.0.0
@@ -181,8 +185,19 @@ tests:
       - equal:
           path: spec.helmChart.values.tokenFetcher.spireSocketPath
           value: /custom/spire/agent.sock
-      - notExists:
+      - equal:
           path: spec.helmChart.values.tokenFetcher.svidHint
+          value: custom-dpu
+
+  - it: passes an empty DPU SVID hint to disable exact selection
+    set:
+      dpuService.tokenFetcher.enabled: true
+      dpuService.tokenFetcher.svidHint: ""
+    template: templates/dpu-token-fetcher-service.yaml
+    asserts:
+      - equal:
+          path: spec.helmChart.values.tokenFetcher.svidHint
+          value: ""
 
   - it: rejects token fetcher admission without a SPIRE socket
     set:
