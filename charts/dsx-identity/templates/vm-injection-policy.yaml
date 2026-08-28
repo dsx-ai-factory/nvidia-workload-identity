@@ -35,20 +35,13 @@ spec:
           container.name == "dsx-imds-network-setup"
         )
   mutations:
-    # ApplyConfiguration merges keyed volumes and pull secrets without replacing
-    # entries already supplied by virt-launcher.
+    # ApplyConfiguration merges keyed volumes without replacing entries already
+    # supplied by virt-launcher.
     - patchType: ApplyConfiguration
       applyConfiguration:
         expression: >-
           Object{
             spec: Object.spec{
-              {{- with .Values.imagePullSecrets }}
-              imagePullSecrets: [
-                {{- range $index, $secret := . }}{{ if $index }},{{ end }}
-                Object.spec.imagePullSecrets{name: {{ $secret.name | quote }}}
-                {{- end }}
-              ],
-              {{- end }}
               volumes: [
                 Object.spec.volumes{
                   name: "spiffe-csi",
@@ -67,11 +60,26 @@ spec:
               ]
             }
           }
-    # Containers use typed CEL objects in JSONPatch so order and atomic fields
-    # remain exact.
+    # imagePullSecrets is atomic, so JSONPatch preserves existing entries while
+    # appending configured secrets. Typed container patches preserve exact order.
     - patchType: JSONPatch
       jsonPatch:
         expression: >-
+          {{- with .Values.imagePullSecrets }}
+          [JSONPatch{
+            op: "add",
+            path: "/spec/imagePullSecrets",
+            value: (has(object.spec.imagePullSecrets) ? object.spec.imagePullSecrets : []) +
+              [
+                {{- range $index, $secret := . }}{{ if $index }},{{ end }}
+                Object.spec.imagePullSecrets{name: {{ $secret.name | quote }}}
+                {{- end }}
+              ].filter(secret,
+                !has(object.spec.imagePullSecrets) ||
+                !object.spec.imagePullSecrets.exists(existing, existing.name == secret.name)
+              )
+          }] +
+          {{- end }}
           [
             JSONPatch{
               op: "add",

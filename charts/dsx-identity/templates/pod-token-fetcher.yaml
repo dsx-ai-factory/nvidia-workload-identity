@@ -30,21 +30,14 @@ spec:
         !has(object.spec.initContainers) ||
         !object.spec.initContainers.exists(container, container.name == "dsx-token-fetcher")
   mutations:
-    # ApplyConfiguration merges map-like lists by their Kubernetes merge keys,
-    # preserving consumer entries. It mounts the token in every app container,
-    # while Kata may already own the spiffe-csi volume.
+    # ApplyConfiguration merges map-like container mounts and volumes by their
+    # Kubernetes merge keys. It mounts the token in every app container while
+    # Kata may already own the spiffe-csi volume.
     - patchType: ApplyConfiguration
       applyConfiguration:
         expression: >-
           Object{
             spec: Object.spec{
-              {{- with .Values.imagePullSecrets }}
-              imagePullSecrets: [
-                {{- range $index, $secret := . }}{{ if $index }},{{ end }}
-                Object.spec.imagePullSecrets{name: {{ $secret.name | quote }}}
-                {{- end }}
-              ],
-              {{- end }}
               containers: object.spec.containers.map(container,
                 Object.spec.containers{
                   name: container.name,
@@ -73,10 +66,26 @@ spec:
               }]
             }
           }
-    # JSONPatch preserves init-container order and handles Pods with no list yet.
+    # imagePullSecrets is atomic, so JSONPatch preserves existing entries while
+    # appending configured secrets. It also preserves init-container order.
     - patchType: JSONPatch
       jsonPatch:
         expression: >-
+          {{- with .Values.imagePullSecrets }}
+          [JSONPatch{
+            op: "add",
+            path: "/spec/imagePullSecrets",
+            value: (has(object.spec.imagePullSecrets) ? object.spec.imagePullSecrets : []) +
+              [
+                {{- range $index, $secret := . }}{{ if $index }},{{ end }}
+                Object.spec.imagePullSecrets{name: {{ $secret.name | quote }}}
+                {{- end }}
+              ].filter(secret,
+                !has(object.spec.imagePullSecrets) ||
+                !object.spec.imagePullSecrets.exists(existing, existing.name == secret.name)
+              )
+          }] +
+          {{- end }}
           (!has(object.spec.initContainers)
             ? [JSONPatch{
                 op: "add",
