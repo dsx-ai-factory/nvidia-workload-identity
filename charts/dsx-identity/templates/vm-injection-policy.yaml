@@ -11,6 +11,9 @@ spec:
   # Re-evaluate if another mutator changes the virt-launcher Pod later.
   reinvocationPolicy: IfNeeded
   matchConstraints:
+    # Declare API defaults so server-side apply compares the rendered and stored policy identically.
+    matchPolicy: Equivalent
+    namespaceSelector: {}
     resourceRules:
       - apiGroups: [""]
         apiVersions: ["v1"]

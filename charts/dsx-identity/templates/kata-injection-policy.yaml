@@ -11,6 +11,10 @@ spec:
   # Token-fetcher injection is a separate policy with unspecified execution order.
   reinvocationPolicy: IfNeeded
   matchConstraints:
+    # Declare API defaults so server-side apply compares the rendered and stored policy identically.
+    matchPolicy: Equivalent
+    namespaceSelector: {}
+    objectSelector: {}
     resourceRules:
       - apiGroups: [""]
         apiVersions: ["v1"]

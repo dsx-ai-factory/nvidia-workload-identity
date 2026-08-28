@@ -15,6 +15,10 @@ spec:
   # Re-evaluate after other DPU-cluster admission mutators change the Pod.
   reinvocationPolicy: IfNeeded
   matchConstraints:
+    # Declare API defaults so server-side apply compares the rendered and stored policy identically.
+    matchPolicy: Equivalent
+    namespaceSelector: {}
+    objectSelector: {}
     resourceRules:
       - apiGroups: [""]
         apiVersions: ["v1"]
