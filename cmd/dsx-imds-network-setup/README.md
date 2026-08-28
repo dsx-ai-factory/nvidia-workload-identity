@@ -28,8 +28,10 @@ flowchart LR
 ```
 
 The command waits up to 60 seconds for the first Linux bridge whose name starts
-with `k6t-`. It then applies the changes below and remains running until it
-receives `SIGINT` or `SIGTERM`.
+with `k6t-`, the primary `tap0` interface, and the replacement UDN interface
+with its IPv4 address. These conditions show that KubeVirt has finished its
+network namespace changes. The command then applies the changes below and
+remains running until it receives `SIGINT` or `SIGTERM`.
 
 ## Manual reproduction
 

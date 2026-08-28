@@ -31,6 +31,7 @@ const (
 	vethContainerSide = "imds-ctr" // max 15 chars for ifname
 	bridgePrefix      = "k6t-"
 	defaultUDNIfName  = "eth0"
+	defaultTapIfName  = "tap0"
 	metaCIDR          = "169.254.169.254/32"
 
 	// IPv4 header offsets (RFC 791)
@@ -113,13 +114,16 @@ func setupPodNetwork(ctx context.Context) error {
 	}
 	defer nlHandle.Close()
 
-	// Wait for bridge
-	slog.Debug("Waiting for bridge", "prefix", bridgePrefix)
-	bridgeLink, err := waitForBridge(ctx, nlHandle)
+	// Wait until KubeVirt finishes moving the pod interface and creating the
+	// bridge, tap, and replacement interface. Mutating the namespace before the
+	// replacement interface has its address can interrupt KubeVirt's netlink
+	// address dump and make VMI startup fail.
+	slog.Debug("Waiting for KubeVirt network", "bridge_prefix", bridgePrefix)
+	bridgeLink, vmIP, vmMAC, err := waitForKubeVirtNetwork(ctx, nlHandle)
 	if err != nil {
-		return fmt.Errorf("waiting for bridge: %w", err)
+		return fmt.Errorf("waiting for KubeVirt network: %w", err)
 	}
-	slog.Info("Found bridge", "bridge", bridgeLink.Attrs().Name)
+	slog.Info("KubeVirt network ready", "bridge", bridgeLink.Attrs().Name)
 
 	// Create veth pair
 	vethCtr, vethVM, err := createVethPair(nlHandle)
@@ -154,11 +158,6 @@ func setupPodNetwork(ctx context.Context) error {
 		return err
 	}
 
-	// Get VM IP from pod status
-	vmIP, vmMAC, err := getInterfaceIPv4AndMAC(*udnIfName)
-	if err != nil {
-		return fmt.Errorf("getting interface IPv4 and MAC: %w", err)
-	}
 	slog.Info("Got VM IP and MAC", "ip", vmIP.String(), "mac", vmMAC.String())
 
 	// Remove the UDN interface's local-table route so the /32 route below returns replies through the veth.
@@ -179,7 +178,7 @@ func setupPodNetwork(ctx context.Context) error {
 	return nil
 }
 
-func waitForBridge(ctx context.Context, nlHandle *netlink.Handle) (netlink.Link, error) {
+func waitForKubeVirtNetwork(ctx context.Context, nlHandle *netlink.Handle) (netlink.Link, net.IP, net.HardwareAddr, error) {
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
@@ -190,13 +189,20 @@ func waitForBridge(ctx context.Context, nlHandle *netlink.Handle) (netlink.Link,
 		select {
 		case <-ctx.Done():
 			if ctx.Err() == context.DeadlineExceeded {
-				return nil, fmt.Errorf("timeout waiting for bridge")
+				return nil, nil, nil, fmt.Errorf("timeout waiting for KubeVirt network")
 			}
-			return nil, ctx.Err()
+			return nil, nil, nil, ctx.Err()
 		case <-ticker.C:
 			bridge, err := findBridge(nlHandle)
+			if err != nil {
+				continue
+			}
+			if _, err := nlHandle.LinkByName(defaultTapIfName); err != nil {
+				continue
+			}
+			vmIP, vmMAC, err := getInterfaceIPv4AndMAC(*udnIfName)
 			if err == nil {
-				return bridge, nil
+				return bridge, vmIP, vmMAC, nil
 			}
 		}
 	}
