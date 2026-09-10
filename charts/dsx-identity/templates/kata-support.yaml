@@ -18,9 +18,12 @@ spec:
     metadata:
       labels:
         {{- include "dsx-identity.labels" (dict "root" . "name" "dsx-kata-uds-proxy") | nindent 8 }}
-      {{- with (include "dsx-identity.observabilityPodAnnotations" (dict "root" . "containerNames" "dsx-kata-uds-proxy")) }}
+      # This proxy skips the shared OTel annotations. It links no SDK, so the
+      # injected environment reaches nothing, and its host network namespace
+      # cannot host the sidecar's ports, which the node's otel-agent serves.
+      {{- with .Values.observability.podAnnotations }}
       annotations:
-        {{- . | nindent 8 }}
+        {{- toYaml . | nindent 8 }}
       {{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
