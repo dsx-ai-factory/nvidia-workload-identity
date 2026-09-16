@@ -105,7 +105,7 @@ spec:
             : []) +
             [JSONPatch{
               op: "add",
-              path: "/spec/initContainers/-",
+              path: "/spec/initContainers/0",
               value: Object.spec.initContainers{
                 name: "dsx-token-fetcher",
                 image: {{ printf "%s:%s" .Values.tokenFetcher.image.repository $imageTag | quote }},

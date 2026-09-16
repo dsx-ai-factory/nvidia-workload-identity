@@ -73,7 +73,7 @@ spec:
     - patchType: JSONPatch
       jsonPatch:
         # Admission policy order is unspecified. Insert before an existing token
-        # fetcher, or append so a later token-fetcher mutation follows the proxy.
+        # fetcher, or prepend so a later token-fetcher mutation follows the proxy.
         expression: >-
           {{- with .Values.imagePullSecrets }}
           (!has(object.spec.imagePullSecrets)
@@ -107,7 +107,7 @@ spec:
             op: "add",
             path: variables.tokenFetcherIndex >= 0
               ? "/spec/initContainers/" + string(variables.tokenFetcherIndex)
-              : "/spec/initContainers/-",
+              : "/spec/initContainers/0",
             value: Object.spec.initContainers{
               name: "dsx-kata-guest-proxy",
               image: {{ printf "%s:%s" .Values.kataSupport.image.repository $imageTag | quote }},
