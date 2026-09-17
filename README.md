@@ -10,6 +10,11 @@ There is no SPIRE federation between shards. Cross-shard trust starts after
 token exchange, when another shard or relying party validates a DSX JWT with
 the aggregate public keys served by any DSX Identity Keys instance.
 
+## User guide
+
+See the [examples user guide](examples/README.md) to acquire and consume DSX
+JWTs through token-fetcher injection or the link-local IMDS endpoint.
+
 Component commands and runtime configuration:
 
 - [DSX Identity Controller](cmd/dsx-identity-controller/README.md)

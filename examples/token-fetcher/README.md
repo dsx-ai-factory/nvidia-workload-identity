@@ -1,13 +1,83 @@
-# Token-fetcher injection examples
+# Token-fetcher user guide
 
-The examples support both deployment paths:
+The injected `dsx-token-fetcher` sidecar exchanges the workload's local SPIRE
+JWT-SVID for a DSX JWT and refreshes the token file before expiry. DSX Identity
+must have Pod token fetching enabled.
 
-- Apply [`non-dpf-pod.yaml`](non-dpf-pod.yaml) to test an ordinary Kubernetes
-  Pod.
-- Apply [`dpu-service.yaml`](dpu-service.yaml) to test DPUService SPIFFE
-  registration and token-fetcher injection using the
-  [`dsx-token-fetcher-example`](../../charts/dsx-token-fetcher-example) chart.
+## Kubernetes Pods
 
-Both paths set the injection and audience annotations on the Pod template. The
-Pod becomes ready only after the exchanged token exists at
-`/run/secrets/nvidia.com/dsx/token`.
+Add the service label and token-fetcher annotations to the Pod template:
+
+```yaml
+spec:
+  template:
+    metadata:
+      labels:
+        spiffe.nvidia.com/service: dsx
+      annotations:
+        spiffe.nvidia.com/inject-dsx-token-fetcher: "true"
+        spiffe.nvidia.com/token-audience: spiffe://ds9.dsx.nvid.id/openbao
+```
+
+Use the relying party's audience. For a Pod, put the labels and annotations
+directly under `metadata`.
+
+Application containers receive the token through a read-only mount:
+
+```text
+/run/secrets/nvidia.com/dsx/token
+```
+
+Apply [`non-dpf-pod.yaml`](non-dpf-pod.yaml) and wait for the example token
+reader to become ready:
+
+```bash
+kubectl apply -f examples/token-fetcher/non-dpf-pod.yaml
+kubectl wait --for=condition=Ready pod/dsx-token-fetcher-example --timeout=2m
+kubectl exec dsx-token-fetcher-example -- \
+  test -s /run/secrets/nvidia.com/dsx/token
+```
+
+## DPUService Pods
+
+A DPUService must opt into SPIFFE registration. The example packages a
+token-fetcher-enabled DaemonSet in the
+[`dsx-token-fetcher-example`](../../charts/dsx-token-fetcher-example) chart:
+
+```yaml
+spec:
+  security:
+    spiffe: {}
+  helmChart:
+    values:
+      audience: spiffe://ds9.dsx.nvid.id/openbao
+```
+
+Set the audience and pin the chart version for persistent environments, then
+apply [`dpu-service.yaml`](dpu-service.yaml):
+
+```bash
+kubectl apply -f examples/token-fetcher/dpu-service.yaml
+```
+
+## Consume the token file
+
+Cache the token and watch `/run/secrets/nvidia.com/dsx`, not the token file
+inode. Refresh replaces the file atomically. Reread on directory changes and on
+a polling interval in case a change event is lost:
+
+```text
+path = "/run/secrets/nvidia.com/dsx/token"
+token = read(path)
+
+loop:
+  wait for a parent-directory change or polling timeout
+  if next = read(path):
+    atomically replace cached token with next
+  else:
+    clear cached token
+```
+
+The fetcher preserves an unexpired token after a failed refresh and removes it
+after expiry. Treat an empty cache as an authentication failure. See [Consume a
+DSX JWT](../README.md#consume-a-dsx-jwt) to use the token.
