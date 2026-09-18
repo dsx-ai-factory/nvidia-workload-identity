@@ -28,6 +28,9 @@
   templating, merge semantics, ordering, compatibility, and cross-resource behavior.
 - Keep documentation factual and current. Do not add revision narrative,
   meta-documentation, marketing language, or future design speculation.
+- Document user-facing API contracts with concrete request and response examples.
+  Do not describe fields, headers, endpoints, or payloads only in prose when an
+  example can show them.
 - Use plain punctuation. Do not use em dashes, en dashes, curly quotes, or semicolons
   in prose or comments.
 - Update this guide when the user gives a durable repository-wide agent instruction.
