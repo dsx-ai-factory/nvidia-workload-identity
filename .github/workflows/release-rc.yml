@@ -12,10 +12,10 @@ permissions:
 jobs:
   checks:
     if: github.event_name == 'pull_request'
-    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-checks.yml@27a80ca894cb186a55e67d99b907e26d49369b20
+    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-checks.yml@7cfe73f4f82a9f6cdbc7c55eae9ecf37e11835ea
 
   release:
     if: github.event_name == 'push' && github.repository == 'dsx-ai-factory/project-dsx-identity'
     permissions:
       contents: write
-    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate.yml@27a80ca894cb186a55e67d99b907e26d49369b20
+    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate.yml@7cfe73f4f82a9f6cdbc7c55eae9ecf37e11835ea
