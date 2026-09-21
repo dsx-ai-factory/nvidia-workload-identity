@@ -3,4 +3,5 @@
 	url = https://github.com/ovn-org/ovn-kubernetes.git
 [submodule "third-party/doca-platform-foundation"]
 	path = third-party/doca-platform-foundation
-	url = https://gitlab-master.nvidia.com/doca-platform-foundation/doca-platform-foundation.git
+	url = https://github.com/NVIDIA/doca-platform.git
+	branch = public-release-v26.8
