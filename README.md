@@ -33,96 +33,37 @@ Component commands and runtime configuration:
 
 ## Release candidates
 
-The GitHub RC workflow uses
-[DSX GitHub Actions](https://github.com/dsx-ai-factory/dsx-github-actions/blob/main/docs/release-candidate-publishing.md).
-The configured release line is `release/1.15.0`, defined in
-[release-rc.config.cjs](.github/release-rc.config.cjs) and
-[release-rc.yml](.github/workflows/release-rc.yml). The imported stable baseline
-is `v1.14.9`. A release-worthy `feat` commit advances that baseline to
-`v1.15.0-rc.1`. The branch name is a target checked against semantic-release's
-calculation, not a command to force an arbitrary version.
+The [RC workflow](.github/workflows/release-rc.yml) calls the shared
+[DSX RC workflow](https://github.com/dsx-ai-factory/dsx-github-actions/blob/main/docs/release-candidate-publishing.md#recommended-minimal-workflow).
+The active line is `release/1.15.0`, starting from the imported `v1.14.9`
+baseline. semantic-release calculates the version from Conventional Commits,
+and the shared workflow requires it to match `1.15.0-rc.N` before tagging.
 
 | Event | Result |
 | --- | --- |
-| Pull request to `master` or a release branch | Release workflow tests only, no tags or registry publication. |
+| PR to `master` or a release branch | Shared RC contract tests, no tags or registry publication. |
 | Push to `master` | No GitHub release. Existing GitLab stable publishing is unchanged. |
 | Release-worthy commit on protected `release/1.15.0` | `v1.15.0-rc.N` and a GitHub prerelease. |
 | Rerun of the current RC commit | Reuse the immutable tag and verify or recover its GitHub prerelease. |
 | No release-worthy changes and no RC tag on the commit | No release. |
 
-### Enable the release line
+Before creating the release branch, a maintainer must require PR review and
+passing checks, block force pushes, and permit `GITHUB_TOKEN` to create but
+not move or delete RC tags. Select source that passed Linux validation and
+E2E. Do not enable a second publisher for the same branch.
 
-1. Have a repository maintainer protect `release/1.15.0` before creating it.
-   Require pull requests, review and passing required checks. Restrict branch
-   deletion and force pushes. Permit the workflow's `GITHUB_TOKEN` to create
-   `v*-rc.*` tags, while prohibiting tag changes and deletion.
-2. Merge the RC workflow configuration through review, then create the release
-   branch from the approved commit. Ensure the corresponding source passed the
-   repository's Linux validation and E2E pipeline before selecting it for QA.
-3. Keep the imported stable Git tags and full history. An unprotected release
-   branch, an obsolete workflow run, or a calculated version outside the target
-   release line fails before publication. A `verifyRelease` hook also checks the
-   actual publishing invocation, not only the preceding preview. Do not run a
-   second semantic-release publisher for this same branch in GitLab.
-4. Open subsequent release changes as pull requests targeting that branch.
-   `feat`, `fix` and other release-worthy Conventional Commits drive the next
-   RC. A branch created at an already released commit may produce no RC until
-   its first release-worthy change. For the next release line, update both
-   configuration files through review.
+RC dependencies, tests, version guards and safe reruns are maintained in
+`dsx-github-actions`, not this repository. Its isolated checkout leaves
+GitLab's stable release configuration unchanged. For a new release line,
+change only the branch trigger through review. See the shared guide for
+activation, verification and recovery steps.
 
-The workflow requests `contents: write` only for the publishing job and uses
-no personal token, NGC key or GitLab credential. It does not update stable
-major aliases such as `v1`, or publish a stable release from `master`.
-The RC configuration is loaded as `.releaserc.cjs` only in the temporary
-GitHub runner checkout, leaving GitLab's semantic-release configuration
-unchanged.
-
-### Verify and hand off
-
-```bash
-gh release view v1.15.0-rc.1 --repo dsx-ai-factory/project-dsx-identity \
-  --json tagName,isPrerelease,isDraft,url
-git fetch origin --tags
-git rev-parse 'v1.15.0-rc.1^{commit}'
-```
-
-Expect `isPrerelease: true`, `isDraft: false` and the reviewed source commit.
-Use the actual RC number from the run. Reruns must target the current release
-branch head and do not move an existing tag.
-
-An existing RC is checked before semantic-release runs again. It must have the
-expected source commit and semantic-release `rc` channel metadata. If the
-original run pushed the tag but failed to push its channel notes, the workflow
-stops for maintainer repair instead of overwriting the tag or inventing its
-history. With valid metadata, it can recover a missing GitHub prerelease.
-
-**A GitHub RC tag is not proof of published NGC artifacts.** This workflow
-does not build or publish containers or charts. The existing GitLab pipeline
-continues publishing stable versions. There is no configured RC publishing
-handoff, and its current version computation does not support these RC tags.
-Adding a mirror alone is not sufficient. Before consuming an RC in the SBOM,
-connect and verify a GitHub-to-GitLab publishing path that accepts prerelease
-tags, uses that exact tag's source and version, and does not retag the source.
-Verify all five charts and all nine images in `components-dev`, including
-both `linux/amd64` and `linux/arm64`, before selecting the RC for QA.
-
-The DPF submodule still points to internal GitLab and supplies source needed
-by `Dockerfile.spire`. Tagging does not need submodules, so the RC workflow
-does not initialize them. Image builds and full E2E still require access to
-that dependency. nSpect registration and a future stable-release migration
-are separate from RC tagging.
-
-Release automation tests use temporary local Git repositories and do not
-publish to GitHub or NGC:
-
-```bash
-# Node.js 24
-npm ci --ignore-scripts --prefix .github/rc-tests
-npm test --prefix .github/rc-tests
-```
-
-These tests validate RC calculation, version guards and Git tag behavior.
-They do not replace `make validate` and the full Linux E2E lifecycle below.
+**This workflow publishes source tags and GitHub prereleases only.** QA/SBOM
+consumption still requires a publishing path for all five charts and all
+nine multi-architecture images in `components-dev`, with matching versions
+and source revisions. A mirror alone is not artifact verification. The DPF
+submodule now uses public GitHub, but image builds, nSpect registration and
+the full Linux E2E lifecycle remain separate from the shared RC tests.
 
 ## Architecture
 

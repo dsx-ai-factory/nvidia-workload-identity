@@ -3,123 +3,19 @@ name: Release candidate
 on:
   push:
     branches: [release/1.15.0]
+  pull_request:
+    branches: [master, "release/**"]
 
 permissions:
   contents: read
 
-concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   checks:
-    uses: ./.github/workflows/rc-checks.yml
+    if: github.event_name == 'pull_request'
+    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-checks.yml@27a80ca894cb186a55e67d99b907e26d49369b20
 
   release:
-    needs: checks
-    if: github.repository == 'dsx-ai-factory/project-dsx-identity'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    if: github.event_name == 'push' && github.repository == 'dsx-ai-factory/project-dsx-identity'
     permissions:
       contents: write
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0
-          submodules: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: "24"
-      - name: Require a protected branch and its current head
-        env:
-          REF_PROTECTED: ${{ github.ref_protected }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "$REF_PROTECTED" != "true" ]]; then
-            echo "Protect the release branch before enabling RC publishing." >&2
-            exit 1
-          fi
-          remote_head="$(git ls-remote --exit-code origin "$GITHUB_REF" | cut -f1)"
-          if [[ "$remote_head" != "$GITHUB_SHA" ]]; then
-            echo "This run is not the current release-branch head. Run the latest commit instead." >&2
-            exit 1
-          fi
-      - name: Load the RC-only release configuration
-        shell: bash
-        run: |
-          set -euo pipefail
-          test ! -e .releaserc.cjs
-          cp .github/release-rc.config.cjs .releaserc.cjs
-
-      - name: Detect an existing RC before running semantic-release
-        id: existing
-        uses: dsx-ai-factory/dsx-github-actions/.github/actions/resolve-release-candidate@7bf5c6a0d004b9675a11e8b862bc26ec34a8bdfc
-      - name: Verify existing RC source and channel metadata
-        if: steps.existing.outputs.should-publish == 'true'
-        env:
-          RC_TAG: ${{ steps.existing.outputs.tag }}
-          RC_VERSION: ${{ steps.existing.outputs.version }}
-        run: bash .github/rc/verify-existing-tag.sh
-
-      - name: Preview release candidate
-        id: preview
-        if: steps.existing.outputs.should-publish != 'true'
-        uses: dsx-ai-factory/dsx-github-actions/.github/actions/semantic-release@7bf5c6a0d004b9675a11e8b862bc26ec34a8bdfc
-        with:
-          semantic-version: 25.0.9
-          extra-plugins: conventional-changelog-conventionalcommits@9.3.1
-          dry-run: "true"
-      - name: Validate calculated RC before creating a tag
-        if: steps.preview.outputs.new-release-published == 'true'
-        env:
-          RC_VERSION: ${{ steps.preview.outputs.new-release-version }}
-        run: node .github/rc/validate-version.cjs
-
-      - name: Create RC tag and GitHub prerelease
-        id: semantic
-        if: steps.existing.outputs.should-publish != 'true'
-        uses: dsx-ai-factory/dsx-github-actions/.github/actions/semantic-release@7bf5c6a0d004b9675a11e8b862bc26ec34a8bdfc
-        with:
-          semantic-version: 25.0.9
-          extra-plugins: conventional-changelog-conventionalcommits@9.3.1
-      - name: Resolve new or existing RC
-        id: rc
-        uses: dsx-ai-factory/dsx-github-actions/.github/actions/resolve-release-candidate@7bf5c6a0d004b9675a11e8b862bc26ec34a8bdfc
-        with:
-          new-release-published: ${{ steps.semantic.outputs.new-release-published || 'false' }}
-          new-release-version: ${{ steps.semantic.outputs.new-release-version }}
-          new-release-git-tag: ${{ steps.semantic.outputs.new-release-git-tag }}
-      - name: Validate resolved RC including reruns
-        if: steps.rc.outputs.should-publish == 'true'
-        env:
-          RC_VERSION: ${{ steps.rc.outputs.version }}
-        run: node .github/rc/validate-version.cjs
-      - name: Verify or recover the GitHub prerelease
-        if: steps.rc.outputs.should-publish == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RC_TAG: ${{ steps.rc.outputs.tag }}
-          RC_VERSION: ${{ steps.rc.outputs.version }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$RC_TAG" == "v${RC_VERSION}" ]]
-          [[ "$(git rev-parse "${RC_TAG}^{commit}")" == "$GITHUB_SHA" ]]
-          release_info="$RUNNER_TEMP/identity-rc-release.json"
-          # A previous run can push the Git tag but fail before creating the release.
-          if ! gh release view "$RC_TAG" --json isPrerelease,isDraft,url > "$release_info"; then
-            gh release create "$RC_TAG" --verify-tag --prerelease --title "$RC_TAG" --generate-notes
-            gh release view "$RC_TAG" --json isPrerelease,isDraft,url > "$release_info"
-          fi
-          jq -e '.isPrerelease == true and .isDraft == false' "$release_info"
-          {
-            printf '## Identity release candidate\n\n'
-            printf 'Tag: `%s`\n\n' "$RC_TAG"
-            jq -r '.url' "$release_info"
-            printf '\nThis workflow creates source tags and GitHub prereleases only. It does not publish NGC charts or images.\n'
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Report no release-worthy changes
-        if: steps.rc.outputs.should-publish != 'true'
-        run: echo "No new or existing RC on this commit. No tag or release was created." >> "$GITHUB_STEP_SUMMARY"
+    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate.yml@27a80ca894cb186a55e67d99b907e26d49369b20
