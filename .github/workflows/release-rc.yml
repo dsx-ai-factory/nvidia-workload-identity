@@ -14,9 +14,10 @@ jobs:
     if: github.repository == 'dsx-ai-factory/project-dsx-identity'
     permissions:
       contents: write
-    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-publish.yml@9917ac984a2c973aaaae8616365e1d602112d5b8
+    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-publish.yml@8a37bf6fbeace3af5e5f5857f65e0da25cdf7537
     with:
-      runner: linux-amd64-cpu4
+      runner: ubuntu-latest
+      buildkit-config: ""
       environment: components-dev
       ngc-path: 0837451325059433/components-dev
       submodules: true
