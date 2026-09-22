@@ -33,37 +33,16 @@ Component commands and runtime configuration:
 
 ## Release candidates
 
-The [RC workflow](.github/workflows/release-rc.yml) calls the shared
-[DSX RC workflow](https://github.com/dsx-ai-factory/dsx-github-actions/blob/main/docs/release-candidate-publishing.md#recommended-minimal-workflow).
-The active line is `release/1.15.0`, starting from the imported `v1.14.9`
-baseline. semantic-release calculates the version from Conventional Commits,
-and the shared workflow requires it to match `1.15.0-rc.N` before tagging.
+1. Send feature PRs to `master`.
+2. When ready for QA, cut protected `release/1.15.0` from a tested `master` commit.
+3. Send release fixes to `release/1.15.0`, then cherry-pick them back to `master` through PRs.
 
-| Event | Result |
-| --- | --- |
-| PR to `master` or a release branch | Shared RC contract tests, no tags or registry publication. |
-| Push to `master` | No GitHub release. Existing GitLab stable publishing is unchanged. |
-| Release-worthy commit on protected `release/1.15.0` | `v1.15.0-rc.N` and a GitHub prerelease. |
-| Rerun of the current RC commit | Reuse the immutable tag and verify or recover its GitHub prerelease. |
-| No release-worthy changes and no RC tag on the commit | No release. |
+Release-worthy merges create `v1.15.0-rc.N`. The [shared workflow](.github/workflows/release-rc.yml)
+publishes matching images and charts directly to NGC, without a GitLab mirror.
+PRs only run validation. This workflow does not publish from `master` or promote RCs to stable.
 
-Before creating the release branch, a maintainer must require PR review and
-passing checks, block force pushes, and permit `GITHUB_TOKEN` to create but
-not move or delete RC tags. Select source that passed Linux validation and
-E2E. Do not enable a second publisher for the same branch.
-
-RC dependencies, tests, version guards and safe reruns are maintained in
-`dsx-github-actions`, not this repository. Its isolated checkout leaves
-GitLab's stable release configuration unchanged. For a new release line,
-change only the branch trigger through review. See the shared guide for
-activation, verification and recovery steps.
-
-**This workflow publishes source tags and GitHub prereleases only.** QA/SBOM
-consumption still requires a publishing path for all five charts and all
-nine multi-architecture images in `components-dev`, with matching versions
-and source revisions. A mirror alone is not artifact verification. The DPF
-submodule now uses public GitHub, but image builds, nSpect registration and
-the full Linux E2E lifecycle remain separate from the shared RC tests.
+[One-time setup](https://github.com/dsx-ai-factory/dsx-github-actions/blob/main/docs/release-candidate-publishing.md#prerequisites-and-scope):
+configure the runner, protected release environment, NGC key, and release permissions.
 
 ## Architecture
 

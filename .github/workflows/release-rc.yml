@@ -10,12 +10,32 @@ permissions:
   contents: read
 
 jobs:
-  checks:
-    if: github.event_name == 'pull_request'
-    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-checks.yml@7cfe73f4f82a9f6cdbc7c55eae9ecf37e11835ea
-
   release:
-    if: github.event_name == 'push' && github.repository == 'dsx-ai-factory/project-dsx-identity'
+    if: github.repository == 'dsx-ai-factory/project-dsx-identity'
     permissions:
       contents: write
-    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate.yml@7cfe73f4f82a9f6cdbc7c55eae9ecf37e11835ea
+    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-publish.yml@9917ac984a2c973aaaae8616365e1d602112d5b8
+    with:
+      runner: linux-amd64-cpu4
+      environment: components-dev
+      ngc-path: 0837451325059433/components-dev
+      submodules: true
+      validate-artifacts: true
+      images: >-
+        [{"name":"dsx-token-fetcher","context":".","dockerfile":"Dockerfile","target":"dsx-token-fetcher","buildArgs":{"BINARY":"dsx-token-fetcher"}},
+         {"name":"dsx-identity-keys","context":".","dockerfile":"Dockerfile","target":"dsx-identity-keys","buildArgs":{"BINARY":"dsx-identity-keys"}},
+         {"name":"metadata-service","context":".","dockerfile":"Dockerfile","target":"metadata-service","buildArgs":{"BINARY":"metadata-service"}},
+         {"name":"dsx-imds-network-setup","context":".","dockerfile":"Dockerfile","target":"dsx-imds-network-setup","buildArgs":{"BINARY":"dsx-imds-network-setup"}},
+         {"name":"dsx-identity-keys-proxy-csi","context":".","dockerfile":"Dockerfile","target":"dsx-identity-keys-proxy-csi","buildArgs":{"BINARY":"dsx-identity-keys-proxy-csi"}},
+         {"name":"dsx-identity-controller","context":".","dockerfile":"Dockerfile","target":"dsx-identity-controller","buildArgs":{"BINARY":"dsx-identity-controller"}},
+         {"name":"dsx-spire-server","context":".","dockerfile":"Dockerfile.spire","target":"dsx-spire-server"},
+         {"name":"dsx-spire-agent","context":".","dockerfile":"Dockerfile.spire","target":"dsx-spire-agent"},
+         {"name":"dsx-kata-uds-proxy","context":".","dockerfile":"kata-uds-proxy/Dockerfile"}]
+      charts: >-
+        [{"name":"dsx-identity","path":"charts/dsx-identity",
+          "versionValuePaths":[["spire","spire-server","image","tag"]],
+          "lintValues":{"global":{"operatorTenant":"operator-1","dsx":{"jwtIssuer":"https://identity.example","region":"test","partition":"example"},"spire":{"trustDomain":"test.example","clusterName":"test","jwtIssuer":"https://test.example"}},"spire":{"spire-server":{"controllerManager":{"extraEnv":[{"name":"OPERATOR_TENANT","value":"operator-1"}]}}},"identityKeys":{"jwksURL":"https://identity.example/.well-known/jwks.json","nats":{"enabled":false}},"podTokenFetcher":{"enabled":false},"dpuService":{"imds":{"enabled":false}}}},
+         {"name":"dsx-imds","path":"charts/dsx-imds","lintValues":{"metadataService":{"identityKeysURL":"https://identity.example/v1/exchange"}}},
+         {"name":"dsx-token-fetcher","path":"charts/dsx-token-fetcher","lintValues":{"tokenFetcher":{"identityKeysURL":"https://identity.example/v1/exchange"}}},
+         {"name":"dsx-token-fetcher-example","path":"charts/dsx-token-fetcher-example","lintValues":{"audience":"spiffe://test.example/service","serviceDaemonSet":{"nodeSelector":{}}}},
+         {"name":"dsx-spiffe-csi","path":"charts/dsx-spiffe-csi"}]

@@ -26,8 +26,9 @@
   security constraints, or workarounds.
 - In Helm templates and YAML, use a low bar for inline comments around non-obvious
   templating, merge semantics, ordering, compatibility, and cross-resource behavior.
-- Keep documentation factual and current. Do not add revision narrative,
-  meta-documentation, marketing language, or future design speculation.
+- Keep documentation factual, current, concise, and conversational for public
+  readers. Omit internal history, revision narrative, meta-documentation,
+  marketing language, and future design speculation.
 - Document user-facing API contracts with concrete request and response examples.
   Do not describe fields, headers, endpoints, or payloads only in prose when an
   example can show them.
