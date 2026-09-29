@@ -3,6 +3,10 @@
 {{- end }}
 {{- if .Values.podTokenFetcher.enabled }}
 {{- $imageTag := .Values.podTokenFetcher.image.tag | default .Values.global.imageTag | default .Chart.Version -}}
+{{- $healthPort := 8080 -}}
+{{- with .Values.podTokenFetcher.startupProbe -}}
+{{- $healthPort = .httpGet.port -}}
+{{- end -}}
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingAdmissionPolicy
 metadata:
@@ -34,6 +38,12 @@ spec:
         !has(object.spec.initContainers) ||
         !object.spec.initContainers.exists(container, container.name == "dsx-token-fetcher")
   variables:
+    # One port drives the process and its startup probe for each admitted Pod.
+    - name: healthPort
+      expression: >-
+        "spiffe.nvidia.com/token-fetcher-health-port" in object.metadata.annotations
+          ? int(object.metadata.annotations["spiffe.nvidia.com/token-fetcher-health-port"])
+          : {{ $healthPort }}
     # The Kata proxy must start before the fetcher can obtain a token.
     - name: guestProxyIndex
       expression: >-
@@ -130,6 +140,7 @@ spec:
                 {{- end }}
                 {{ printf "--output=%s" .Values.podTokenFetcher.outputPath | quote }},
                 {{ printf "--identity-keys-url=%s" (required "podTokenFetcher.identityKeysURL is required" .Values.podTokenFetcher.identityKeysURL) | quote }},
+                "--health-port=" + string(variables.healthPort),
                 {{ printf "--log-level=%s" .Values.observability.logLevel | quote }}
               ],
               env: {{ include "dsx-identity.observabilityEnv" (dict
@@ -151,7 +162,7 @@ spec:
               startupProbe: Object.spec.initContainers.startupProbe{
                 httpGet: Object.spec.initContainers.startupProbe.httpGet{
                   path: {{ .httpGet.path | quote }},
-                  port: {{ .httpGet.port }}
+                  port: variables.healthPort
                 },
                 periodSeconds: {{ .periodSeconds }},
                 failureThreshold: {{ .failureThreshold }}
