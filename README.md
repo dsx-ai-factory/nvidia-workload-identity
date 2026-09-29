@@ -37,7 +37,7 @@ Component commands and runtime configuration:
 2. When ready for QA, cut protected `release/1.15.0` from a tested `master` commit.
 3. Send release fixes to `release/1.15.0`, then cherry-pick them back to `master` through PRs.
 
-Release-worthy merges create `v1.15.0-rc.N`. The [shared workflow](.github/workflows/release-rc.yml)
+Release-worthy merges create `v1.15.0-rc.N`. The [CI release job](.github/workflows/ci.yml)
 publishes matching images and charts directly to NGC, without a GitLab mirror.
 PRs only run validation. This workflow does not publish from `master` or promote RCs to stable.
 
