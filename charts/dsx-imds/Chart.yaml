@@ -5,4 +5,4 @@ type: application
 version: 0.1.0
 appVersion: "0.1.0"
 sources:
-  - https://gitlab-master.nvidia.com/ncp/vmaas/dsx-identity
+  - https://github.com/dsx-ai-factory/project-dsx-identity

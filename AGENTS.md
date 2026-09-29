@@ -1,5 +1,10 @@
 # DSX Identity agent guide
 
+The source repository is `https://github.com/dsx-ai-factory/project-dsx-identity`.
+Open pull requests there with `gh` and check its GitHub Actions workflows for
+validation and release status. The GitLab repository is a legacy mirror, not a
+pull request or release source.
+
 ## Start here
 
 - Read the relevant [README](README.md) section before changing code or configuration.
@@ -38,21 +43,20 @@
 
 ## Git and merge requests
 
-- Read active commitlint, semantic-release, and MR policy configuration before
-  creating or updating an MR.
-- Search for an equivalent open MR or branch before creating another.
+- Read the active GitHub Actions and release workflow configuration before
+  creating or updating a pull request.
+- Search for an equivalent open pull request or branch before creating another.
 - Use a `feat/` or `fix/` branch for release-producing changes.
-- Use a Conventional Commit title recognized by semantic-release. Use `feat` for a
+- Use a Conventional Commit title. Use `feat` for a
   capability and `fix` for corrections, reliability, performance, or maintenance.
 - Put a supplied Jira reference in the Conventional Commit scope, for example
-  `fix(VMAAS-1586): use BM identity resource type`. Use `NO-REF` or `NO_REF` only
-  when MR Cop permits a change without Jira.
-- Validate every commit from the merge base with the repository's pinned commitlint
-  policy. Wrap commit body lines at 72 characters and keep all lines within 100.
-- Keep each MR focused and its description current. Verify branch, title,
+  `fix(VMAAS-1586): use BM identity resource type`. Use `NO-REF` when no Jira
+  reference was supplied.
+- Wrap commit body lines at 72 characters and keep all lines within 100.
+- Keep each pull request focused and its description current. Verify branch, title,
   description, complete commit range, and clean worktree before handoff.
-- Open MRs ready for review unless the user explicitly requests Draft status.
-  Required CI gates merging and does not determine MR readiness.
+- Open pull requests ready for review unless the user explicitly requests Draft
+  status. Required CI gates merging and does not determine review readiness.
 
 ## Implementation
 

@@ -182,8 +182,8 @@ func TestExchangeSPIRESVIDUsesCSIUnixSocket(t *testing.T) {
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/exchange" {
 			t.Errorf("request = %s %s", r.Method, r.URL.Path)
 		}
-		if r.Host != "exchange" {
-			t.Errorf("authority = %q, want exchange", r.Host)
+		if r.Host != "keys.example.com" {
+			t.Errorf("authority = %q, want keys.example.com", r.Host)
 		}
 		if err := r.ParseForm(); err != nil {
 			t.Error(err)
@@ -197,7 +197,7 @@ func TestExchangeSPIRESVIDUsesCSIUnixSocket(t *testing.T) {
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(func() { _ = server.Close() })
 
-	client, err := newExchangeClient("unix://" + socketPath)
+	client, err := newExchangeClient("unix://"+socketPath, "keys.example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestExchangeSPIRESVIDRejectsUnavailableCSIUnixSocket(t *testing.T) {
 	t.Parallel()
 
 	socketPath := filepath.Join(t.TempDir(), "missing.sock")
-	client, err := newExchangeClient("unix://" + socketPath)
+	client, err := newExchangeClient("unix://"+socketPath, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestExchangeSPIRESVIDUsesDirectServiceURL(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client, err := newExchangeClient(server.URL + "/v1/exchange")
+	client, err := newExchangeClient(server.URL+"/v1/exchange", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestDirectExchangeVerifiesTLSCertificate(t *testing.T) {
 		_, _ = w.Write([]byte(`{"access_token":"exchanged","token_type":"Bearer","expires_in":60}`))
 	}))
 	t.Cleanup(server.Close)
-	client, err := newExchangeClient(server.URL + "/v1/exchange")
+	client, err := newExchangeClient(server.URL+"/v1/exchange", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,15 +271,17 @@ func TestExchangeTransportConfiguration(t *testing.T) {
 	for _, test := range []struct {
 		name    string
 		url     string
+		host    string
 		wantErr string
 	}{
 		{name: "missing", wantErr: "required"},
 		{name: "Unix endpoint", url: "unix:///identity-keys.sock"},
+		{name: "invalid Unix host", url: "unix:///identity-keys.sock", host: "keys.example.com/path", wantErr: "invalid"},
 		{name: "HTTP endpoint", url: "http://exchange.example.com/v1/exchange"},
 		{name: "HTTPS endpoint", url: "https://exchange.example.com/v1/exchange"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := newExchangeClient(test.url)
+			_, err := newExchangeClient(test.url, test.host)
 			if test.wantErr == "" && err != nil {
 				t.Fatal(err)
 			}

@@ -1,4 +1,4 @@
-{{- if .Values.spire.enabled }}
+{{- if and .Values.spire.enabled (index .Values.spire "spire-server").enabled }}
 {{- $className := printf "%s-%s" .Release.Namespace .Release.Name -}}
 {{- $tenant := include "dsx-identity.operatorTenant" . -}}
 apiVersion: spire.spiffe.io/v1alpha1

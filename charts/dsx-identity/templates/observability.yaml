@@ -4,7 +4,7 @@ Prometheus listeners. The upstream chart does not expose those listeners on a
 Service, so this Service makes both producers discoverable without copying the
 upstream StatefulSet.
 */}}
-{{- if and .Values.spire.enabled .Values.observability.metrics.enabled }}
+{{- if and .Values.spire.enabled (index .Values.spire "spire-server").enabled .Values.observability.metrics.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
