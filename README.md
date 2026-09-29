@@ -15,6 +15,8 @@ the aggregate public keys served by any DSX Identity Keys instance.
 See the [examples user guide](examples/README.md) to acquire and consume DSX
 JWTs through token-fetcher injection or the link-local IMDS endpoint.
 
+For release maintainers, see [Release candidates](#release-candidates).
+
 Component commands and runtime configuration:
 
 - [DSX Identity Controller](cmd/dsx-identity-controller/README.md)
@@ -28,6 +30,19 @@ Component commands and runtime configuration:
 - [DSX IMDS](cmd/metadata-service/README.md)
 - [DSX Identity Keys](cmd/dsx-identity-keys/README.md)
 - [Kata UDS Proxy](kata-uds-proxy/README.md)
+
+## Release candidates
+
+1. Send feature PRs to `master`.
+2. When ready for QA, cut protected `release/1.15.0` from a tested `master` commit.
+3. Send release fixes to `release/1.15.0`, then cherry-pick them back to `master` through PRs.
+
+Release-worthy merges create `v1.15.0-rc.N`. The [shared workflow](.github/workflows/release-rc.yml)
+publishes matching images and charts directly to NGC, without a GitLab mirror.
+PRs only run validation. This workflow does not publish from `master` or promote RCs to stable.
+
+[One-time setup](https://github.com/dsx-ai-factory/dsx-github-actions/blob/main/docs/release-candidate-publishing.md#prerequisites-and-scope):
+configure the runner, protected release environment, NGC key, and release permissions.
 
 ## Architecture
 
