@@ -1,0 +1,11 @@
+[
+  {"name":"dsx-token-fetcher","context":".","dockerfile":"Dockerfile","target":"dsx-token-fetcher","buildArgs":{"BINARY":"dsx-token-fetcher"}},
+  {"name":"dsx-identity-keys","context":".","dockerfile":"Dockerfile","target":"dsx-identity-keys","buildArgs":{"BINARY":"dsx-identity-keys"}},
+  {"name":"metadata-service","context":".","dockerfile":"Dockerfile","target":"metadata-service","buildArgs":{"BINARY":"metadata-service"}},
+  {"name":"dsx-imds-network-setup","context":".","dockerfile":"Dockerfile","target":"dsx-imds-network-setup","buildArgs":{"BINARY":"dsx-imds-network-setup"}},
+  {"name":"dsx-identity-keys-proxy-csi","context":".","dockerfile":"Dockerfile","target":"dsx-identity-keys-proxy-csi","buildArgs":{"BINARY":"dsx-identity-keys-proxy-csi"}},
+  {"name":"dsx-identity-controller","context":".","dockerfile":"Dockerfile","target":"dsx-identity-controller","buildArgs":{"BINARY":"dsx-identity-controller"}},
+  {"name":"dsx-spire-server","context":".","dockerfile":"Dockerfile.spire","target":"dsx-spire-server"},
+  {"name":"dsx-spire-agent","context":".","dockerfile":"Dockerfile.spire","target":"dsx-spire-agent"},
+  {"name":"dsx-kata-uds-proxy","context":".","dockerfile":"kata-uds-proxy/Dockerfile"}
+]
