@@ -517,7 +517,7 @@ stack. Structured allow, deny, and dependency events never include
 credentials.
 
 SPIRE server, controller-manager, and the optional local SPIRE agent expose
-their native Prometheus metrics through chart-owned monitors. SPIRE 1.13.2
+their native Prometheus metrics through chart-owned monitors. SPIRE
 does not produce traces. SPIFFE CSI Driver, CSI node-driver-registrar, and
 the `socat` proxy expose no native application telemetry. Their health checks,
 container logs, and platform container metrics remain available.

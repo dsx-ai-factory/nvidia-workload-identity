@@ -48,7 +48,7 @@ spire:
       instrumentation.opentelemetry.io/inject-sdk: dsx-obs/default-instrumentation
       instrumentation.opentelemetry.io/container-names: spire-server
       sidecar.opentelemetry.io/inject: dsx-obs/default-sidecar
-    # SPIRE 1.13 provides native Prometheus metrics but no tracing support.
+    # SPIRE provides native Prometheus metrics but no tracing support.
     telemetry:
       prometheus:
         enabled: true

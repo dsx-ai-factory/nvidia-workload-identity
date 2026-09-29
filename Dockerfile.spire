@@ -1,6 +1,6 @@
 ARG BUILDER_IMG=golang:1.26.4
-ARG SPIRE_SERVER_IMG=ghcr.io/spiffe/spire-server:1.13.2
-ARG SPIRE_AGENT_IMG=ghcr.io/spiffe/spire-agent:1.13.2
+ARG SPIRE_SERVER_IMG=ghcr.io/spiffe/spire-server:1.15.3
+ARG SPIRE_AGENT_IMG=ghcr.io/spiffe/spire-agent:1.15.3
 
 FROM --platform=$BUILDPLATFORM ${BUILDER_IMG} AS builder-base
 

@@ -44,8 +44,8 @@ build:
         buildArgs:
           <<: &spireBuildArgs
             BUILDER_IMG: 127.0.0.1:5002/library/golang:1.26.4
-            SPIRE_SERVER_IMG: 127.0.0.1:5002/spiffe/spire-server:1.13.2
-            SPIRE_AGENT_IMG: 127.0.0.1:5002/spiffe/spire-agent:1.13.2
+            SPIRE_SERVER_IMG: 127.0.0.1:5002/spiffe/spire-server:1.15.3
+            SPIRE_AGENT_IMG: 127.0.0.1:5002/spiffe/spire-agent:1.15.3
     - image: dsx-identity/dsx-spire-agent
       context: ..
       docker:

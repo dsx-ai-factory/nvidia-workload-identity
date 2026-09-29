@@ -14,7 +14,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/${BINARY} ./cmd/${BINARY}
 
-FROM nvcr.io/nvidia/distroless/go:v4.0.6 AS runtime
+FROM gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3 AS runtime
 ARG BINARY
 COPY --from=builder /out/${BINARY} /usr/local/bin/${BINARY}
 USER 1000:1000
