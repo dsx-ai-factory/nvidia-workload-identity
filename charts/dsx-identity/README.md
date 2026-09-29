@@ -153,6 +153,11 @@ audience in `spiffe.nvidia.com/token-audience`. The
 [examples](../../examples/token-fetcher/README.md) cover ordinary Kubernetes
 Pods and DPUService deployment.
 
+The fetcher health endpoint and startup probe use
+`podTokenFetcher.startupProbe.httpGet.port` (default `8080`). A Pod can override
+both with `spiffe.nvidia.com/token-fetcher-health-port: "18080"` when another
+container uses that port. The annotation must contain a valid TCP port number.
+
 Keep the token-fetcher policy in a standalone `DPUService`. A policy-only
 service in a `DPUDeployment` blocks `DPUNodeMaintenance`.
 
