@@ -1,17 +1,21 @@
 name: Release candidate
 
 on:
-  push:
-    branches: [release/1.15.0]
-  pull_request:
-    branches: [master, "release/**"]
+  workflow_call:
+    inputs:
+      images:
+        description: Image inventory validated by the caller
+        type: string
+        required: true
 
 permissions:
   contents: read
 
 jobs:
   release:
-    if: github.repository == 'dsx-ai-factory/project-dsx-identity'
+    if: >-
+      github.repository == 'dsx-ai-factory/project-dsx-identity' &&
+      github.event_name == 'push' && github.ref == 'refs/heads/release/1.15.0'
     permissions:
       contents: write
     uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-publish.yml@8a37bf6fbeace3af5e5f5857f65e0da25cdf7537
@@ -21,17 +25,7 @@ jobs:
       environment: components-dev
       ngc-path: 0837451325059433/components-dev
       submodules: true
-      validate-artifacts: true
-      images: >-
-        [{"name":"dsx-token-fetcher","context":".","dockerfile":"Dockerfile","target":"dsx-token-fetcher","buildArgs":{"BINARY":"dsx-token-fetcher"}},
-         {"name":"dsx-identity-keys","context":".","dockerfile":"Dockerfile","target":"dsx-identity-keys","buildArgs":{"BINARY":"dsx-identity-keys"}},
-         {"name":"metadata-service","context":".","dockerfile":"Dockerfile","target":"metadata-service","buildArgs":{"BINARY":"metadata-service"}},
-         {"name":"dsx-imds-network-setup","context":".","dockerfile":"Dockerfile","target":"dsx-imds-network-setup","buildArgs":{"BINARY":"dsx-imds-network-setup"}},
-         {"name":"dsx-identity-keys-proxy-csi","context":".","dockerfile":"Dockerfile","target":"dsx-identity-keys-proxy-csi","buildArgs":{"BINARY":"dsx-identity-keys-proxy-csi"}},
-         {"name":"dsx-identity-controller","context":".","dockerfile":"Dockerfile","target":"dsx-identity-controller","buildArgs":{"BINARY":"dsx-identity-controller"}},
-         {"name":"dsx-spire-server","context":".","dockerfile":"Dockerfile.spire","target":"dsx-spire-server"},
-         {"name":"dsx-spire-agent","context":".","dockerfile":"Dockerfile.spire","target":"dsx-spire-agent"},
-         {"name":"dsx-kata-uds-proxy","context":".","dockerfile":"kata-uds-proxy/Dockerfile"}]
+      images: ${{ inputs.images }}
       charts: >-
         [{"name":"dsx-identity","path":"charts/dsx-identity",
           "versionValuePaths":[["spire","spire-server","image","tag"]],

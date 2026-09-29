@@ -1,0 +1,168 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [master, "release/**"]
+  push:
+    branches: [master, "release/**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: identity-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/heads/release/') }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  images:
+    name: Image inventory
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      images: ${{ steps.images.outputs.images }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - id: images
+        run: echo "images=$(jq -ce . .github/images.json)" >> "$GITHUB_OUTPUT"
+
+  validate:
+    name: Validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        with:
+          version: 2026.4.28
+          install_args: --locked
+      - run: make validate
+
+  e2e:
+    name: E2E
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    env:
+      # Use the existing split-kubeconfig path for parallel cluster creation.
+      KIND_DIND_SERVICE_HOST: localhost
+      KUBECONFIG: ${{ github.workspace }}/.kube/kind-k1:${{ github.workspace }}/.kube/kind-k2
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        id: tools
+        with:
+          version: 2026.4.28
+          install_args: --locked
+      - name: Prepare host networking and virtualization
+        run: |
+          for module in openvswitch vport-geneve nft_socket tun vhost_net; do
+            sudo modprobe "$module"
+          done
+          test -d /sys/module/openvswitch
+          test -d /sys/module/nft_socket
+          docker info
+          df -h
+          free -h
+      - run: make -j install
+      - run: make test
+      - name: E2E failure diagnostics
+        if: failure() && steps.tools.outcome == 'success'
+        run: |
+          for context in kind-k1 kind-k2; do
+            mise exec -- kubectl --context "$context" --request-timeout=10s get nodes -o wide || true
+            mise exec -- kubectl --context "$context" --request-timeout=10s get pods -A -o wide || true
+            mise exec -- kubectl --context "$context" --request-timeout=10s get events -A --sort-by=.lastTimestamp || true
+          done
+          mise exec -- kubectl --context kind-k2 --request-timeout=10s get kubevirt -n kubevirt || true
+          mise exec -- kubectl --context kind-k2 --request-timeout=10s get vm,vmi -n tenant-tenant1 || true
+      - name: Clean up E2E clusters
+        if: always() && steps.tools.outcome == 'success'
+        run: make clean
+
+  secret-detection:
+    name: Secret detection
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dsx-ai-factory/dsx-github-actions/.github/actions/trufflehog-scan@a252aa5208a0176d9c0789150d197e8a99a36b21
+        with:
+          head: ${{ github.sha }}
+          version: 3.91.1
+          extra-args: --results=verified,unknown
+          post-pr-comment: "false"
+          fail-on-findings: "true"
+
+  container-scan:
+    name: Container scan (${{ matrix.name }})
+    needs: images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.images.outputs.images) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          submodules: recursive
+          persist-credentials: false
+      - name: Read image build arguments
+        id: args
+        env:
+          BUILD_ARGS: ${{ toJSON(matrix.buildArgs || fromJSON('{}')) }}
+        run: |
+          {
+            echo 'build-args<<EOF'
+            jq -r 'to_entries[] | "\(.key)=\(.value)"' <<< "$BUILD_ARGS"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+      - name: Build and scan both platforms
+        uses: dsx-ai-factory/dsx-github-actions/.github/actions/docker-build@a252aa5208a0176d9c0789150d197e8a99a36b21
+        with:
+          image: local/${{ matrix.name }}
+          tags: ${{ github.sha }}
+          context: ${{ matrix.context }}
+          dockerfile: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target || '' }}
+          build-args: ${{ steps.args.outputs.build-args }}
+          platforms: linux/amd64,linux/arm64
+          push: "false"
+          buildkit-config: ""
+          security-scan-enabled: "true"
+          security-scan-fail-on-critical: "true"
+
+  release-checks:
+    name: RC contract checks
+    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-checks.yml@8a37bf6fbeace3af5e5f5857f65e0da25cdf7537
+
+  release:
+    needs: [images, validate, e2e, secret-detection, container-scan, release-checks]
+    if: >-
+      github.repository == 'dsx-ai-factory/project-dsx-identity' &&
+      github.event_name == 'push' && github.ref == 'refs/heads/release/1.15.0'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release-rc.yml
+    with:
+      images: ${{ needs.images.outputs.images }}
