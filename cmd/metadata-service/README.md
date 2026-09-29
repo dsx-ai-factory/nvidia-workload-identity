@@ -6,6 +6,8 @@ and returns the DSX JWT. KubeVirt uses DSX Identity Keys Proxy CSI. Paired-DPU
 placement uses a direct URL to its reachable shard-local DSX Identity Keys.
 Each process configures exactly one `--identity-keys-url`, whose scheme selects
 the transport.
+For a Unix proxy to an HTTPS virtual host, set `--identity-keys-host` to that
+route's DNS name so the exchange request carries the matching HTTP Host header.
 
 ```mermaid
 sequenceDiagram

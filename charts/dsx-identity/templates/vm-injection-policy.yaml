@@ -132,7 +132,9 @@ spec:
                   "--listen=:80",
                   {{ printf "--log-level=%s" .Values.observability.logLevel | quote }},
                   "--svid-hint=dsx-imds-vm",
-                  "--identity-keys-url=unix:///run/dsx/identity-keys.sock"
+                  "--identity-keys-url=unix:///run/dsx/identity-keys.sock"{{- with .Values.vmSupport.identityKeysProxy.httpHost }},
+                  {{ printf "--identity-keys-host=%s" . | quote }}
+                  {{- end }}
                 ],
                 ports: [
                   Object.spec.containers.ports{

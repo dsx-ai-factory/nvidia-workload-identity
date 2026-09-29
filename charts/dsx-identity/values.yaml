@@ -23,6 +23,7 @@ imagePullSecrets: []
 spire:
   enabled: true
   spire-server:
+    enabled: true
     # This image extends the pinned upstream SPIRE server image with both DSX
     # server plugins. Keep its tag aligned with the DSX Identity chart version.
     image:
@@ -203,6 +204,8 @@ vmSupport:
   tolerations: []
   identityKeysProxy:
     target: ""
+    # Set when the Unix proxy reaches an HTTP virtual host through TLS.
+    httpHost: ""
   socat:
     image:
       repository: alpine/socat

@@ -6,7 +6,7 @@ version: 0.1.0
 appVersion: "0.1.0"
 kubeVersion: ">=1.35.0-0"
 sources:
-  - https://gitlab-master.nvidia.com/ncp/vmaas/dsx-identity
+  - https://github.com/dsx-ai-factory/project-dsx-identity
 annotations:
   # DPF uses this constraint when coordinating DPUService upgrades.
   dpu.nvidia.com/doca-version: ">= 2.9"

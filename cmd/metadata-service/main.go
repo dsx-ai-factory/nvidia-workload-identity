@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"syscall"
 	"time"
 
@@ -94,7 +95,9 @@ type exchangeClient struct {
 	httpClient *http.Client
 }
 
-func newExchangeClient(exchangeURL string) (*exchangeClient, error) {
+var exchangeHostPattern = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$`)
+
+func newExchangeClient(exchangeURL, unixHTTPHost string) (*exchangeClient, error) {
 	if exchangeURL == "" {
 		return nil, errors.New("--identity-keys-url is required")
 	}
@@ -103,8 +106,14 @@ func newExchangeClient(exchangeURL string) (*exchangeClient, error) {
 		return nil, fmt.Errorf("parse DSX Identity Keys URL: %w", err)
 	}
 	if u.Scheme == "unix" {
+		if unixHTTPHost == "" {
+			unixHTTPHost = "exchange"
+		}
+		if !exchangeHostPattern.MatchString(unixHTTPHost) {
+			return nil, fmt.Errorf("invalid DSX Identity Keys Unix HTTP host %q", unixHTTPHost)
+		}
 		return &exchangeClient{
-			endpoint:   "http://exchange/v1/exchange",
+			endpoint:   "http://" + unixHTTPHost + "/v1/exchange",
 			httpClient: newUnixHTTPClient(u.Path),
 		}, nil
 	}
@@ -364,10 +373,11 @@ func run() (runErr error) {
 	var logLevel slog.Level
 	flag.TextVar(&logLevel, "log-level", slog.LevelInfo, "log level (debug, info, warn, error)")
 	var (
-		listenAddr      = flag.String("listen", ":80", "HTTP server listen address")
-		identityKeysURL = flag.String("identity-keys-url", "", "RFC 8693 endpoint of shard-local DSX Identity Keys")
-		spireSocketPath = flag.String("spire-socket", defaultSpireSocketPath, "Path to SPIRE agent socket")
-		svidHint        = flag.String("svid-hint", "dsx-imds", "Exact JWT-SVID hint (dsx-imds or dsx-imds-vm)")
+		listenAddr       = flag.String("listen", ":80", "HTTP server listen address")
+		identityKeysURL  = flag.String("identity-keys-url", "", "RFC 8693 endpoint of shard-local DSX Identity Keys")
+		identityKeysHost = flag.String("identity-keys-host", "", "HTTP Host for DSX Identity Keys requests over a Unix proxy")
+		spireSocketPath  = flag.String("spire-socket", defaultSpireSocketPath, "Path to SPIRE agent socket")
+		svidHint         = flag.String("svid-hint", "dsx-imds", "Exact JWT-SVID hint (dsx-imds or dsx-imds-vm)")
 	)
 	flag.Parse()
 
@@ -378,7 +388,7 @@ func run() (runErr error) {
 	defer func() {
 		runErr = errors.Join(runErr, sdk.Shutdown(context.Background()))
 	}()
-	exchange, err := newExchangeClient(*identityKeysURL)
+	exchange, err := newExchangeClient(*identityKeysURL, *identityKeysHost)
 	if err != nil {
 		return err
 	}
