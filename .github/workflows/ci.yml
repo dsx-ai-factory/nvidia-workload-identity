@@ -1,10 +1,15 @@
 name: CI
 
 on:
+  workflow_call:
+    outputs:
+      images:
+        description: Image inventory used by product CI
+        value: ${{ jobs.images.outputs.images }}
   pull_request:
     branches: [master, "release/**"]
   push:
-    branches: [master, "release/**"]
+    branches: [master]
 
 permissions:
   contents: read
@@ -155,27 +160,3 @@ jobs:
   release-checks:
     name: RC contract checks
     uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-checks.yml@8a37bf6fbeace3af5e5f5857f65e0da25cdf7537
-
-  release:
-    needs: [images, validate, e2e, secret-detection, container-scan, release-checks]
-    if: >-
-      github.repository == 'dsx-ai-factory/project-dsx-identity' &&
-      github.event_name == 'push' && github.ref == 'refs/heads/release/1.15.0'
-    permissions:
-      contents: write
-    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-publish.yml@8a37bf6fbeace3af5e5f5857f65e0da25cdf7537
-    with:
-      runner: ubuntu-latest
-      buildkit-config: ""
-      environment: components-dev
-      ngc-path: 0837451325059433/components-dev
-      submodules: true
-      images: ${{ needs.images.outputs.images }}
-      charts: >-
-        [{"name":"dsx-identity","path":"charts/dsx-identity",
-          "versionValuePaths":[["spire","spire-server","image","tag"]],
-          "lintValues":{"global":{"operatorTenant":"operator-1","dsx":{"jwtIssuer":"https://identity.example","region":"test","partition":"example"},"spire":{"trustDomain":"test.example","clusterName":"test","jwtIssuer":"https://test.example"}},"spire":{"spire-server":{"controllerManager":{"extraEnv":[{"name":"OPERATOR_TENANT","value":"operator-1"}]}}},"identityKeys":{"jwksURL":"https://identity.example/.well-known/jwks.json","nats":{"enabled":false}},"podTokenFetcher":{"enabled":false},"dpuService":{"imds":{"enabled":false}}}},
-         {"name":"dsx-imds","path":"charts/dsx-imds","lintValues":{"metadataService":{"identityKeysURL":"https://identity.example/v1/exchange"}}},
-         {"name":"dsx-token-fetcher","path":"charts/dsx-token-fetcher","lintValues":{"tokenFetcher":{"identityKeysURL":"https://identity.example/v1/exchange"}}},
-         {"name":"dsx-token-fetcher-example","path":"charts/dsx-token-fetcher-example","lintValues":{"audience":"spiffe://test.example/service","serviceDaemonSet":{"nodeSelector":{}}}},
-         {"name":"dsx-spiffe-csi","path":"charts/dsx-spiffe-csi"}]
