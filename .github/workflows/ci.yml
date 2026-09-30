@@ -62,7 +62,7 @@ jobs:
   e2e:
     name: E2E
     needs: validate
-    runs-on: ubuntu-24.04
+    runs-on: linux-amd64-cpu32
     timeout-minutes: 240
     env:
       # Use the existing split-kubeconfig path for parallel cluster creation.
