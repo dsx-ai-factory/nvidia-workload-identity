@@ -53,9 +53,11 @@ jobs:
   e2e:
     name: E2E
     needs: validate
-    runs-on: ubuntu-24.04
+    # This runner can reach the shared NVIDIA Docker Hub mirror.
+    runs-on: linux-amd64-cpu32
     timeout-minutes: 240
     env:
+      DOCKERHUB_MIRROR: https://dc.local.gha-runners.nvidia.com
       # Use the existing split-kubeconfig path for parallel cluster creation.
       KIND_DIND_SERVICE_HOST: localhost
       KUBECONFIG: ${{ github.workspace }}/.kube/kind-k1:${{ github.workspace }}/.kube/kind-k2
@@ -70,6 +72,8 @@ jobs:
         with:
           version: 2026.4.28
           install_args: --locked
+      - name: Configure Docker Hub mirror
+        run: ./scripts/configure-dockerhub-mirror.sh
       - name: Prepare host networking and virtualization
         run: |
           for module in openvswitch vport-geneve nft_socket tun vhost_net; do

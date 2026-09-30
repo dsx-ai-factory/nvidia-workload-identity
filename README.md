@@ -57,6 +57,8 @@ without release secrets. The RC workflow calls product CI once and waits on
 `needs: dsx-component-ci`, without listing individual jobs. The [image inventory](.github/images.json) is shared by scanning
 and publishing. E2E requires a Linux Docker host with OVN and KubeVirt kernel
 support. Missing prerequisites fail the job rather than skipping tests.
+The E2E runner uses the NVIDIA Docker Hub mirror for host pulls and the local
+Zot registry's Docker Hub upstream.
 
 ## Architecture
 
