@@ -41,6 +41,10 @@ jobs:
     name: Validate
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      MISE_DATA_DIR: ${{ github.workspace }}/.mise/mise-data
+      RUSTUP_HOME: ${{ github.workspace }}/.mise/mise-data/rustup
+      CARGO_HOME: ${{ github.workspace }}/.mise/mise-data/cargo
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -51,8 +55,8 @@ jobs:
         with:
           version: 2026.4.28
           install_args: --locked
-          # The action cache omits rustup toolchains but restores mise's Rust symlink.
-          cache: false
+          # Rustup and Cargo live under MISE_DATA_DIR so the cache includes them.
+          cache_key_prefix: mise-rustup-v1
       - run: make validate
 
   e2e:
@@ -85,7 +89,8 @@ jobs:
           docker info
           df -h
           free -h
-      - run: make -j install
+      # The checked-out CI commit is stable, so skip hashing nine image contexts.
+      - run: make -j install SKAFFOLD_RUN="mise exec -- skaffold run --iterative-status-check=false --tag=${GITHUB_SHA}"
       - run: make test
       - name: E2E failure diagnostics
         if: failure() && steps.tools.outcome == 'success'
