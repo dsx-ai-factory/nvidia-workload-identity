@@ -47,7 +47,6 @@ jobs:
         with:
           version: 2026.4.28
           install_args: --locked
-      - run: mise exec -- rustup component add rustfmt clippy
       - run: make validate
 
   e2e:
