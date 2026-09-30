@@ -107,6 +107,12 @@ jobs:
             '.extensions.sync.registries[0].urls[1] = $mirror' \
             scripts/local-registry/zot-config.json > "$RUNNER_TEMP/zot-config.json"
           echo "ZOT_CONFIG_FILE=$RUNNER_TEMP/zot-config.json" >> "$GITHUB_ENV"
+      - name: Docker Hub mirror diagnostics
+        run: |
+          curl -sS --connect-timeout 5 --max-time 15 -D - -o /dev/null \
+            https://dc.local.gha-runners.nvidia.com/v2/library/busybox/manifests/1.37.0-uclibc || true
+          curl -sS --connect-timeout 5 --max-time 15 -D - -o /dev/null \
+            https://dc.local.gha-runners.nvidia.com/v2/nicolaka/netshoot/manifests/v0.16 || true
       # The checked-out CI commit is stable, so skip hashing nine image contexts.
       - run: make -j install SKAFFOLD_RUN="mise exec -- skaffold run --iterative-status-check=false --tag=${GITHUB_SHA}"
         id: install
@@ -129,6 +135,7 @@ jobs:
       - name: E2E failure diagnostics
         if: failure() && steps.tools.outcome == 'success'
         run: |
+          docker logs --tail=400 dsx-identity-registry || true
           for context in kind-k1 kind-k2; do
             mise exec -- kubectl --context "$context" --request-timeout=10s get nodes -o wide || true
             mise exec -- kubectl --context "$context" --request-timeout=10s get pods -A -o wide || true
