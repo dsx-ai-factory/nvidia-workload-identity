@@ -6,6 +6,10 @@ on:
       images:
         description: Image inventory used by product CI
         value: ${{ jobs.images.outputs.images }}
+  pull_request:
+    branches: [master, "release/**"]
+  push:
+    branches: [master]
 
 permissions:
   contents: read
@@ -52,8 +56,7 @@ jobs:
   e2e:
     name: E2E
     needs: validate
-    # This runner can reach the shared NVIDIA Docker Hub mirror.
-    runs-on: linux-amd64-cpu32
+    runs-on: ubuntu-24.04
     timeout-minutes: 240
     env:
       DOCKERHUB_MIRROR: https://dc.local.gha-runners.nvidia.com
@@ -71,6 +74,8 @@ jobs:
         with:
           version: 2026.4.28
           install_args: --locked
+      - name: Check Docker Hub mirror reachability
+        run: curl --max-time 10 --silent --show-error --output /dev/null "${DOCKERHUB_MIRROR}/v2/"
       - name: Configure Docker Hub mirror
         run: ./scripts/configure-dockerhub-mirror.sh
       - name: Prepare host networking and virtualization
