@@ -86,11 +86,13 @@ jobs:
           key: zot-dockerhub-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/local-registry/zot-config.json') }}
       - name: Prepare host networking and virtualization
         run: |
-          for module in openvswitch vport-geneve nft_socket tun vhost_net; do
+          # Primary UDN gateways require VRF support in the host kernel.
+          for module in openvswitch vport-geneve nft_socket vrf tun vhost_net; do
             sudo modprobe "$module"
           done
           test -d /sys/module/openvswitch
           test -d /sys/module/nft_socket
+          test -d /sys/module/vrf
           docker info
           df -h
           free -h
@@ -105,6 +107,21 @@ jobs:
       - run: make -j install SKAFFOLD_RUN="mise exec -- skaffold run --iterative-status-check=false --tag=${GITHUB_SHA}"
         id: install
       - run: make test
+      - name: VM UDN and IMDS evidence
+        run: |
+          mise exec -- kubectl --context kind-k2 --request-timeout=10s \
+            get pods -n tenant-tenant1 -o json | mise exec -- jq \
+            '.items[] | {name: .metadata.name, uid: .metadata.uid, node: .spec.nodeName,
+              hostNetwork: (.spec.hostNetwork // false), networks: .metadata.annotations["k8s.ovn.org/pod-networks"]}'
+          mise exec -- kubectl --context kind-k2 --request-timeout=10s \
+            get virtualinstance e2e-debian-vm -n tenant-tenant1 -o json | \
+            mise exec -- jq '{spec, status}'
+          mise exec -- kubectl --context kind-k2 --request-timeout=10s \
+            logs -n tenant-tenant1 -l kubevirt.io=virt-launcher \
+            -c dsx-imds-network-setup --tail=20 --prefix
+          mise exec -- kubectl --context kind-k2 --request-timeout=10s \
+            logs -n tenant-tenant1 -l kubevirt.io=virt-launcher \
+            -c metadata-service --tail=20 --prefix
       - name: E2E failure diagnostics
         if: failure() && steps.tools.outcome == 'success'
         run: |
