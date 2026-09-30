@@ -155,19 +155,29 @@ openbao_curl() {
 ssh_vm() {
     local vm_ip="$1"
     local command="$2"
-    # VMI readiness can precede both the SSH listener and its banner. Bound the
-    # complete attempt while SSH retries refusals and waits for the banner.
-    kubectl exec "${EXTERNAL_CLIENT_NAME}" -c "${EXTERNAL_CLIENT_CONTAINER}" -n "${NAMESPACE}" \
-        --context "${CONTEXT}" -- timeout 180s ssh \
-        -i /run/dsx-identity-ssh/id_ed25519 \
-        -o BatchMode=yes \
-        -o StrictHostKeyChecking=no \
-        -o UserKnownHostsFile=/dev/null \
-        -o GlobalKnownHostsFile=/dev/null \
-        -o LogLevel=ERROR \
-        -o ConnectionAttempts=180 \
-        -o ConnectTimeout=180 \
-        "debian@${vm_ip}" "${command}"
+    local deadline=$((SECONDS + 180)) remaining result
+    # Cloud-init can restart sshd during authentication. Retry SSH failures,
+    # but preserve remote command failures and the overall startup deadline.
+    while ((SECONDS < deadline)); do
+        remaining=$((deadline - SECONDS))
+        if kubectl exec "${EXTERNAL_CLIENT_NAME}" -c "${EXTERNAL_CLIENT_CONTAINER}" -n "${NAMESPACE}" \
+            --context "${CONTEXT}" -- timeout "${remaining}s" ssh \
+            -i /run/dsx-identity-ssh/id_ed25519 \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o GlobalKnownHostsFile=/dev/null \
+            -o LogLevel=ERROR \
+            -o ConnectionAttempts=180 \
+            -o ConnectTimeout="${remaining}" \
+            "debian@${vm_ip}" "${command}"; then
+            return 0
+        else
+            result=$?
+        fi
+        [[ "${result}" == 255 ]] || return "${result}"
+    done
+    return 124
 }
 
 verify_openbao_access() {

@@ -39,6 +39,10 @@ jobs:
     name: Validate
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      MISE_DATA_DIR: ${{ github.workspace }}/.mise/mise-data
+      RUSTUP_HOME: ${{ github.workspace }}/.mise/mise-data/rustup
+      CARGO_HOME: ${{ github.workspace }}/.mise/mise-data/cargo
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -49,17 +53,20 @@ jobs:
         with:
           version: 2026.4.28
           install_args: --locked
+          # Rustup and Cargo live under MISE_DATA_DIR so the cache includes them.
+          cache_key_prefix: mise-rustup-v1
       - run: make validate
 
   e2e:
     name: E2E
     needs: validate
-    runs-on: ubuntu-24.04
+    runs-on: linux-amd64-cpu32
     timeout-minutes: 240
     env:
       # Use the existing split-kubeconfig path for parallel cluster creation.
       KIND_DIND_SERVICE_HOST: localhost
       KUBECONFIG: ${{ github.workspace }}/.kube/kind-k1:${{ github.workspace }}/.kube/kind-k2
+      ZOT_DATA_DIR: ${{ github.workspace }}/.cache/zot
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -71,21 +78,64 @@ jobs:
         with:
           version: 2026.4.28
           install_args: --locked
+      - uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        id: zot-cache
+        with:
+          # The full Zot storage exceeds GitHub's 10 GB per-entry limit.
+          path: ${{ env.ZOT_DATA_DIR }}/library
+          key: zot-dockerhub-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/local-registry/zot-config.json') }}
       - name: Prepare host networking and virtualization
         run: |
-          for module in openvswitch vport-geneve nft_socket tun vhost_net; do
+          # The AWS image omits VRF and holds its matching extra module package.
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends --allow-change-held-packages \
+            "linux-modules-extra-$(uname -r)"
+          # Primary UDN gateways require VRF support in the host kernel.
+          for module in openvswitch vport-geneve nft_socket vrf tun vhost_net; do
             sudo modprobe "$module"
           done
           test -d /sys/module/openvswitch
           test -d /sys/module/nft_socket
+          test -d /sys/module/vrf
           docker info
           df -h
           free -h
-      - run: make -j install
+      - name: Configure Zot upstream mirror
+        run: |
+          # shellcheck disable=SC2016
+          mise exec -- jq --arg mirror 'https://dc.local.gha-runners.nvidia.com' \
+            '.extensions.sync.registries[0].urls[1] = $mirror' \
+            scripts/local-registry/zot-config.json > "$RUNNER_TEMP/zot-config.json"
+          echo "ZOT_CONFIG_FILE=$RUNNER_TEMP/zot-config.json" >> "$GITHUB_ENV"
+      - name: Docker Hub mirror diagnostics
+        run: |
+          curl -sS --connect-timeout 5 --max-time 15 -D - -o /dev/null \
+            https://dc.local.gha-runners.nvidia.com/v2/library/busybox/manifests/1.37.0-uclibc || true
+          curl -sS --connect-timeout 5 --max-time 15 -D - -o /dev/null \
+            https://dc.local.gha-runners.nvidia.com/v2/nicolaka/netshoot/manifests/v0.16 || true
+      # The checked-out CI commit is stable, so skip hashing nine image contexts.
+      - run: make -j install SKAFFOLD_RUN="mise exec -- skaffold run --iterative-status-check=false --tag=${GITHUB_SHA}"
+        id: install
       - run: make test
+      - name: VM UDN and IMDS evidence
+        run: |
+          mise exec -- kubectl --context kind-k2 --request-timeout=10s \
+            get pods -n tenant-tenant1 -o json | mise exec -- jq \
+            '.items[] | {name: .metadata.name, uid: .metadata.uid, node: .spec.nodeName,
+              hostNetwork: (.spec.hostNetwork // false), networks: .metadata.annotations["k8s.ovn.org/pod-networks"]}'
+          mise exec -- kubectl --context kind-k2 --request-timeout=10s \
+            get virtualinstance e2e-debian-vm -n tenant-tenant1 -o json | \
+            mise exec -- jq '{spec, status}'
+          mise exec -- kubectl --context kind-k2 --request-timeout=10s \
+            logs -n tenant-tenant1 -l kubevirt.io=virt-launcher \
+            -c dsx-imds-network-setup --tail=20 --prefix
+          mise exec -- kubectl --context kind-k2 --request-timeout=10s \
+            logs -n tenant-tenant1 -l kubevirt.io=virt-launcher \
+            -c metadata-service --tail=20 --prefix
       - name: E2E failure diagnostics
         if: failure() && steps.tools.outcome == 'success'
         run: |
+          docker logs --tail=400 dsx-identity-registry || true
           for context in kind-k1 kind-k2; do
             mise exec -- kubectl --context "$context" --request-timeout=10s get nodes -o wide || true
             mise exec -- kubectl --context "$context" --request-timeout=10s get pods -A -o wide || true
@@ -93,9 +143,53 @@ jobs:
           done
           mise exec -- kubectl --context kind-k2 --request-timeout=10s get kubevirt -n kubevirt || true
           mise exec -- kubectl --context kind-k2 --request-timeout=10s get vm,vmi -n tenant-tenant1 || true
+          mise exec -- kubectl --context kind-k2 --request-timeout=10s \
+            get virtualinstance e2e-debian-vm -n tenant-tenant1 -o yaml || true
+          mise exec -- kubectl --context kind-k2 --request-timeout=10s \
+            get clusterstaticentries || true
+          mise exec -- kubectl --context kind-k2 --request-timeout=10s \
+            logs -n tenant-tenant1 job/e2e-launch-layer-status \
+            -c status-publisher --tail=100 || true
+          mise exec -- kubectl --context kind-k2 --request-timeout=10s \
+            logs -n dsx-identity -l app.kubernetes.io/name=dsx-identity-controller --tail=100 || true
+          mise exec -- kubectl --context kind-k2 --request-timeout=10s \
+            logs -n tenant-tenant1 -l kubevirt.io=virt-launcher \
+            -c metadata-service --tail=200 --prefix || true
+          mise exec -- kubectl --context kind-k2 --request-timeout=10s \
+            get pods -n tenant-tenant1 -o json | mise exec -- jq \
+            '.items[] | {name: .metadata.name, node: .spec.nodeName,
+              hostNetwork: (.spec.hostNetwork // false), networks: .metadata.annotations["k8s.ovn.org/pod-networks"]}' || true
+          mise exec -- kubectl --context kind-k2 --request-timeout=10s \
+            exec -n tenant-tenant1 e2e-external-client -c external-client -- \
+            sh -c 'ip -4 route; curl -k -sS --connect-timeout 3 --max-time 5 https://10.96.0.1/healthz' || true
+          mise exec -- kubectl --context kind-k2 --request-timeout=10s \
+            logs -n ovn-kubernetes -l app=ovnkube-node -c ovnkube-node --tail=100 --prefix || true
+          for node in k2-control-plane k2-worker; do
+            docker exec "$node" ip -4 rule || true
+            docker exec "$node" ip -4 route show table all || true
+            docker exec "$node" sysctl net.ipv4.conf.all.rp_filter net.ipv4.conf.breth0.rp_filter || true
+            docker exec "$node" nft list table inet ovn-kubernetes || true
+          done
+          for pod in $(mise exec -- kubectl --context kind-k2 --request-timeout=10s \
+            get pods -n ovn-kubernetes -l app=ovs-node -o name); do
+            mise exec -- kubectl --context kind-k2 --request-timeout=10s \
+              exec -n ovn-kubernetes "$pod" -- ovs-ofctl dump-flows breth0 || true
+          done
       - name: Clean up E2E clusters
         if: always() && steps.tools.outcome == 'success'
         run: make clean
+      - name: Stop Zot before caching
+        if: always() && steps.install.outcome == 'success' && steps.zot-cache.outputs.cache-hit != 'true'
+        id: stop-zot
+        run: |
+          docker stop dsx-identity-registry
+          sudo chown -R "$(id -u):$(id -g)" "$ZOT_DATA_DIR/library"
+          du -sh "$ZOT_DATA_DIR/library"
+      - uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        if: always() && steps.stop-zot.outcome == 'success'
+        with:
+          path: ${{ env.ZOT_DATA_DIR }}/library
+          key: ${{ steps.zot-cache.outputs.cache-primary-key }}
 
   secret-detection:
     name: Secret detection
