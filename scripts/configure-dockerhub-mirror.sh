@@ -28,4 +28,5 @@ if command -v systemctl >/dev/null 2>&1; then
 else
     sudo service docker restart
 fi
-docker info --format '{{json .RegistryConfig.Mirrors}}' | jq -e --arg mirror "${mirror}" 'index($mirror) != null'
+docker info --format '{{json .RegistryConfig.Mirrors}}' | \
+    tee /dev/stderr | jq -e --arg mirror "${mirror}" 'any(.[]; . == $mirror or . == ($mirror + "/"))'
