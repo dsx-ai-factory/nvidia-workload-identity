@@ -89,6 +89,13 @@ jobs:
           docker info
           df -h
           free -h
+      - name: Configure Zot upstream mirror
+        run: |
+          # shellcheck disable=SC2016
+          mise exec -- jq --arg mirror 'https://dc.local.gha-runners.nvidia.com' \
+            '.extensions.sync.registries[0].urls += [$mirror]' \
+            scripts/local-registry/zot-config.json > "$RUNNER_TEMP/zot-config.json"
+          echo "ZOT_CONFIG_FILE=$RUNNER_TEMP/zot-config.json" >> "$GITHUB_ENV"
       # The checked-out CI commit is stable, so skip hashing nine image contexts.
       - run: make -j install SKAFFOLD_RUN="mise exec -- skaffold run --iterative-status-check=false --tag=${GITHUB_SHA}"
       - run: make test

@@ -9,7 +9,7 @@ REGISTRY_CONTAINER_PORT=5000
 REGISTRY_HOST=127.0.0.1
 REGISTRY_READY_HOST=127.0.0.1
 REGISTRY_VOLUME=dsx-identity-registry-zot-data
-CONFIG_FILE="${PROJECT_ROOT}/scripts/local-registry/zot-config.json"
+CONFIG_FILE="${ZOT_CONFIG_FILE:-${PROJECT_ROOT}/scripts/local-registry/zot-config.json}"
 
 source "${PROJECT_ROOT}/scripts/common.sh"
 
