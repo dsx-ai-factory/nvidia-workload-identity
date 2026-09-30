@@ -46,8 +46,10 @@ configure the runner, protected release environment, NGC key, and release permis
 
 ## CI
 
-PRs to `master` and `release/**`, and pushes to those branches, run `make validate`,
-the full [local E2E lifecycle](#local-e2e), secret detection, and container scans.
+PRs run CI on `copy-pr-bot`'s `pull-request/<number>` branches. Pushes to `master`
+and `release/**` also run `make validate`, the full [local E2E lifecycle](#local-e2e),
+secret detection, and container scans. The bot must be installed for this repo,
+and its [configuration](.github/copy-pr-bot.yaml) must be on `master` to take effect.
 The shared build action scans both image platforms with Syft and Grype, uploads
 SBOMs and reports, and fails on Critical vulnerabilities or scanner errors.
 These scans do not submit results to Pulse.
