@@ -115,8 +115,8 @@ jobs:
           mise exec -- kubectl --context kind-k2 --request-timeout=10s get kubevirt -n kubevirt || true
           mise exec -- kubectl --context kind-k2 --request-timeout=10s get vm,vmi -n tenant-tenant1 || true
           mise exec -- kubectl --context kind-k2 --request-timeout=10s \
-            logs -n dsx-identity daemonset/dsx-imds \
-            -c e2e-metadata-service --tail=200 --prefix || true
+            logs -n tenant-tenant1 -l kubevirt.io=virt-launcher \
+            -c metadata-service --tail=200 --prefix || true
       - name: Clean up E2E clusters
         if: always() && steps.tools.outcome == 'success'
         run: make clean
@@ -125,6 +125,7 @@ jobs:
         id: stop-zot
         run: |
           docker stop dsx-identity-registry
+          sudo chown -R "$(id -u):$(id -g)" "$ZOT_DATA_DIR"
           du -sh "$ZOT_DATA_DIR"
       - uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         if: always() && steps.stop-zot.outcome == 'success'
