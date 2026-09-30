@@ -18,7 +18,7 @@ source "${PROJECT_ROOT}/scripts/common.sh"
 
 if [[ -n "${DOCKERHUB_MIRROR:-}" ]]; then
     jq --arg mirror "${DOCKERHUB_MIRROR}" \
-        '(.extensions.sync.registries[] | select(.urls[0] == "https://registry-1.docker.io").urls) = [$mirror]' \
+        '(.extensions.sync.registries[] | select(.urls[0] == "https://registry-1.docker.io").urls) |= ([$mirror] + map(select(. != $mirror)))' \
         "${CONFIG_FILE}" > "${runtime_config}"
 else
     cp "${CONFIG_FILE}" "${runtime_config}"

@@ -61,7 +61,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     env:
-      DOCKERHUB_MIRROR: https://dc.local.gha-runners.nvidia.com
+      DOCKERHUB_MIRROR: https://mirror.gcr.io
       # Use the existing split-kubeconfig path for parallel cluster creation.
       KIND_DIND_SERVICE_HOST: localhost
       KUBECONFIG: ${{ github.workspace }}/.kube/kind-k1:${{ github.workspace }}/.kube/kind-k2
@@ -88,6 +88,7 @@ jobs:
           test -d /sys/module/openvswitch
           test -d /sys/module/nft_socket
           docker info
+          docker system df
           df -h
           free -h
       - run: make -j install
