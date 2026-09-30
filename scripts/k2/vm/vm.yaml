@@ -122,6 +122,8 @@ metadata:
 spec:
   template:
     spec:
+      # Publish status through the node network because the tenant UDN cannot reach the API service.
+      hostNetwork: true
       restartPolicy: OnFailure
       serviceAccountName: e2e-launch-layer-status
       containers:
