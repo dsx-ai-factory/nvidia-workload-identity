@@ -18,6 +18,7 @@ FROM gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55
 ARG BINARY
 COPY --from=builder /out/${BINARY} /usr/local/bin/${BINARY}
 USER 1000:1000
+WORKDIR /
 
 FROM runtime AS dsx-identity-keys
 CMD ["/usr/local/bin/dsx-identity-keys"]
