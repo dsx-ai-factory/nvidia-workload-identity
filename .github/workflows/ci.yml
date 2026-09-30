@@ -6,10 +6,8 @@ on:
       images:
         description: Image inventory used by product CI
         value: ${{ jobs.images.outputs.images }}
-  pull_request:
-    branches: [master, "release/**"]
   push:
-    branches: [master]
+    branches: [master, "pull-request/[0-9]+"]
 
 permissions:
   contents: read
