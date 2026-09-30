@@ -8,7 +8,7 @@ REGISTRY_PORT=5002
 REGISTRY_CONTAINER_PORT=5000
 REGISTRY_HOST=127.0.0.1
 REGISTRY_READY_HOST=127.0.0.1
-REGISTRY_VOLUME=dsx-identity-registry-zot-data
+REGISTRY_VOLUME="${ZOT_DATA_DIR:-dsx-identity-registry-zot-data}"
 CONFIG_FILE="${ZOT_CONFIG_FILE:-${PROJECT_ROOT}/scripts/local-registry/zot-config.json}"
 
 source "${PROJECT_ROOT}/scripts/common.sh"
@@ -32,6 +32,9 @@ registry_image() {
 docker network inspect kind >/dev/null 2>&1 || docker network create kind >/dev/null
 
 if ! docker container inspect "${REGISTRY_NAME}" >/dev/null 2>&1; then
+    if [[ -n "${ZOT_DATA_DIR:-}" ]]; then
+        mkdir -p "${ZOT_DATA_DIR}"
+    fi
     docker create --restart=always \
         --name "${REGISTRY_NAME}" \
         --network kind \
