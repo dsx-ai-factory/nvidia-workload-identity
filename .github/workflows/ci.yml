@@ -93,7 +93,7 @@ jobs:
         run: |
           # shellcheck disable=SC2016
           mise exec -- jq --arg mirror 'https://dc.local.gha-runners.nvidia.com' \
-            '.extensions.sync.registries[0].urls += [$mirror]' \
+            '.extensions.sync.registries[0].urls[1] = $mirror' \
             scripts/local-registry/zot-config.json > "$RUNNER_TEMP/zot-config.json"
           echo "ZOT_CONFIG_FILE=$RUNNER_TEMP/zot-config.json" >> "$GITHUB_ENV"
       # The checked-out CI commit is stable, so skip hashing nine image contexts.

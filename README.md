@@ -58,7 +58,7 @@ without release secrets. The RC workflow calls product CI once and waits on
 and publishing. E2E requires a Linux Docker host with OVN and KubeVirt kernel
 support. Missing prerequisites fail the job rather than skipping tests.
 The local Zot registry caches image pulls for both Kind clusters and local image
-builds. CI configures the NVIDIA Docker Hub mirror as Zot's first pull source.
+builds through `mirror.gcr.io`. CI uses the NVIDIA Docker Hub mirror instead.
 
 ## Architecture
 
