@@ -59,7 +59,8 @@ without release secrets. The RC workflow calls product CI once and waits on
 `needs: dsx-component-ci`, without listing individual jobs. The [image inventory](.github/images.json) is shared by scanning
 and publishing. E2E requires a Linux Docker host with OVN and KubeVirt kernel
 support, including the `vrf` module for primary UDN gateways. Missing
-prerequisites fail the job rather than skipping tests.
+prerequisites fail the job rather than skipping tests. CI installs Ubuntu's
+extra module package for the running kernel before loading these modules.
 The local Zot registry caches image pulls for both Kind clusters and local image
 builds through `mirror.gcr.io`. CI uses the NVIDIA Docker Hub mirror instead.
 

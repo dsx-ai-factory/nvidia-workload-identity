@@ -86,6 +86,9 @@ jobs:
           key: zot-dockerhub-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/local-registry/zot-config.json') }}
       - name: Prepare host networking and virtualization
         run: |
+          # Ubuntu's AWS runner image omits VRF from its base module package.
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends "linux-modules-extra-$(uname -r)"
           # Primary UDN gateways require VRF support in the host kernel.
           for module in openvswitch vport-geneve nft_socket vrf tun vhost_net; do
             sudo modprobe "$module"
