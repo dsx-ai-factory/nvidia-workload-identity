@@ -51,6 +51,8 @@ jobs:
         with:
           version: 2026.4.28
           install_args: --locked
+          # The action cache omits rustup toolchains but restores mise's Rust symlink.
+          cache: false
       - run: make validate
 
   e2e:
