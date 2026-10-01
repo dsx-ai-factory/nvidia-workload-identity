@@ -18,7 +18,7 @@ jobs:
       github.ref == 'refs/heads/release/1.15.0'
     permissions:
       contents: write
-    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-publish.yml@8a37bf6fbeace3af5e5f5857f65e0da25cdf7537
+    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-publish.yml@08b623112fae5e353c0a13c738e60001062fd64b
     secrets: inherit
     with:
       runner: ubuntu-latest
