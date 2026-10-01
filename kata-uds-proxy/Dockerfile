@@ -1,5 +1,5 @@
 ARG BUILDER_IMG=rust:1.97.1-alpine
-ARG RUNTIME_IMG=alpine:3.24.1
+ARG RUNTIME_IMG=alpine:3.24.2
 
 FROM --platform=$BUILDPLATFORM ${BUILDER_IMG} AS builder
 
