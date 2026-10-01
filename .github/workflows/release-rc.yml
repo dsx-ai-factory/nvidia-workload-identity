@@ -19,6 +19,7 @@ jobs:
     permissions:
       contents: write
     uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-publish.yml@8a37bf6fbeace3af5e5f5857f65e0da25cdf7537
+    secrets: inherit
     with:
       runner: ubuntu-latest
       buildkit-config: ""
