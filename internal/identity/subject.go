@@ -10,7 +10,7 @@ import (
 
 var segmentPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]*$`)
 
-// ResourceType identifies the resource represented by a subject.
+// ResourceType is the first path key, such as bm, vm, or cluster.
 type ResourceType string
 
 const (
@@ -85,9 +85,7 @@ func (s Subject) validate() error {
 	if !ValidService(s.Service) {
 		return fmt.Errorf("invalid service %q", s.Service)
 	}
-	switch s.ResourceType {
-	case ResourceDPU, ResourceBM, ResourceVM:
-	default:
+	if !segmentPattern.MatchString(string(s.ResourceType)) {
 		return fmt.Errorf("invalid resource type %q", s.ResourceType)
 	}
 	if !ValidResourceID(s.ResourceID) {

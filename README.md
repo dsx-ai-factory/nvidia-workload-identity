@@ -414,8 +414,7 @@ admission](charts/dsx-token-fetcher/README.md) child charts.
 DSX JWT subjects use:
 
 ```text
-spiffe://<tenant>.<region>.<service>.<partition>/<dpu|bm|vm>/<resource-id>
-  [/process/<name>][/role/<role>]
+spiffe://<tenant>.<region>.<service>.<partition>/<key>/<value>[/...]
 spiffe://<operator-tenant>.<region>.<service>.<partition>/bm/<node-name>/pod/<pod-uuid>
   [/role/<role>]
 ```
@@ -426,13 +425,21 @@ DPU service identities use:
 spiffe://<operator-tenant>.<region>.<service>.<partition>/dpu/<serial>/dpuservice/<service-id>/namespace/<namespace>
 ```
 
-Only the resource type and resource ID have fixed parser semantics:
+The first path key and value are required, with no resource-type allowlist:
 
 ```text
-spiffe://<tenant>.<region>.<service>.<partition>/<dpu|bm|vm>/<resource-id>[/...]
+spiffe://<tenant>.<region>.<service>.<partition>/<key>/<value>[/...]
 ```
 
-Exchange preserves every remaining path segment without interpreting it.
+Exchange preserves the complete resource path without interpreting suffix keys
+or values. For example:
+
+```text
+local:     spiffe://<local-domain>/tenant/<tenant>/service/dsx/cluster/cluster-1/namespace/team-a/workload/api
+exchanged: spiffe://<tenant>.<region>.dsx.<partition>/cluster/cluster-1/namespace/team-a/workload/api
+```
+
+Path keys and values retain their case, order, and repeated keys.
 
 Cluster-local SPIRE identities encode the same fields under the shard trust
 domain. Exchange takes the region and partition from explicit configuration,
@@ -688,6 +695,11 @@ flowchart TB
 The KubeVirt VM contains no SPIRE agent. SPIFFE CSI exposes the attested second
 agent's Workload API socket to the virt-launcher Pod, and DSX IMDS uses that
 socket to fetch the VM SPIRE JWT-SVID.
+
+The SPIRE-only probe also obtains a registered `/Cluster/Cluster-1` JWT-SVID
+with repeated namespace keys. The fixture exchanges it through DSX Identity
+Keys, checks the exact subject, and verifies its signature through both shards'
+aggregate JWKS.
 
 ### Cross-shard OpenBao validation
 

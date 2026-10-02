@@ -323,7 +323,8 @@ assert_full_aggregates() {
 main() {
     local script_started=${SECONDS} setup_started=${SECONDS} stage_started
     local k1_token k2_token k1_subject k2_subject k2_spire_subject k1_spire_id k2_spire_id
-    local k1_spire_svid k2_spire_svid
+    local k1_spire_svid k2_spire_svid generic_svid generic_token
+    local generic_path="Cluster/Cluster-1/namespace/team-a/namespace/team-b"
     local local_k1_token local_k2_token expected
 
     validate_context_exists "${K1_CONTEXT}"
@@ -384,12 +385,20 @@ main() {
         "${K1_IDENTITY_KEYS_URL}" "${k2_spire_svid}"
     assert_exchange_rejects "k1 SPIRE JWT-SVID at k2 DSX Identity Keys" \
         "${K2_IDENTITY_KEYS_URL}" "${k1_spire_svid}"
+    generic_svid=$(fetch_spire_jwt_svid \
+        "${K2_CONTEXT}" "${K2_SPIRE_POD}" \
+        "spiffe://${K2_TRUST_DOMAIN}/tenant/${OPERATOR_TENANT}/service/identity-probe/${generic_path}" \
+        "${AUDIENCE}" generic-path "${K2_SPIRE_NAMESPACE}")
+    generic_token=$(exchange_spire_svid "${K2_IDENTITY_KEYS_URL}" "${generic_svid}")
+    assert_token_contract "generic path exchange" "${generic_token}" \
+        "spiffe://${OPERATOR_TENANT}.ds9.identity-probe.nvid.id/${generic_path}"
     log_timing "local exchange and shard rejection" "${stage_started}"
 
     stage_started=${SECONDS}
     expected=$(jq -cn --arg k1 "${K1_ORIGINAL_KID}" --arg k2 "${K2_ORIGINAL_KID}" '[$k1, $k2]')
     assert_nats_kv "${expected}"
-    assert_full_aggregates "${expected}" "${k1_token}" "${k2_token}" "${local_k1_token}" "${local_k2_token}"
+    assert_full_aggregates "${expected}" "${k1_token}" "${k2_token}" \
+        "${local_k1_token}" "${local_k2_token}" "${generic_token}"
     log_timing "NATS KV connectivity, entries, and aggregate JWKS" "${stage_started}"
 
     stage_started=${SECONDS}

@@ -15,6 +15,16 @@ func TestExchangeSubject(t *testing.T) {
 		dsx   string
 	}{
 		{
+			name:  "generic key with repeated suffix keys",
+			local: "spiffe://k2.internal/tenant/tenant-2/service/dsx/Cluster/Cluster-1/namespace/team-a/namespace/team-b",
+			dsx:   "spiffe://tenant-2.ds9.dsx.nvid.id/Cluster/Cluster-1/namespace/team-a/namespace/team-b",
+		},
+		{
+			name:  "pod resource",
+			local: "spiffe://k2.internal/tenant/tenant-2/service/dsx/pod/pod-1",
+			dsx:   "spiffe://tenant-2.ds9.dsx.nvid.id/pod/pod-1",
+		},
+		{
 			name:  "dpu",
 			local: "spiffe://k2.internal/tenant/tenant-2/service/dsx/dpu/dpu-1",
 			dsx:   "spiffe://tenant-2.ds9.dsx.nvid.id/dpu/dpu-1",

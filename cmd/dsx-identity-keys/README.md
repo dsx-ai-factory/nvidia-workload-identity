@@ -10,9 +10,14 @@ registration determines the tenant in the local subject, and DSX Identity Keys
 preserves it while validating the common identity grammar. It obtains local
 JWT verification bundles through the node-local SPIFFE Workload API.
 
-Only tenant, service, resource type, and resource ID have fixed semantics. DSX
-Identity Keys preserves every path segment after the resource ID without
-interpreting it.
+Tenant and service determine the exchanged trust domain. The remaining path
+requires a first key and value, with no resource-type allowlist. DSX Identity
+Keys preserves that path exactly, including case, order, and repeated keys:
+
+```text
+local:     spiffe://<local-domain>/tenant/<tenant>/service/dsx/cluster/cluster-1/namespace/team-a/workload/api
+exchanged: spiffe://<tenant>.<region>.dsx.<partition>/cluster/cluster-1/namespace/team-a/workload/api
+```
 
 For example, DPF can use this explicitly labelled DPUService suffix:
 
