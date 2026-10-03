@@ -96,6 +96,7 @@ func TestVerifyHostAttestation(t *testing.T) {
 		{name: "wrong audience", issuer: testIssuer, subject: "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7", audience: jwt.Audience{"wrong"}, expiry: time.Now().Add(time.Minute), wantErr: true},
 		{name: "extra audience", issuer: testIssuer, subject: "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7", audience: jwt.Audience{"spire-server", "extra"}, expiry: time.Now().Add(time.Minute), want: "spiffe://k2.internal/spire/agent/dsx_imds/tenant/operator-1/bm/host-7"},
 		{name: "expired", issuer: testIssuer, subject: "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7", audience: jwt.Audience{"spire-server"}, expiry: time.Now().Add(-time.Minute), wantErr: true},
+		{name: "generic resource", issuer: testIssuer, subject: "spiffe://operator-1.ds9.dsx.nvid.id/cluster/cluster-1", audience: jwt.Audience{"spire-server"}, expiry: time.Now().Add(time.Minute), wantErr: true},
 		{name: "VM", issuer: testIssuer, subject: "spiffe://operator-1.ds9.dsx.nvid.id/vm/vm-7", audience: jwt.Audience{"spire-server"}, expiry: time.Now().Add(time.Minute), wantErr: true},
 		{name: "host process", issuer: testIssuer, subject: "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7/process/agent", audience: jwt.Audience{"spire-server"}, expiry: time.Now().Add(time.Minute), wantErr: true},
 	}
