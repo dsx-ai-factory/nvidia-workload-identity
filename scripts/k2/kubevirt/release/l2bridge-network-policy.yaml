@@ -28,18 +28,6 @@ spec:
         expression: >-
           Object{
             spec: Object.spec{
-              volumes: [Object.spec.volumes{
-                name: "e2e-l2bridge-network",
-                downwardAPI: Object.spec.volumes.downwardAPI{
-                  items: [Object.spec.volumes.downwardAPI.items{
-                    path: "pod-networks",
-                    fieldRef: Object.spec.volumes.downwardAPI.items.fieldRef{
-                      apiVersion: "v1",
-                      fieldPath: "metadata.annotations['k8s.ovn.org/pod-networks']"
-                    }
-                  }]
-                }
-              }],
               containers: [Object.spec.containers{
                 name: "hook-sidecar-0",
                 volumeMounts: [Object.spec.containers.volumeMounts{
@@ -50,6 +38,28 @@ spec:
               }]
             }
           }
+    # Downward API items and fieldRef are atomic. Append the volume with JSONPatch.
+    - patchType: JSONPatch
+      jsonPatch:
+        expression: >-
+          object.spec.volumes.exists(volume, volume.name == "e2e-l2bridge-network")
+          ? []
+          : [JSONPatch{
+              op: "add",
+              path: "/spec/volumes/-",
+              value: Object.spec.volumes{
+                name: "e2e-l2bridge-network",
+                downwardAPI: Object.spec.volumes.downwardAPI{
+                  items: [Object.spec.volumes.downwardAPI.items{
+                    path: "pod-networks",
+                    fieldRef: Object.spec.volumes.downwardAPI.items.fieldRef{
+                      apiVersion: "v1",
+                      fieldPath: "metadata.annotations['k8s.ovn.org/pod-networks']"
+                    }
+                  }]
+                }
+              }
+            }]
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingAdmissionPolicyBinding

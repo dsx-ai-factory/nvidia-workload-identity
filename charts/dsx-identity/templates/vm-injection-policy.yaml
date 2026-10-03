@@ -38,8 +38,7 @@ spec:
           container.name == "dsx-imds-network-setup"
         )
   mutations:
-    # ApplyConfiguration merges keyed volumes without replacing entries already
-    # supplied by virt-launcher. Mount annotation updates without a subPath.
+    # Merge CSI volumes with those already supplied by virt-launcher.
     - patchType: ApplyConfiguration
       applyConfiguration:
         expression: >-
@@ -59,24 +58,12 @@ spec:
                     driver: "csi.dsx-identity-keys.nvidia.com",
                     readOnly: true
                   }
-                },
-                Object.spec.volumes{
-                  name: "dsx-imds-network-status",
-                  downwardAPI: Object.spec.volumes.downwardAPI{
-                    items: [Object.spec.volumes.downwardAPI.items{
-                      path: "network-status",
-                      fieldRef: Object.spec.volumes.downwardAPI.items.fieldRef{
-                        apiVersion: "v1",
-                        fieldPath: "metadata.annotations['k8s.v1.cni.cncf.io/network-status']"
-                      }
-                    }]
-                  }
                 }
               ]
             }
           }
-    # Create the atomic list when absent, then append only configured secrets
-    # missing by name. Existing pull secrets and container order stay intact.
+    # JSONPatch can append Downward API volumes with atomic items and fieldRef.
+    # Initialize pull secrets when absent and append configured secrets missing by name.
     - patchType: JSONPatch
       jsonPatch:
         expression: >-
@@ -102,6 +89,22 @@ spec:
           }) +
           {{- end }}
           [
+            JSONPatch{
+              op: "add",
+              path: "/spec/volumes/-",
+              value: Object.spec.volumes{
+                name: "dsx-imds-network-status",
+                downwardAPI: Object.spec.volumes.downwardAPI{
+                  items: [Object.spec.volumes.downwardAPI.items{
+                    path: "network-status",
+                    fieldRef: Object.spec.volumes.downwardAPI.items.fieldRef{
+                      apiVersion: "v1",
+                      fieldPath: "metadata.annotations['k8s.v1.cni.cncf.io/network-status']"
+                    }
+                  }]
+                }
+              }
+            },
             JSONPatch{
               op: "add",
               path: "/spec/containers/-",
