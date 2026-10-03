@@ -425,7 +425,7 @@ DPU service identities use:
 spiffe://<operator-tenant>.<region>.<service>.<partition>/dpu/<serial>/dpuservice/<service-id>/namespace/<namespace>
 ```
 
-The first path key and value are required, with no resource-type allowlist:
+The resource path begins with any valid key/value pair:
 
 ```text
 spiffe://<tenant>.<region>.<service>.<partition>/<key>/<value>[/...]

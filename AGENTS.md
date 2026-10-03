@@ -34,6 +34,8 @@ pull request or release source.
 - Keep documentation factual, current, concise, and conversational for public
   readers. Omit internal history, revision narrative, meta-documentation,
   marketing language, and future design speculation.
+- Describe supported behavior directly. Omit unsolicited comparisons with
+  unsupported behavior or statements about what something is not.
 - Document user-facing API contracts with concrete request and response examples.
   Do not describe fields, headers, endpoints, or payloads only in prose when an
   example can show them.
