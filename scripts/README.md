@@ -11,6 +11,10 @@ Controller, OVN-Kubernetes layer-3 UDN, and KubeVirt VMs using `bridge` and
 describe only this fixture and do not define a trust hierarchy. Local identity
 components use one replica and SPIRE uses its SQLite default.
 
+Local fixtures configure DSX Identity Keys HTTP endpoints directly. The local
+Zot registry caches image pulls for both Kind clusters and local builds through
+`mirror.gcr.io`. CI uses the NVIDIA Docker Hub mirror instead.
+
 The identity chart is installed independently in both clusters. The remaining
 components are separate Skaffold modules. Shared fixture settings and the
 shard-specific overrides are in:
@@ -148,7 +152,9 @@ host. `make validate` builds Linux-only nftables code and exercises Unix socket
 paths that exceed macOS limits. macOS and WSL are unsupported. Mise installs
 the repository-pinned tools. The full E2E lifecycle also requires Docker with
 Buildx, OpenSSL, OpenSSH, and the kernel features needed by OVN-Kubernetes and
-KubeVirt.
+KubeVirt, including the `vrf` module for primary UDN gateways. Missing
+prerequisites fail the job rather than skipping tests. CI installs Ubuntu's
+extra module package for the running kernel before loading these modules.
 
 ```bash
 git submodule update --init --recursive
@@ -180,6 +186,9 @@ go test ./cmd/dsx-imds-network-setup
 ```
 
 The focused tests cover guest metadata selection, invalid or ambiguous metadata,
-published annotation updates, setup completion, failure, and cancellation. The
-Linux E2E suite boots one VM per binding. Each guest requests its IMDS identity
+published annotation updates, setup completion, failure, and cancellation. They
+also cover primary bridge selection, invalid attachments, stale rule repair,
+duplicate removal, and preservation of unrelated nftables rules.
+
+The E2E suite boots one VM per binding. Each guest requests its IMDS identity
 and authenticates the returned token through OpenBao.

@@ -91,7 +91,7 @@ setup sidecar's `/var/run/dsx-imds/network-status` file.
 ### Identify the KubeVirt interfaces
 
 ```bash
-BRIDGE=$(ip -o link show type bridge | awk -F': ' '$2 ~ /^k6t-/ { print $2; exit }')
+BRIDGE=$(ip -j link show dev tap0 | jq -er '.[0].master')
 UDN_IF=${BRIDGE#k6t-}
 VM_IP=$(jq -r --arg iface "$UDN_IF" 'map(select(.interface == $iface))[0].ips[] | select(contains(":") | not)' /var/run/dsx-imds/network-status)
 VM_MAC=$(jq -r --arg iface "$UDN_IF" 'map(select(.interface == $iface))[0].mac' /var/run/dsx-imds/network-status)

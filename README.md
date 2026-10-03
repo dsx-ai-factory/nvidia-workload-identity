@@ -62,7 +62,7 @@ configure the runner, protected release environment, NGC key, and release permis
 ## CI
 
 PRs run CI on `copy-pr-bot`'s `pull-request/<number>` branches. Pushes to `master`
-and `release/**` also run `make validate`, the full [local E2E lifecycle](#local-e2e),
+and `release/**` also run `make validate`, the full [local E2E lifecycle](scripts/README.md#workflow),
 secret detection, and container scans. The bot must be installed for this repo,
 and its [configuration](.github/copy-pr-bot.yaml) must be on `master` to take effect.
 The shared build action scans both image platforms with Syft and Grype, uploads
@@ -72,12 +72,8 @@ These scans do not submit results to Pulse.
 All product jobs use the event's commit and read-only repository permissions,
 without release secrets. The RC workflow calls product CI once and waits on
 `needs: dsx-component-ci`, without listing individual jobs. The [image inventory](.github/images.json) is shared by scanning
-and publishing. E2E requires a Linux Docker host with OVN and KubeVirt kernel
-support, including the `vrf` module for primary UDN gateways. Missing
-prerequisites fail the job rather than skipping tests. CI installs Ubuntu's
-extra module package for the running kernel before loading these modules.
-The local Zot registry caches image pulls for both Kind clusters and local image
-builds through `mirror.gcr.io`. CI uses the NVIDIA Docker Hub mirror instead.
+and publishing. See the [local E2E guide](scripts/README.md#workflow) for runner
+requirements.
 
 ## Architecture
 
@@ -516,7 +512,7 @@ local SPIRE JWT-SVIDs and issues DSX JWTs. By default it publishes public
 signing keys to the Event Bus and serves aggregate JWKS. With NATS disabled it
 serves only local public signing keys. The external Gateway terminates TLS and
 applies source-aware request quotas. Clients configure the Gateway HTTPS
-endpoint. Local fixtures configure their HTTP endpoints directly.
+endpoint.
 
 ## DSX IMDS host and VM flows
 
