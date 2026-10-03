@@ -15,6 +15,27 @@ The program creates a veth path from the bridge to the metadata-service,
 redirects IMDS request frames into that path, and installs an explicit return
 path to the VM.
 
+## Chart integration
+
+Enable `vmSupport` in the [identity chart](../../charts/dsx-identity/README.md).
+Its admission policy injects the network setup and metadata-service sidecars
+into KubeVirt launcher Pods whose VM template has this annotation:
+
+```yaml
+spec:
+  template:
+    metadata:
+      annotations:
+        spiffe.nvidia.com/inject-dsx-imds: "true"
+```
+
+The chart mounts CNI network-status through the Downward API. The network setup
+container runs as root with `NET_ADMIN` in the launcher network namespace.
+KubeVirt creates the guest bridge and tap. This sidecar adds only the IMDS path.
+Injection is defined in `charts/dsx-identity/templates/vm-injection-policy.yaml`.
+
+## Network layout
+
 ```mermaid
 flowchart LR
     Guest["VM guest<br/>CNI-assigned IP/MAC"] <--> Tap["tap0"]
@@ -32,9 +53,7 @@ flowchart LR
 
 Each VM uses one guest configuration branch. The tap, bridge, uplink, veth, and
 both sidecars share the virt-launcher Pod network namespace. Solid arrows carry
-packets. Dotted arrows configure networking. The original CNI interface name
-remains on a dummy after handoff. IMDS discovery uses the annotation allocation
-rather than that dummy's current addresses.
+packets. Dotted arrows configure networking.
 
 ## VM bindings
 
@@ -66,9 +85,8 @@ The process stays alive after setup until shutdown.
 
 ## Manual reproduction
 
-Run these commands as root in the same network namespace as the
-`metadata-service` sidecar. Read the guest address from the mounted CNI
-network-status file.
+Run as root in the launcher Pod network namespace, with access to the network
+setup sidecar's `/var/run/dsx-imds/network-status` file.
 
 ### Identify the KubeVirt interfaces
 
@@ -91,10 +109,8 @@ ip link set imds-vm up
 ip link set imds-ctr up
 ```
 
-`imds-vm` is the bridge-facing end. Attaching it to the KubeVirt bridge gives
-the bridge a port for IMDS frames. `imds-ctr` is the metadata-service end in the
-same network namespace. Enabling both ends allows frames to cross the pair. The
-Go command reuses the pair when it already exists.
+`imds-vm` joins the KubeVirt bridge. Its peer, `imds-ctr`, delivers frames to
+metadata-service. The command reuses an existing pair.
 
 ### Assign the IMDS address
 
@@ -102,10 +118,7 @@ Go command reuses the pair when it already exists.
 ip addr replace 169.254.169.254/32 dev imds-ctr
 ```
 
-This assigns the IMDS address to the container-facing end of the veth pair.
-The metadata-service listening on port 80 can then accept packets delivered to
-that address. `replace` matches the netlink address replacement used by the
-command.
+Metadata-service listens on port 80 at this address.
 
 ### Redirect request frames
 
@@ -125,17 +138,6 @@ that forwarding decision. The `PREROUTING` rule matches the IMDS IPv4
 destination and replaces the gateway MAC with the `imds-ctr` MAC. The bridge
 then forwards the frame through `imds-vm`, and the peer delivers it on
 `imds-ctr` to the metadata-service.
-
-The rule uses names instead of unexplained packet constants:
-
-- `ip daddr` selects IPv4 EtherType `0x0800`, then reads the four-byte IPv4
-  destination address at byte offset 16 of the IPv4 header.
-- `ether daddr set` writes the six-byte Ethernet destination MAC at byte offset
-  0 of the Ethernet header.
-- `dstnat` names the destination NAT chain priority.
-
-These are the same protocol value, offsets, and field widths encoded by the Go
-nftables expressions.
 
 ### Remove the conflicting local route
 
@@ -194,9 +196,6 @@ DSX IMDS sidecar -> imds-ctr -> VM /32 route and permanent neighbor
 The local-route deletion allows the `/32` route to win. The route chooses the
 veth path and the neighbor entry supplies the VM MAC used by the bridge.
 
-The identity chart injects the sidecar through
-`charts/dsx-identity/templates/vm-injection-policy.yaml`.
-
 ## Flags
 
 | Flag | Default | Purpose |
@@ -204,17 +203,5 @@ The identity chart injects the sidecar through
 | `--network-status-file` | `/var/run/dsx-imds/network-status` | Downward API file containing CNI network-status |
 | `--log-level` | `info` | JSON log level: `debug`, `info`, `warn`, or `error` |
 
-The container must run as root with `NET_ADMIN` in the `virt-launcher` Pod
-network namespace. Linux netlink, bridge nftables, an OVN-Kubernetes layer-3
-UDN, and the KubeVirt bridge are runtime dependencies.
-
-## Testing
-
-```bash
-go test ./cmd/dsx-imds-network-setup
-```
-
-The focused tests cover guest metadata selection, invalid or ambiguous metadata,
-published annotation updates, setup completion, failure, and cancellation. The
-Linux E2E suite boots one VM per binding. Each guest requests its IMDS identity
-and authenticates the returned token through OpenBao.
+Linux netlink, bridge nftables, an OVN-Kubernetes layer-3 UDN, and the KubeVirt
+bridge are runtime dependencies.
