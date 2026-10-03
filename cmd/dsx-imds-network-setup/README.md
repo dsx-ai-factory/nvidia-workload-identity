@@ -38,25 +38,25 @@ Injection is defined in `charts/dsx-identity/templates/vm-injection-policy.yaml`
 
 ```mermaid
 flowchart LR
-    Guest["VM guest<br/>OVN-allocated IP"] <--> Tap["tap0"]
+    Guest["VM guest<br/>CNI-assigned IP/MAC"] <--> Tap["tap0"]
     Tap <--> Bridge["k6t-* bridge"]
-    Bridge <--> Veth["imds-vm / imds-ctr<br/>ARP learns guest MAC"]
+    Bridge <--> Veth["imds-vm / imds-ctr"]
     Veth <--> Metadata["metadata-service sidecar<br/>169.254.169.254"]
     UDN["Primary layer-3 UDN"] <--> Uplink["CNI uplink"]
     Uplink <--> Bridge
 
     DHCP["bridge: KubeVirt DHCP"] -.-> Guest
     CloudInit["l2bridge / managedTap:<br/>cloud-init network setup"] -.-> Guest
-    Status["OVN pod-networks<br/>primary guest IPv4"] -.-> File["Downward API file"]
+    Status["OVN pod-networks<br/>primary guest IPv4 + MAC"] -.-> File["Downward API file"]
     File -.-> Setup["network setup sidecar"]
-    Setup -.->|"guest /32 reply route"| Veth
+    Setup -.->|"guest /32 reply route + MAC neighbor"| Veth
     Setup -.->|"IMDS MAC rewrite"| Bridge
 ```
 
 Each VM uses one guest configuration branch. The tap, bridge, uplink, veth, and
 both sidecars share the virt-launcher Pod network namespace. Solid arrows carry
 packets. Dotted arrows configure networking. The Downward API supplies the
-guest address for the reply route. ARP learns the guest MAC on that path.
+guest address for the reply route and the guest MAC for its neighbor entry.
 
 ## VM bindings
 
@@ -77,17 +77,20 @@ returns when QEMU opens the tap after network preparation. The dummy alone
 appears before address updates finish. This ordering keeps IMDS route changes
 out of KubeVirt's network handoff.
 
-The Downward API file supplies the guest IPv4 reply destination for the `/32`
-route. The guest MAC is learned through ARP, including when KubeVirt overrides
-the OVN allocation MAC. The sidecar
+The Downward API file supplies the guest IPv4 reply destination and MAC. The
+sidecar uses them for the guest `/32` route and permanent neighbor entry. It
 reads the single entry with `role: primary` in OVN's `pod-networks` annotation,
 which describes the network attached to `tap0`. Infrastructure and secondary
 entries are excluded. The chart mounts
 `metadata.annotations['k8s.ovn.org/pod-networks']` through the Downward API at
 `/var/run/dsx-imds/pod-networks`. The mount receives annotation updates
 and needs no Kubernetes API credentials. Discovery fails if the primary
-entry is missing or ambiguous, or its IPv4 CIDR is invalid. OVN must
+entry is missing or ambiguous, or its IPv4 CIDR or MAC is invalid. OVN must
 publish the primary network role and allocation for both bindings.
+
+The guest must use the MAC in that allocation. Set any VMI `macAddress` to the
+same value or leave it unset. A different guest MAC is unsupported because
+IMDS replies use a permanent neighbor entry, bypassing ARP resolution.
 
 The process stays alive after setup until shutdown.
 
@@ -100,22 +103,27 @@ setup sidecar's `/var/run/dsx-imds/pod-networks` file.
 
 ```bash
 BRIDGE=$(ip -j link show dev tap0 | jq -er '.[0].master')
-VM_IP=$(python3 - <<'PYTHON'
+VM_NETWORK=$(python3 - <<'PYTHON'
 import ipaddress
 import json
+import re
 
 with open("/var/run/dsx-imds/pod-networks") as source:
     primary, = (n for n in json.load(source).values() if n.get("role") == "primary")
 addresses = map(ipaddress.ip_interface, primary["ip_addresses"])
 ip, = (address.ip for address in addresses if address.version == 4)
-print(ip)
+mac = primary["mac_address"]
+if not re.fullmatch(r"(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}", mac):
+    raise ValueError("invalid guest MAC")
+print(ip, mac)
 PYTHON
 )
+read -r VM_IP VM_MAC <<< "$VM_NETWORK"
 ```
 
-`BRIDGE` is the KubeVirt primary bridge. The extraction requires one primary
-OVN entry, valid CIDRs, and one IPv4 address. It preserves that address's host
-bits and stops on invalid or ambiguous data.
+`BRIDGE` is the KubeVirt primary bridge. Extraction requires one primary OVN
+entry, valid CIDRs, one IPv4 address, and a six-byte MAC. It preserves the IPv4
+host bits and stops on invalid or ambiguous data.
 
 ### Create the veth path
 
@@ -180,21 +188,16 @@ This host route sends every reply for the VM IP through `imds-ctr`. A frame
 transmitted there emerges from `imds-vm`, enters the KubeVirt bridge, and can
 reach the VM tap interface.
 
-### Clear the old VM neighbor entry
+### Add the VM neighbor entry
 
 ```bash
-# Delete when an entry for this guest exists.
-ip neigh del "$VM_IP" dev imds-ctr
+ip neigh replace "$VM_IP" lladdr "$VM_MAC" dev imds-ctr nud permanent
 ```
 
-A previous setup may have left a permanent neighbor using OVN's allocation MAC.
-KubeVirt can give the guest a different MAC. Clear that mapping so the kernel
-resolves the actual guest MAC through ARP.
-
-The `/32` route sends ARP through `imds-ctr`, `imds-vm`, and the bridge to the
-VM tap. The guest answers for its IP, and the bridge learns its MAC on the tap.
-KubeVirt's `arp_ignore=1` prevents its dummy address from answering this request.
-OVN port security blocks the IMDS veth's sender on the uplink.
+The host route is directly connected, so the kernel still needs a destination
+MAC before it can create each Ethernet reply frame. The permanent neighbor
+entry supplies the guest MAC from OVN pod-networks and avoids ARP on
+the point-to-point veth path.
 
 ## Packet flow
 
@@ -211,12 +214,12 @@ following the gateway MAC to the bridge uplink.
 Reply path:
 
 ```text
-DSX IMDS sidecar -> VM /32 route and ARP-resolved neighbor -> imds-ctr
+DSX IMDS sidecar -> VM /32 route and permanent neighbor -> imds-ctr
   -> imds-vm -> KubeVirt bridge -> tap interface -> KubeVirt VM
 ```
 
 The local-route deletion allows the `/32` route to win. The route chooses the
-veth path and ARP supplies the guest MAC used by the bridge.
+veth path and the neighbor entry supplies the VM MAC used by the bridge.
 
 ## Flags
 

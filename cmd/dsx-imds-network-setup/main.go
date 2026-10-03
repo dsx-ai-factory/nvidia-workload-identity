@@ -118,9 +118,9 @@ func setupPodNetwork(ctx context.Context) error {
 
 	// bridge uses DHCP, while l2bridge/managedTap needs guest network configuration.
 	// Both hand the CNI link to a bridge and tap, then leave a dummy behind.
-	// Wait for QEMU to open the tap, then read the guest IP from OVN.
+	// Wait for QEMU to open the tap, then read guest IP/MAC from OVN.
 	slog.Debug("Waiting for KubeVirt network", "bridge_prefix", bridgePrefix)
-	bridgeLink, vmIP, err := waitForKubeVirtNetwork(ctx, nlHandle, *podNetworksFile)
+	bridgeLink, vmIP, vmMAC, err := waitForKubeVirtNetwork(ctx, nlHandle, *podNetworksFile)
 	if err != nil {
 		return fmt.Errorf("waiting for KubeVirt network: %w", err)
 	}
@@ -159,7 +159,7 @@ func setupPodNetwork(ctx context.Context) error {
 		return err
 	}
 
-	slog.Info("Got VM IP", "ip", vmIP.String())
+	slog.Info("Got VM IP and MAC", "ip", vmIP.String(), "mac", vmMAC.String())
 
 	// Remove the UDN interface's local-table route so the /32 route below returns replies through the veth.
 	if err := deleteLocalRouteForIP(nlHandle, vmIP); err != nil {
@@ -171,15 +171,16 @@ func setupPodNetwork(ctx context.Context) error {
 		return err
 	}
 
-	// KubeVirt can override the OVN MAC. Let ARP resolve the actual guest MAC.
-	if err := clearVMNeighbor(nlHandle, vethCtr, vmIP); err != nil {
+	// Use the OVN allocation MAC for deterministic replies without ARP.
+	// Supported guests retain this MAC rather than overriding it in the VMI.
+	if err := addVMNeighbor(nlHandle, vethCtr, vmIP, vmMAC); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func waitForKubeVirtNetwork(ctx context.Context, nlHandle *netlink.Handle, statusFile string) (netlink.Link, net.IP, error) {
+func waitForKubeVirtNetwork(ctx context.Context, nlHandle *netlink.Handle, statusFile string) (netlink.Link, net.IP, net.HardwareAddr, error) {
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
@@ -191,9 +192,9 @@ func waitForKubeVirtNetwork(ctx context.Context, nlHandle *netlink.Handle, statu
 		select {
 		case <-ctx.Done():
 			if ctx.Err() == context.DeadlineExceeded {
-				return nil, nil, fmt.Errorf("timeout waiting for KubeVirt network: %w", lastErr)
+				return nil, nil, nil, fmt.Errorf("timeout waiting for KubeVirt network: %w", lastErr)
 			}
-			return nil, nil, ctx.Err()
+			return nil, nil, nil, ctx.Err()
 		case <-ticker.C:
 			bridge, err := findBridge(nlHandle)
 			if err != nil {
@@ -225,9 +226,9 @@ func waitForKubeVirtNetwork(ctx context.Context, nlHandle *netlink.Handle, statu
 				lastErr = fmt.Errorf("waiting for guest to open %s", defaultTapIfName)
 				continue
 			}
-			vmIP, err := readVMNetwork(statusFile)
+			vmIP, vmMAC, err := readVMNetwork(statusFile)
 			if err == nil {
-				return bridge, vmIP, nil
+				return bridge, vmIP, vmMAC, nil
 			}
 			lastErr = err
 		}
@@ -489,47 +490,56 @@ func nftAddIMDSRule(conn nftRules, table *nftables.Table, chain *nftables.Chain,
 
 // tap0 attaches the primary network. OVN preserves its allocation across
 // KubeVirt's handoff, including when eth0 belongs to the infrastructure network.
-func readVMNetwork(path string) (net.IP, error) {
+func readVMNetwork(path string) (net.IP, net.HardwareAddr, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("open OVN pod networks: %w", err)
+		return nil, nil, fmt.Errorf("open OVN pod networks: %w", err)
 	}
 	defer file.Close()
 
 	var networks map[string]struct {
 		Role string   `json:"role"`
 		IPs  []string `json:"ip_addresses"`
+		MAC  string   `json:"mac_address"`
 	}
 	if err := json.NewDecoder(file).Decode(&networks); err != nil {
-		return nil, fmt.Errorf("decode OVN pod networks: %w", err)
+		return nil, nil, fmt.Errorf("decode OVN pod networks: %w", err)
 	}
 	var vmIP net.IP
+	var vmMAC net.HardwareAddr
 	matched := false
 	for name, network := range networks {
 		if network.Role != "primary" {
 			continue
 		}
 		if matched {
-			return nil, fmt.Errorf("multiple primary OVN networks")
+			return nil, nil, fmt.Errorf("multiple primary OVN networks")
 		}
 		matched = true
+		vmMAC, err = net.ParseMAC(network.MAC)
+		if err != nil {
+			return nil, nil, fmt.Errorf("parse guest MAC for %s: %w", name, err)
+		}
+		if len(vmMAC) != 6 {
+			return nil, nil, fmt.Errorf("invalid guest MAC %q for %s", network.MAC, name)
+		}
 		for _, address := range network.IPs {
 			ip, _, err := net.ParseCIDR(address)
 			if err != nil {
-				return nil, fmt.Errorf("parse guest CIDR %q for %s: %w", address, name, err)
+				return nil, nil, fmt.Errorf("parse guest CIDR %q for %s: %w", address, name, err)
 			}
 			if ipv4 := ip.To4(); ipv4 != nil {
 				if vmIP != nil {
-					return nil, fmt.Errorf("multiple guest IPv4 addresses for %s", name)
+					return nil, nil, fmt.Errorf("multiple guest IPv4 addresses for %s", name)
 				}
 				vmIP = ipv4
 			}
 		}
 	}
 	if vmIP == nil {
-		return nil, fmt.Errorf("no guest IPv4 address in primary OVN network")
+		return nil, nil, fmt.Errorf("no guest IPv4 address in primary OVN network")
 	}
-	return vmIP, nil
+	return vmIP, vmMAC, nil
 }
 
 // deleteLocalRouteForIP deletes the local route for an IP address.
@@ -586,15 +596,18 @@ func addVMRoute(nlHandle *netlink.Handle, link netlink.Link, vmIP net.IP) error 
 	return nil
 }
 
-type neighborDeleter interface {
-	NeighDel(*netlink.Neigh) error
-}
-
-// Clear a previous permanent mapping so ARP can learn the guest's actual MAC.
-func clearVMNeighbor(nl neighborDeleter, link netlink.Link, vmIP net.IP) error {
-	neighbor := &netlink.Neigh{LinkIndex: link.Attrs().Index, IP: vmIP}
-	if err := nl.NeighDel(neighbor); err != nil && !errors.Is(err, unix.ENOENT) {
-		return fmt.Errorf("clearing VM neighbor: %w", err)
+// addVMNeighbor adds a static ARP entry for the VM.
+// Equivalent to: ip neigh replace <vmIP> lladdr <vmMAC> dev imds-ctr nud permanent
+func addVMNeighbor(nlHandle *netlink.Handle, link netlink.Link, vmIP net.IP, vmMAC net.HardwareAddr) error {
+	slog.Debug("Adding neighbor entry for VM", "vm_ip", vmIP.String(), "vm_mac", vmMAC.String())
+	neigh := &netlink.Neigh{
+		LinkIndex:    link.Attrs().Index,
+		IP:           vmIP,
+		HardwareAddr: vmMAC,
+		State:        netlink.NUD_PERMANENT,
+	}
+	if err := nlHandle.NeighSet(neigh); err != nil {
+		return fmt.Errorf("adding neighbor entry: %w", err)
 	}
 	return nil
 }
