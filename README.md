@@ -433,7 +433,7 @@ exchanged: spiffe://<tenant>.<region>.dsx.<partition>/cluster/cluster-1/namespac
 ```
 
 Path keys and values retain their case and order. Each segment starts with an
-ASCII letter or digit, followed by ASCII letters, digits, `.`, `_`, `:`, or `-`.
+ASCII letter or digit, followed by ASCII letters, digits, `.`, `_`, or `-`.
 
 Cluster-local SPIRE identities encode the same fields under the shard trust
 domain. Exchange takes the region and partition from explicit configuration,

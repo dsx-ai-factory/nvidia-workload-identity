@@ -10,7 +10,7 @@ JWT verification bundles through the node-local SPIFFE Workload API.
 
 Tenant and service determine the exchanged trust domain. The resource path
 contains complete key/value pairs with unique keys. Each segment starts with
-an ASCII letter or digit, followed by ASCII letters, digits, `.`, `_`, `:`, or `-`.
+an ASCII letter or digit, followed by ASCII letters, digits, `.`, `_`, or `-`.
 DSX Identity Keys preserves valid paths exactly, including case and order:
 
 ```text

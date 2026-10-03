@@ -11,6 +11,10 @@ func TestResourceRoundTrip(t *testing.T) {
 
 	for _, want := range []Subject{
 		{
+			Tenant: "tenant-2", Service: "dsx", ResourceType: "cluster.zone_1-a", ResourceID: "cluster.1_a-b",
+			Path: []string{"workload.zone_1-a", "api.1_a-b"},
+		},
+		{
 			Tenant: "tenant-2", Service: "identity-probe", ResourceType: ResourceBM, ResourceID: "worker-1",
 			Path: []string{"pod", "13c31c2c-2673-42d1-bdeb-241864db47f6", "role", "database"},
 		},
@@ -54,6 +58,9 @@ func TestRejectInvalidResourcePairs(t *testing.T) {
 	for _, resource := range [][]string{
 		{}, {"cluster"}, {"", "cluster-1"}, {"cluster", ""},
 		{"_cluster", "cluster-1"}, {"cluster", "_invalid"},
+		{"cluster:zone", "cluster-1"}, {"cluster", "cluster:1"},
+		{"cluster", "cluster-1", "namespace:zone", "team-a"},
+		{"cluster", "cluster-1", "namespace", "team:a"},
 		{"cluster", "cluster-1", "namespace"},
 		{"cluster", "cluster-1", "", "team-a"},
 		{"cluster", "cluster-1", "namespace", ""},
