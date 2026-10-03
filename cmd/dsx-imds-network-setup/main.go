@@ -28,13 +28,13 @@ import (
 )
 
 const (
-	imdsIP                   = "169.254.169.254"
-	vethVMSide               = "imds-vm"  // max 15 chars for ifname
-	vethContainerSide        = "imds-ctr" // max 15 chars for ifname
-	bridgePrefix             = "k6t-"
-	defaultNetworkStatusFile = "/var/run/dsx-imds/network-status"
-	defaultTapIfName         = "tap0"
-	metaCIDR                 = "169.254.169.254/32"
+	imdsIP                 = "169.254.169.254"
+	vethVMSide             = "imds-vm"  // max 15 chars for ifname
+	vethContainerSide      = "imds-ctr" // max 15 chars for ifname
+	bridgePrefix           = "k6t-"
+	defaultPodNetworksFile = "/var/run/dsx-imds/pod-networks"
+	defaultTapIfName       = "tap0"
+	metaCIDR               = "169.254.169.254/32"
 
 	// IPv4 header offsets (RFC 791)
 	ipv4DstAddrOffset = 16 // Destination IP address offset in IPv4 header
@@ -46,13 +46,13 @@ const (
 )
 
 var (
-	logLevel          slog.Level
-	networkStatusFile *string
+	logLevel        slog.Level
+	podNetworksFile *string
 )
 
 func runCommand() (runErr error) {
 	flag.TextVar(&logLevel, "log-level", slog.LevelInfo, "log level (debug, info, warn, error)")
-	networkStatusFile = flag.String("network-status-file", defaultNetworkStatusFile, "Downward API network-status file")
+	podNetworksFile = flag.String("pod-networks-file", defaultPodNetworksFile, "Downward API OVN pod-networks file")
 	flag.Parse()
 
 	sdk, err := telemetry.Setup(context.Background(), "dsx-imds-network-setup", os.Stdout, logLevel)
@@ -118,9 +118,9 @@ func setupPodNetwork(ctx context.Context) error {
 
 	// bridge uses DHCP, while l2bridge/managedTap needs guest network configuration.
 	// Both hand the CNI link to a bridge and tap, then leave a dummy behind.
-	// Wait for QEMU to open the tap, then read guest IP/MAC from CNI.
+	// Wait for QEMU to open the tap, then read guest IP/MAC from OVN.
 	slog.Debug("Waiting for KubeVirt network", "bridge_prefix", bridgePrefix)
-	bridgeLink, vmIP, vmMAC, err := waitForKubeVirtNetwork(ctx, nlHandle, *networkStatusFile)
+	bridgeLink, vmIP, vmMAC, err := waitForKubeVirtNetwork(ctx, nlHandle, *podNetworksFile)
 	if err != nil {
 		return fmt.Errorf("waiting for KubeVirt network: %w", err)
 	}
@@ -225,7 +225,7 @@ func waitForKubeVirtNetwork(ctx context.Context, nlHandle *netlink.Handle, statu
 				lastErr = fmt.Errorf("waiting for guest to open %s", defaultTapIfName)
 				continue
 			}
-			vmIP, vmMAC, err := readVMNetwork(statusFile, ifaceName)
+			vmIP, vmMAC, err := readVMNetwork(statusFile)
 			if err == nil {
 				return bridge, vmIP, vmMAC, nil
 			}
@@ -487,55 +487,56 @@ func nftAddIMDSRule(conn nftRules, table *nftables.Table, chain *nftables.Chain,
 	return nil
 }
 
-// CNI network-status preserves the guest IP and MAC across KubeVirt's handoff.
-func readVMNetwork(path, ifaceName string) (net.IP, net.HardwareAddr, error) {
+// tap0 attaches the primary network. OVN preserves its allocation across
+// KubeVirt's handoff, including when eth0 belongs to the infrastructure network.
+func readVMNetwork(path string) (net.IP, net.HardwareAddr, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, nil, fmt.Errorf("open network status: %w", err)
+		return nil, nil, fmt.Errorf("open OVN pod networks: %w", err)
 	}
 	defer file.Close()
 
-	var networks []struct {
-		Interface string   `json:"interface"`
-		IPs       []string `json:"ips"`
-		MAC       string   `json:"mac"`
+	var networks map[string]struct {
+		Role string   `json:"role"`
+		IPs  []string `json:"ip_addresses"`
+		MAC  string   `json:"mac_address"`
 	}
 	if err := json.NewDecoder(file).Decode(&networks); err != nil {
-		return nil, nil, fmt.Errorf("decode network status: %w", err)
+		return nil, nil, fmt.Errorf("decode OVN pod networks: %w", err)
 	}
 	var vmIP net.IP
 	var vmMAC net.HardwareAddr
 	matched := false
-	for _, network := range networks {
-		if network.Interface != ifaceName {
+	for name, network := range networks {
+		if network.Role != "primary" {
 			continue
 		}
 		if matched {
-			return nil, nil, fmt.Errorf("multiple network-status entries for %s", ifaceName)
+			return nil, nil, fmt.Errorf("multiple primary OVN networks")
 		}
 		matched = true
 		vmMAC, err = net.ParseMAC(network.MAC)
 		if err != nil {
-			return nil, nil, fmt.Errorf("parse guest MAC for %s: %w", ifaceName, err)
+			return nil, nil, fmt.Errorf("parse guest MAC for %s: %w", name, err)
 		}
 		if len(vmMAC) != 6 {
-			return nil, nil, fmt.Errorf("invalid guest MAC %q for %s", network.MAC, ifaceName)
+			return nil, nil, fmt.Errorf("invalid guest MAC %q for %s", network.MAC, name)
 		}
 		for _, address := range network.IPs {
-			ip := net.ParseIP(address)
-			if ip == nil {
-				return nil, nil, fmt.Errorf("invalid guest IP %q for %s", address, ifaceName)
+			ip, _, err := net.ParseCIDR(address)
+			if err != nil {
+				return nil, nil, fmt.Errorf("parse guest CIDR %q for %s: %w", address, name, err)
 			}
 			if ipv4 := ip.To4(); ipv4 != nil {
 				if vmIP != nil {
-					return nil, nil, fmt.Errorf("multiple guest IPv4 addresses for %s", ifaceName)
+					return nil, nil, fmt.Errorf("multiple guest IPv4 addresses for %s", name)
 				}
 				vmIP = ipv4
 			}
 		}
 	}
 	if vmIP == nil {
-		return nil, nil, fmt.Errorf("no guest IPv4 address for %s in network status", ifaceName)
+		return nil, nil, fmt.Errorf("no guest IPv4 address in primary OVN network")
 	}
 	return vmIP, vmMAC, nil
 }

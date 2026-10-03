@@ -93,13 +93,13 @@ spec:
               op: "add",
               path: "/spec/volumes/-",
               value: Object.spec.volumes{
-                name: "dsx-imds-network-status",
+                name: "dsx-imds-pod-networks",
                 downwardAPI: Object.spec.volumes.downwardAPI{
                   items: [Object.spec.volumes.downwardAPI.items{
-                    path: "network-status",
+                    path: "pod-networks",
                     fieldRef: Object.spec.volumes.downwardAPI.items.fieldRef{
                       apiVersion: "v1",
-                      fieldPath: "metadata.annotations['k8s.v1.cni.cncf.io/network-status']"
+                      fieldPath: "metadata.annotations['k8s.ovn.org/pod-networks']"
                     }
                   }]
                 }
@@ -115,7 +115,7 @@ spec:
                 command: ["/usr/local/bin/dsx-imds-network-setup"],
                 args: [{{ printf "--log-level=%s" .Values.observability.logLevel | quote }}],
                 volumeMounts: [Object.spec.containers.volumeMounts{
-                  name: "dsx-imds-network-status",
+                  name: "dsx-imds-pod-networks",
                   mountPath: "/var/run/dsx-imds",
                   readOnly: true
                 }],

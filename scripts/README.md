@@ -105,7 +105,7 @@ name describes the guest's Ethernet attachment, not the UDN topology.
 | `e2e-debian-vm-l2bridge` | `l2bridge` with `managedTap` | Cloud-init hook supplies the CNI-assigned address, MAC match, and gateway |
 
 Both bindings create a `k6t-*` bridge and tap, then replace the original CNI
-interface with a dummy. IMDS setup reads the matching CNI network-status entry
+interface with a dummy. IMDS setup reads the primary OVN pod-networks entry
 through the Downward API, so it works even when the dummy has no guest IPv4.
 It installs the guest reply route and neighbor through the IMDS veth path.
 

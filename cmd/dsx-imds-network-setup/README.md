@@ -29,7 +29,7 @@ spec:
         spiffe.nvidia.com/inject-dsx-imds: "true"
 ```
 
-The chart mounts CNI network-status through the Downward API. The network setup
+The chart mounts OVN pod-networks through the Downward API. The network setup
 container runs as root with `NET_ADMIN` in the launcher network namespace.
 KubeVirt creates the guest bridge and tap. This sidecar adds only the IMDS path.
 Injection is defined in `charts/dsx-identity/templates/vm-injection-policy.yaml`.
@@ -47,7 +47,7 @@ flowchart LR
 
     DHCP["bridge: KubeVirt DHCP"] -.-> Guest
     CloudInit["l2bridge / managedTap:<br/>cloud-init network setup"] -.-> Guest
-    Status["CNI network-status<br/>guest IPv4 + MAC"] -.-> File["Downward API file"]
+    Status["OVN pod-networks<br/>primary guest IPv4 + MAC"] -.-> File["Downward API file"]
     File -.-> Setup["network setup sidecar"]
     Setup -.->|"guest /32 reply route + MAC neighbor"| Veth
     Setup -.->|"IMDS MAC rewrite"| Bridge
@@ -79,31 +79,32 @@ out of KubeVirt's network handoff.
 
 The Downward API file supplies the guest IPv4 reply destination and MAC. The
 sidecar uses them for the guest `/32` route and permanent neighbor entry. It
-reads the CNI `network-status` entry whose interface name matches the bridge
-name without `k6t-`. The chart mounts
-`metadata.annotations['k8s.v1.cni.cncf.io/network-status']` through the Downward
-API at `/var/run/dsx-imds/network-status`. The mount receives annotation updates
-and needs no Kubernetes API credentials. Discovery fails if the matching entry
-has no IPv4 address or its address or MAC is invalid or ambiguous.
+reads the single entry with `role: primary` in OVN's `pod-networks` annotation,
+which describes the network attached to `tap0`. Infrastructure and secondary
+entries are excluded. The chart mounts
+`metadata.annotations['k8s.ovn.org/pod-networks']` through the Downward API at
+`/var/run/dsx-imds/pod-networks`. The mount receives annotation updates
+and needs no Kubernetes API credentials. Discovery fails if the primary
+entry is missing or ambiguous, or its IPv4 CIDR or MAC is invalid. OVN must
+publish the primary network role and allocation for both bindings.
 
 The process stays alive after setup until shutdown.
 
 ## Manual reproduction
 
 Run as root in the launcher Pod network namespace, with access to the network
-setup sidecar's `/var/run/dsx-imds/network-status` file.
+setup sidecar's `/var/run/dsx-imds/pod-networks` file.
 
 ### Identify the KubeVirt interfaces
 
 ```bash
 BRIDGE=$(ip -j link show dev tap0 | jq -er '.[0].master')
-UDN_IF=${BRIDGE#k6t-}
-VM_IP=$(jq -r --arg iface "$UDN_IF" 'map(select(.interface == $iface))[0].ips[] | select(contains(":") | not)' /var/run/dsx-imds/network-status)
-VM_MAC=$(jq -r --arg iface "$UDN_IF" 'map(select(.interface == $iface))[0].mac' /var/run/dsx-imds/network-status)
+VM_IP=$(jq -r '.[] | select(.role == "primary") | .ip_addresses[] | split("/")[0] | select(contains(":") | not)' /var/run/dsx-imds/pod-networks)
+VM_MAC=$(jq -r '.[] | select(.role == "primary") | .mac_address' /var/run/dsx-imds/pod-networks)
 ```
 
-`BRIDGE` is the KubeVirt bridge. `VM_IP` and `VM_MAC` belong to its matching
-CNI network-status entry.
+`BRIDGE` is the KubeVirt primary bridge. `VM_IP` and `VM_MAC` come from OVN's
+primary network entry.
 
 ### Create the veth path
 
@@ -176,7 +177,7 @@ ip neigh replace "$VM_IP" lladdr "$VM_MAC" dev imds-ctr nud permanent
 
 The host route is directly connected, so the kernel still needs a destination
 MAC before it can create each Ethernet reply frame. The permanent neighbor
-entry supplies the guest MAC from CNI network-status and avoids ARP on
+entry supplies the guest MAC from OVN pod-networks and avoids ARP on
 the point-to-point veth path.
 
 ## Packet flow
@@ -205,7 +206,7 @@ veth path and the neighbor entry supplies the VM MAC used by the bridge.
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
-| `--network-status-file` | `/var/run/dsx-imds/network-status` | Downward API file containing CNI network-status |
+| `--pod-networks-file` | `/var/run/dsx-imds/pod-networks` | Downward API file containing OVN pod-networks |
 | `--log-level` | `info` | JSON log level: `debug`, `info`, `warn`, or `error` |
 
 Linux netlink, bridge nftables, an OVN-Kubernetes layer-3 UDN, and the KubeVirt
