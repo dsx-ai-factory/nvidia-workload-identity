@@ -55,7 +55,20 @@ metadata:
 spec:
   className: dsx-identity-dsx-identity
   hint: generic-path
-  spiffeIDTemplate: spiffe://{{ .TrustDomain }}/tenant/operator-1/service/identity-probe/Cluster/Cluster-1/namespace/team-a/namespace/team-b
+  spiffeIDTemplate: spiffe://{{ .TrustDomain }}/tenant/operator-1/service/identity-probe/Cluster/Cluster-1/namespace/team-a/workload/api
+  podSelector:
+    matchLabels:
+      identity.dsx.nvidia.com/generic-path: e2e
+
+---
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: e2e-duplicate-path-key
+spec:
+  className: dsx-identity-dsx-identity
+  hint: duplicate-path-key
+  spiffeIDTemplate: spiffe://{{ .TrustDomain }}/tenant/operator-1/service/identity-probe/cluster/cluster-1/namespace/team-a/namespace/team-b
   podSelector:
     matchLabels:
       identity.dsx.nvidia.com/generic-path: e2e

@@ -4,15 +4,14 @@
 shard. It validates only local SPIRE JWT-SVIDs, transforms their SPIFFE subject
 to the DSX identity contract, preserves the registered `aud`, `exp`, `iat`,
 `jti`, and `nbf` claims, and signs the exchanged DSX JWT with the shard's active
-key. It has no
-tenant configuration or tenant-specific authorization policy. SPIRE
-registration determines the tenant in the local subject, and DSX Identity Keys
-preserves it while validating the common identity grammar. It obtains local
+key. SPIRE registration determines the tenant in the local subject, and DSX
+Identity Keys preserves it while validating the common identity grammar. It obtains local
 JWT verification bundles through the node-local SPIFFE Workload API.
 
 Tenant and service determine the exchanged trust domain. The resource path
-begins with any valid key/value pair. DSX Identity Keys preserves that path
-exactly, including case, order, and repeated keys:
+contains complete key/value pairs with unique keys. Each segment starts with
+an ASCII letter or digit, followed by ASCII letters, digits, `.`, `_`, `:`, or `-`.
+DSX Identity Keys preserves valid paths exactly, including case and order:
 
 ```text
 local:     spiffe://<local-domain>/tenant/<tenant>/service/dsx/cluster/cluster-1/namespace/team-a/workload/api

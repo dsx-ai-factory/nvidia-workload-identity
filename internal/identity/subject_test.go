@@ -47,3 +47,33 @@ func TestValidTenant(t *testing.T) {
 		}
 	}
 }
+
+func TestRejectInvalidResourcePairs(t *testing.T) {
+	t.Parallel()
+
+	for _, resource := range [][]string{
+		{}, {"cluster"}, {"", "cluster-1"}, {"cluster", ""},
+		{"_cluster", "cluster-1"}, {"cluster", "_invalid"},
+		{"cluster", "cluster-1", "namespace"},
+		{"cluster", "cluster-1", "", "team-a"},
+		{"cluster", "cluster-1", "namespace", ""},
+		{"cluster", "cluster-1", "_namespace", "team-a"},
+		{"cluster", "cluster-1", "namespace", "_invalid"},
+		{"cluster", "cluster-1", "namespace", "team-a", "namespace", "team-b"},
+		{"cluster", "cluster-1", "namespace", "team-a", "namespace", "team-a"},
+		{"cluster", "cluster-1", "cluster", "cluster-2"},
+	} {
+		t.Run(strings.Join(resource, "/"), func(t *testing.T) {
+			t.Parallel()
+			if _, err := ParseResource("tenant-2", "dsx", resource); err == nil {
+				t.Fatal("invalid resource path was accepted")
+			}
+			if len(resource) >= 2 {
+				subject := Subject{Tenant: "tenant-2", Service: "dsx", ResourceType: ResourceType(resource[0]), ResourceID: resource[1], Path: resource[2:]}
+				if _, err := subject.ResourceSegments(); err == nil {
+					t.Fatal("invalid subject was encoded")
+				}
+			}
+		})
+	}
+}

@@ -15,9 +15,9 @@ func TestExchangeSubject(t *testing.T) {
 		dsx   string
 	}{
 		{
-			name:  "generic key with repeated suffix keys",
-			local: "spiffe://k2.internal/tenant/tenant-2/service/dsx/Cluster/Cluster-1/namespace/team-a/namespace/team-b",
-			dsx:   "spiffe://tenant-2.ds9.dsx.nvid.id/Cluster/Cluster-1/namespace/team-a/namespace/team-b",
+			name:  "generic key with workload suffix",
+			local: "spiffe://k2.internal/tenant/tenant-2/service/dsx/Cluster/Cluster-1/namespace/team-a/workload/api",
+			dsx:   "spiffe://tenant-2.ds9.dsx.nvid.id/Cluster/Cluster-1/namespace/team-a/workload/api",
 		},
 		{
 			name:  "pod resource",
@@ -84,5 +84,24 @@ func TestExchangeSubjectRejectsTenantlessLocalID(t *testing.T) {
 		spiffeid.RequireFromString("spiffe://k2.internal/dpu/dpu-1/process/dpu-agent"),
 	); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestExchangeSubjectRejectsInvalidPairs(t *testing.T) {
+	t.Parallel()
+
+	for _, path := range []string{
+		"cluster/cluster-1/namespace",
+		"cluster/cluster-1/namespace/team-a/namespace/team-b",
+		"cluster/cluster-1/cluster/cluster-2",
+		"cluster/cluster-1/_namespace/team-a",
+	} {
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+			id := spiffeid.RequireFromString("spiffe://k2.internal/tenant/tenant-2/service/dsx/" + path)
+			if _, err := exchangeSubject("ds9", "nvid.id", id); err == nil {
+				t.Fatal("invalid subject was exchanged")
+			}
+		})
 	}
 }

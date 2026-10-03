@@ -14,9 +14,8 @@ import (
 //
 //	spiffe://<trust-domain>/tenant/<tenant>/service/<service>/<resource>
 //
-// The resource starts with <key>/<value>. Any remaining path is preserved
-// without interpretation. The trust domain is not constrained because local
-// SPIRE validates the JWT-SVID before this parser runs.
+// The resource contains key/value pairs with unique keys. SPIRE validates
+// the JWT-SVID before this parser runs.
 func Parse(id spiffeid.ID) (identity.Subject, error) {
 	segments, err := pathSegments(id)
 	if err != nil {

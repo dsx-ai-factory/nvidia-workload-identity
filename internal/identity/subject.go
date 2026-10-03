@@ -25,7 +25,7 @@ type Subject struct {
 	Service      string
 	ResourceType ResourceType
 	ResourceID   string
-	// Path contains every segment after ResourceID without assigning meaning to it.
+	// Path contains key/value pairs after ResourceID.
 	// For dpu/dpu-1/dpuservice/storage/namespace/system, it contains
 	// [dpuservice, storage, namespace, system].
 	Path []string
@@ -47,8 +47,7 @@ func ValidResourceID(id string) bool {
 	return segmentPattern.MatchString(id)
 }
 
-// ParseResource parses the fixed resource prefix and preserves the remaining
-// path without interpreting it.
+// ParseResource validates path pairs and preserves their order and case.
 func ParseResource(tenant, service string, resource []string) (Subject, error) {
 	if len(resource) < 2 {
 		return Subject{}, fmt.Errorf("resource path requires type and ID")
@@ -90,6 +89,20 @@ func (s Subject) validate() error {
 	}
 	if !ValidResourceID(s.ResourceID) {
 		return fmt.Errorf("invalid resource ID %q", s.ResourceID)
+	}
+	if len(s.Path)%2 != 0 {
+		return fmt.Errorf("resource path requires complete key/value pairs")
+	}
+	keys := map[string]struct{}{string(s.ResourceType): {}}
+	for i := 0; i < len(s.Path); i += 2 {
+		key, value := s.Path[i], s.Path[i+1]
+		if !segmentPattern.MatchString(key) || !segmentPattern.MatchString(value) {
+			return fmt.Errorf("invalid path pair %q/%q", key, value)
+		}
+		if _, exists := keys[key]; exists {
+			return fmt.Errorf("duplicate path key %q", key)
+		}
+		keys[key] = struct{}{}
 	}
 	return nil
 }

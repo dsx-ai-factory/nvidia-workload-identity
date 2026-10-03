@@ -19,9 +19,9 @@ func TestParse(t *testing.T) {
 	}{
 		{
 			name: "generic key",
-			raw:  "spiffe://k2.internal/tenant/tenant-2/service/dsx/Cluster/Cluster-1/namespace/team-a/namespace/team-b",
+			raw:  "spiffe://k2.internal/tenant/tenant-2/service/dsx/Cluster/Cluster-1/namespace/team-a/workload/api",
 			subject: identity.Subject{Tenant: "tenant-2", Service: "dsx", ResourceType: "Cluster", ResourceID: "Cluster-1",
-				Path: []string{"namespace", "team-a", "namespace", "team-b"}},
+				Path: []string{"namespace", "team-a", "workload", "api"}},
 		},
 		{
 			name:    "dpu",
@@ -81,6 +81,8 @@ func TestRejectInvalidID(t *testing.T) {
 		"spiffe://k2.internal/tenant/operator-1/service/dsx/bm",
 		"spiffe://k2.internal/tenant/operator-1/service/dsx/cluster",
 		"spiffe://k2.internal/tenant/operator-1/service/dsx/cluster/_invalid",
+		"spiffe://k2.internal/tenant/operator-1/service/dsx/cluster/cluster-1/namespace",
+		"spiffe://k2.internal/tenant/operator-1/service/dsx/cluster/cluster-1/namespace/team-a/namespace/team-b",
 	} {
 		t.Run(raw, func(t *testing.T) {
 			t.Parallel()
