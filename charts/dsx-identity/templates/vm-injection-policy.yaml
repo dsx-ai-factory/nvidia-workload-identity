@@ -38,8 +38,7 @@ spec:
           container.name == "dsx-imds-network-setup"
         )
   mutations:
-    # ApplyConfiguration merges keyed volumes without replacing entries already
-    # supplied by virt-launcher.
+    # Merge CSI volumes with those already supplied by virt-launcher.
     - patchType: ApplyConfiguration
       applyConfiguration:
         expression: >-
@@ -63,8 +62,8 @@ spec:
               ]
             }
           }
-    # Create the atomic list when absent, then append only configured secrets
-    # missing by name. Existing pull secrets and container order stay intact.
+    # JSONPatch can append Downward API volumes with atomic items and fieldRef.
+    # Initialize pull secrets when absent and append configured secrets missing by name.
     - patchType: JSONPatch
       jsonPatch:
         expression: >-
@@ -92,6 +91,22 @@ spec:
           [
             JSONPatch{
               op: "add",
+              path: "/spec/volumes/-",
+              value: Object.spec.volumes{
+                name: "dsx-imds-pod-networks",
+                downwardAPI: Object.spec.volumes.downwardAPI{
+                  items: [Object.spec.volumes.downwardAPI.items{
+                    path: "pod-networks",
+                    fieldRef: Object.spec.volumes.downwardAPI.items.fieldRef{
+                      apiVersion: "v1",
+                      fieldPath: "metadata.annotations['k8s.ovn.org/pod-networks']"
+                    }
+                  }]
+                }
+              }
+            },
+            JSONPatch{
+              op: "add",
               path: "/spec/containers/-",
               value: Object.spec.containers{
                 name: "dsx-imds-network-setup",
@@ -99,6 +114,11 @@ spec:
                 imagePullPolicy: {{ .Values.vmSupport.imdsNetworkSetup.image.pullPolicy | quote }},
                 command: ["/usr/local/bin/dsx-imds-network-setup"],
                 args: [{{ printf "--log-level=%s" .Values.observability.logLevel | quote }}],
+                volumeMounts: [Object.spec.containers.volumeMounts{
+                  name: "dsx-imds-pod-networks",
+                  mountPath: "/var/run/dsx-imds",
+                  readOnly: true
+                }],
                 env: {{ include "dsx-identity.observabilityEnv" (dict
                     "root" .
                     "serviceName" "dsx-imds-network-setup"

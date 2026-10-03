@@ -7,7 +7,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CLUSTER_NAME="k2"
 CONTEXT="kind-${CLUSTER_NAME}"
-VM_NAME="${VM_NAME:-e2e-debian-vm}"
+# bridge uses KubeVirt DHCP. l2bridge/managedTap uses the cloud-init hook.
+# Both must return their own signed VM identity and pass the same OpenBao checks.
+VM_NAMES=(e2e-debian-vm e2e-debian-vm-l2bridge)
+if [[ -n "${VM_NAME:-}" ]]; then
+    VM_NAMES=("${VM_NAME}")
+fi
+VM_NAME="${VM_NAMES[0]}"
 VM_TENANT="${VM_TENANT:-tenant1}"
 NAMESPACE="tenant-${VM_TENANT}"
 TEST_AUDIENCE="spiffe://ds9.dsx.nvid.id/openbao"
@@ -266,7 +272,7 @@ verify_dpu_imds() {
 }
 
 verify_metadata_access() {
-    log_test "Requesting DSX IMDS v1 from an external tenant-network client..."
+    log_test "Requesting DSX IMDS v1 from guest ${VM_NAME} through the tenant network..."
 
     local vm_ip response command
     local ssh_started
@@ -279,16 +285,14 @@ verify_metadata_access() {
         --for=condition=Ready \
         "vmi/${VM_NAME}" -n "${NAMESPACE}" --context "${CONTEXT}" \
         --timeout=300s || return 1
-    run_timed "VM VMI address" kubectl wait \
-        --for=jsonpath='{.status.interfaces[?(@.name=="default")].ipAddress}' \
-        "vmi/${VM_NAME}" -n "${NAMESPACE}" --context "${CONTEXT}" \
-        --timeout=300s || return 1
-    vm_ip=$(kubectl get vmi "${VM_NAME}" -n "${NAMESPACE}" \
-        --context "${CONTEXT}" -o json | jq -r '
-          [.status.interfaces[]? |
-           select(.name == "default") |
-           ((.ipAddresses // [])[]?, .ipAddress?) |
-           select(type == "string" and test("^[0-9]+(\\.[0-9]+){3}$"))][0] // empty
+    # managedTap guests need not report their address through the guest agent.
+    # Use the CNI allocation to reach the real guest, then assert its IMDS response.
+    vm_ip=$(kubectl get pods -l "kubevirt.io/domain=${VM_NAME}" -n "${NAMESPACE}" \
+        --context "${CONTEXT}" -o json | jq -er '
+          [.items[] |
+           .metadata.annotations["k8s.ovn.org/pod-networks"] | fromjson |
+           .[] | select(.role == "primary") | .ip_addresses[] |
+           split("/")[0] | select(test("^[0-9]+(\\.[0-9]+){3}$"))][0]
         ') || return 1
     ssh_started=${SECONDS}
     if [[ -n "${vm_ip}" ]] && response=$(ssh_vm "${vm_ip}" "${command}"); then
@@ -325,7 +329,10 @@ main() {
     run_timed "DPU controller registration" verify_dpu_controller_registration || failed=$((failed + 1))
     run_timed "operator host IMDS" verify_operator_host_imds || failed=$((failed + 1))
     run_timed "DPU IMDS" verify_dpu_imds || failed=$((failed + 1))
-    run_timed "VM identity and OpenBao" verify_metadata_access || failed=$((failed + 1))
+    for VM_NAME in "${VM_NAMES[@]}"; do
+        EXPECTED_SPIFFE_ID="spiffe://tenant-2.ds9.dsx.nvid.id/vm/${VM_NAME}"
+        run_timed "${VM_NAME} identity and OpenBao" verify_metadata_access || failed=$((failed + 1))
+    done
     echo
     if [[ $failed -eq 0 ]]; then
         log_timing "k2 identity verification total" "${script_started}"

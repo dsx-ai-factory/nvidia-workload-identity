@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: e2e-l2bridge-cloud-init
+data:
+  # managedTap supplies no DHCP server. Configure the CNI-allocated guest address
+  # through KubeVirt's upstream cloud-init hook.
+  preCloudInitIso: |
+    #!/usr/bin/env python3
+    import argparse
+    import json
+    from pathlib import Path
+    from time import monotonic, sleep
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--vmi", required=True)
+    parser.add_argument("--cloud-init", required=True)
+    args = parser.parse_args()
+    # The projection is mounted before CNI publishes the annotation.
+    path = Path("/var/run/e2e-l2bridge/pod-networks")
+    deadline = monotonic() + 60
+    while True:
+        status = path.read_text()
+        if status:
+            networks = json.loads(status)
+            break
+        if monotonic() >= deadline:
+            raise RuntimeError("timed out waiting for OVN guest network")
+        sleep(1)
+    primary = [network for network in networks.values() if network.get("role") == "primary"]
+    if len(primary) != 1:
+        raise RuntimeError("expected one primary guest network")
+    network = primary[0]
+    data = json.loads(args.cloud_init)
+    data["NetworkData"] = json.dumps({
+        "version": 2,
+        "ethernets": {
+            "primary": {
+                "match": {"macaddress": network["mac_address"]},
+                "addresses": network["ip_addresses"],
+                "routes": [{"to": "0.0.0.0/0", "via": network["gateway_ips"][0]}],
+            }
+        },
+    })
+    print(json.dumps(data))
