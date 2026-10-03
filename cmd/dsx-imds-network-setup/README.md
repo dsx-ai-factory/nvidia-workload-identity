@@ -47,13 +47,16 @@ flowchart LR
 
     DHCP["bridge: KubeVirt DHCP"] -.-> Guest
     CloudInit["l2bridge / managedTap:<br/>cloud-init network setup"] -.-> Guest
-    Status["CNI network-status<br/>Downward API file"] -.->|"guest IP/MAC"| Setup["network setup sidecar"]
-    Setup -.->|"MAC rewrite, reply route, neighbor"| Veth
+    Status["CNI network-status<br/>guest IPv4 + MAC"] -.-> File["Downward API file"]
+    File -.-> Setup["network setup sidecar"]
+    Setup -.->|"guest /32 reply route + MAC neighbor"| Veth
+    Setup -.->|"IMDS MAC rewrite"| Bridge
 ```
 
 Each VM uses one guest configuration branch. The tap, bridge, uplink, veth, and
 both sidecars share the virt-launcher Pod network namespace. Solid arrows carry
-packets. Dotted arrows configure networking.
+packets. Dotted arrows configure networking. The Downward API supplies the
+guest address for the reply route and the guest MAC for its neighbor entry.
 
 ## VM bindings
 
@@ -74,8 +77,10 @@ returns when QEMU opens the tap after network preparation. The dummy alone
 appears before address updates finish. This ordering keeps IMDS route changes
 out of KubeVirt's network handoff.
 
-The guest IPv4 address and MAC come from the CNI `network-status` entry whose
-interface name matches the bridge name without `k6t-`. The chart mounts
+The Downward API file supplies the guest IPv4 reply destination and MAC. The
+sidecar uses them for the guest `/32` route and permanent neighbor entry. It
+reads the CNI `network-status` entry whose interface name matches the bridge
+name without `k6t-`. The chart mounts
 `metadata.annotations['k8s.v1.cni.cncf.io/network-status']` through the Downward
 API at `/var/run/dsx-imds/network-status`. The mount receives annotation updates
 and needs no Kubernetes API credentials. Discovery fails if the matching entry
