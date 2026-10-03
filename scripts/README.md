@@ -107,7 +107,8 @@ name describes the guest's Ethernet attachment, not the UDN topology.
 Both bindings create a `k6t-*` bridge and tap, then replace the original CNI
 interface with a dummy. IMDS setup reads the primary OVN pod-networks entry
 through the Downward API, so it works even when the dummy has no guest IPv4.
-It installs the guest reply route and neighbor through the IMDS veth path.
+It installs the guest reply route through the IMDS veth path. Kernel ARP
+resolves the guest MAC, which KubeVirt can override independently of OVN.
 
 The l2bridge fixture registers `managedTap` in KubeVirt and enables its upstream
 cloud-init hook. An E2E-only admission policy projects the Pod's OVN allocation
