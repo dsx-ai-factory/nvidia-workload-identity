@@ -55,6 +55,9 @@ metadata:
 spec:
   className: dsx-identity-dsx-identity
   hint: generic-path
+  # Distinguish this entry from the operator Pod identity selected by Pod UID.
+  workloadSelectorTemplates:
+    - k8s:container-name:identity-probe
   spiffeIDTemplate: spiffe://{{ .TrustDomain }}/tenant/operator-1/service/identity-probe/Cluster/Cluster-1/namespace/team-a/workload/api
   podSelector:
     matchLabels:
@@ -68,6 +71,10 @@ metadata:
 spec:
   className: dsx-identity-dsx-identity
   hint: duplicate-path-key
+  # Namespace adds a distinct selector set for this same probe process.
+  workloadSelectorTemplates:
+    - k8s:container-name:identity-probe
+    - k8s:ns:dsx-identity-spire-e2e
   spiffeIDTemplate: spiffe://{{ .TrustDomain }}/tenant/operator-1/service/identity-probe/cluster/cluster-1/namespace/team-a/namespace/team-b
   podSelector:
     matchLabels:
