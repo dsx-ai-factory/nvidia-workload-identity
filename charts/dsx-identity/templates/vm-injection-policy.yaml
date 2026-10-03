@@ -39,7 +39,7 @@ spec:
         )
   mutations:
     # ApplyConfiguration merges keyed volumes without replacing entries already
-    # supplied by virt-launcher.
+    # supplied by virt-launcher. Mount annotation updates without a subPath.
     - patchType: ApplyConfiguration
       applyConfiguration:
         expression: >-
@@ -58,6 +58,18 @@ spec:
                   csi: Object.spec.volumes.csi{
                     driver: "csi.dsx-identity-keys.nvidia.com",
                     readOnly: true
+                  }
+                },
+                Object.spec.volumes{
+                  name: "dsx-imds-network-status",
+                  downwardAPI: Object.spec.volumes.downwardAPI{
+                    items: [Object.spec.volumes.downwardAPI.items{
+                      path: "network-status",
+                      fieldRef: Object.spec.volumes.downwardAPI.items.fieldRef{
+                        apiVersion: "v1",
+                        fieldPath: "metadata.annotations['k8s.v1.cni.cncf.io/network-status']"
+                      }
+                    }]
                   }
                 }
               ]
@@ -99,6 +111,11 @@ spec:
                 imagePullPolicy: {{ .Values.vmSupport.imdsNetworkSetup.image.pullPolicy | quote }},
                 command: ["/usr/local/bin/dsx-imds-network-setup"],
                 args: [{{ printf "--log-level=%s" .Values.observability.logLevel | quote }}],
+                volumeMounts: [Object.spec.containers.volumeMounts{
+                  name: "dsx-imds-network-status",
+                  mountPath: "/var/run/dsx-imds",
+                  readOnly: true
+                }],
                 env: {{ include "dsx-identity.observabilityEnv" (dict
                     "root" .
                     "serviceName" "dsx-imds-network-setup"

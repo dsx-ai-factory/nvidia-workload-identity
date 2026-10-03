@@ -607,7 +607,8 @@ The repository validates the architecture with two Kind clusters. k1 hosts a
 Common Services identity shard, one unauthenticated NATS server with in-memory
 JetStream for KV, and the
 OpenBao relying party. k2 hosts a Data Hall identity shard, the Identity
-Controller, OVN-Kubernetes layer-3 UDN, and a KubeVirt VM. The k1 and k2 names
+Controller, OVN-Kubernetes layer-3 UDN, and KubeVirt VMs using `bridge` and
+`l2bridge` bindings. The k1 and k2 names
 describe only this fixture and do not define a trust hierarchy. Local identity
 components use one replica and SPIRE uses its SQLite default.
 
@@ -742,7 +743,7 @@ make clean
 ```
 
 The E2E suite verifies operator-host IMDS through both `dsx_imds` plugin halves,
-DPU file delivery, Pod and VM identity delivery, shard isolation, NATS KV
+DPU file delivery, Pod and VM identity delivery through both bindings, shard isolation, NATS KV
 propagation, aggregate JWKS behavior, OpenBao authorization, restart recovery,
 and signing-key rotation. External DPU and standalone-host hardware is not
 modeled as Kubernetes Nodes.

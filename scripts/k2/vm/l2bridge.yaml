@@ -1,0 +1,85 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: e2e-debian-vm-l2bridge
+automountServiceAccountToken: false
+---
+apiVersion: launchlayer.nvidia.com/v1alpha1
+kind: VirtualInstance
+metadata:
+  name: e2e-debian-vm-l2bridge
+  annotations:
+    launchlayer.nvidia.com/org-id: tenant-2
+spec:
+  instance_id: e2e-debian-vm-l2bridge
+  node_name: k2-worker
+---
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: e2e-debian-vm-l2bridge
+  labels:
+    app: e2e-vm
+    kubevirt.io/vm: e2e-debian-vm-l2bridge
+    tenant: tenant1
+spec:
+  runStrategy: Always
+  template:
+    metadata:
+      labels:
+        kubevirt.io/domain: e2e-debian-vm-l2bridge
+        app: e2e-vm
+        tenant: tenant1
+        spiffe.nvidia.com/service: dsx
+      annotations:
+        spiffe.nvidia.com/inject-dsx-imds: 'true'
+        hooks.kubevirt.io/hookSidecars: '[{"args": ["--version", "v1alpha2"], "configMap":
+          {"name": "e2e-l2bridge-cloud-init", "key": "preCloudInitIso", "hookPath":
+          "/usr/bin/preCloudInitIso"}}]'
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k2-worker
+      domain:
+        cpu:
+          cores: 2
+        devices:
+          disks:
+            - disk:
+                bus: virtio
+              name: rootdisk
+            - disk:
+                bus: virtio
+              name: cloudinit
+            - disk:
+                bus: virtio
+                readonly: true
+              name: vm-service-account
+          interfaces:
+            - name: default
+              binding:
+                name: l2bridge
+        features:
+          acpi:
+            enabled: true
+        resources:
+          requests:
+            memory: 2Gi
+          limits:
+            memory: 2Gi
+      networks:
+        - name: default
+          multus:
+            networkName: tenant-tenant1/tenant-tenant1-network
+            default: true
+      volumes:
+        - containerDisk:
+            image: quay.io/containerdisks/debian:13
+            imagePullPolicy: IfNotPresent
+          name: rootdisk
+        - cloudInitNoCloud:
+            secretRef:
+              name: e2e-debian-vm-cloud-init
+          name: cloudinit
+        - name: vm-service-account
+          serviceAccount:
+            serviceAccountName: e2e-debian-vm-l2bridge

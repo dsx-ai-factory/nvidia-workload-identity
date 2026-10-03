@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -26,13 +27,13 @@ import (
 )
 
 const (
-	imdsIP            = "169.254.169.254"
-	vethVMSide        = "imds-vm"  // max 15 chars for ifname
-	vethContainerSide = "imds-ctr" // max 15 chars for ifname
-	bridgePrefix      = "k6t-"
-	defaultUDNIfName  = "eth0"
-	defaultTapIfName  = "tap0"
-	metaCIDR          = "169.254.169.254/32"
+	imdsIP                   = "169.254.169.254"
+	vethVMSide               = "imds-vm"  // max 15 chars for ifname
+	vethContainerSide        = "imds-ctr" // max 15 chars for ifname
+	bridgePrefix             = "k6t-"
+	defaultNetworkStatusFile = "/var/run/dsx-imds/network-status"
+	defaultTapIfName         = "tap0"
+	metaCIDR                 = "169.254.169.254/32"
 
 	// IPv4 header offsets (RFC 791)
 	ipv4DstAddrOffset = 16 // Destination IP address offset in IPv4 header
@@ -44,13 +45,13 @@ const (
 )
 
 var (
-	logLevel  slog.Level
-	udnIfName *string
+	logLevel          slog.Level
+	networkStatusFile *string
 )
 
 func runCommand() (runErr error) {
 	flag.TextVar(&logLevel, "log-level", slog.LevelInfo, "log level (debug, info, warn, error)")
-	udnIfName = flag.String("udn-if-name", defaultUDNIfName, "UDN interface name")
+	networkStatusFile = flag.String("network-status-file", defaultNetworkStatusFile, "Downward API network-status file")
 	flag.Parse()
 
 	sdk, err := telemetry.Setup(context.Background(), "dsx-imds-network-setup", os.Stdout, logLevel)
@@ -114,12 +115,10 @@ func setupPodNetwork(ctx context.Context) error {
 	}
 	defer nlHandle.Close()
 
-	// Wait until KubeVirt finishes moving the pod interface and creating the
-	// bridge, tap, and replacement interface. Mutating the namespace before the
-	// replacement interface has its address can interrupt KubeVirt's netlink
-	// address dump and make VMI startup fail.
+	// Wait for KubeVirt to replace the CNI interface before changing routes.
+	// The annotation retains the guest address even when the dummy has no IPv4.
 	slog.Debug("Waiting for KubeVirt network", "bridge_prefix", bridgePrefix)
-	bridgeLink, vmIP, vmMAC, err := waitForKubeVirtNetwork(ctx, nlHandle)
+	bridgeLink, vmIP, vmMAC, err := waitForKubeVirtNetwork(ctx, nlHandle, *networkStatusFile)
 	if err != nil {
 		return fmt.Errorf("waiting for KubeVirt network: %w", err)
 	}
@@ -178,32 +177,51 @@ func setupPodNetwork(ctx context.Context) error {
 	return nil
 }
 
-func waitForKubeVirtNetwork(ctx context.Context, nlHandle *netlink.Handle) (netlink.Link, net.IP, net.HardwareAddr, error) {
+func waitForKubeVirtNetwork(ctx context.Context, nlHandle *netlink.Handle, statusFile string) (netlink.Link, net.IP, net.HardwareAddr, error) {
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
+	lastErr := errors.New("KubeVirt network is not ready")
 
 	for {
 		select {
 		case <-ctx.Done():
 			if ctx.Err() == context.DeadlineExceeded {
-				return nil, nil, nil, fmt.Errorf("timeout waiting for KubeVirt network")
+				return nil, nil, nil, fmt.Errorf("timeout waiting for KubeVirt network: %w", lastErr)
 			}
 			return nil, nil, nil, ctx.Err()
 		case <-ticker.C:
 			bridge, err := findBridge(nlHandle)
 			if err != nil {
+				lastErr = err
 				continue
 			}
-			if _, err := nlHandle.LinkByName(defaultTapIfName); err != nil {
+			tap, err := nlHandle.LinkByName(defaultTapIfName)
+			if err != nil {
+				lastErr = err
 				continue
 			}
-			vmIP, vmMAC, err := getInterfaceIPv4AndMAC(*udnIfName)
+			if tap.Attrs().MasterIndex != bridge.Attrs().Index {
+				lastErr = fmt.Errorf("%s is not attached to %s", defaultTapIfName, bridge.Attrs().Name)
+				continue
+			}
+			ifaceName := strings.TrimPrefix(bridge.Attrs().Name, bridgePrefix)
+			iface, err := nlHandle.LinkByName(ifaceName)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			if iface.Type() != "dummy" {
+				lastErr = fmt.Errorf("waiting for KubeVirt to replace %s", ifaceName)
+				continue
+			}
+			vmIP, vmMAC, err := readVMNetwork(statusFile, ifaceName)
 			if err == nil {
 				return bridge, vmIP, vmMAC, nil
 			}
+			lastErr = err
 		}
 	}
 }
@@ -435,31 +453,57 @@ func nftAddIMDSRule(conn *nftables.Conn, table *nftables.Table, chain *nftables.
 	return nil
 }
 
-// getInterfaceIPv4AndMAC gets the IPv4 address and MAC address of an interface.
-func getInterfaceIPv4AndMAC(ifname string) (net.IP, net.HardwareAddr, error) {
-	iface, err := net.InterfaceByName(ifname)
+// CNI network-status preserves the guest IP and MAC across KubeVirt's handoff.
+func readVMNetwork(path, ifaceName string) (net.IP, net.HardwareAddr, error) {
+	file, err := os.Open(path)
 	if err != nil {
-		return nil, nil, fmt.Errorf("getting interface %q: %w", ifname, err)
+		return nil, nil, fmt.Errorf("open network status: %w", err)
 	}
-	addrs, err := iface.Addrs()
-	if err != nil {
-		return nil, nil, fmt.Errorf("listing addresses for %q: %w", ifname, err)
+	defer file.Close()
+
+	var networks []struct {
+		Interface string   `json:"interface"`
+		IPs       []string `json:"ips"`
+		MAC       string   `json:"mac"`
 	}
-	for _, a := range addrs {
-		ipNet, ok := a.(*net.IPNet)
-		if !ok || ipNet.IP == nil {
+	if err := json.NewDecoder(file).Decode(&networks); err != nil {
+		return nil, nil, fmt.Errorf("decode network status: %w", err)
+	}
+	var vmIP net.IP
+	var vmMAC net.HardwareAddr
+	matched := false
+	for _, network := range networks {
+		if network.Interface != ifaceName {
 			continue
 		}
-		ip4 := ipNet.IP.To4()
-		if ip4 == nil {
-			continue
+		if matched {
+			return nil, nil, fmt.Errorf("multiple network-status entries for %s", ifaceName)
 		}
-		if len(iface.HardwareAddr) != 6 {
-			return nil, nil, fmt.Errorf("unexpected MAC for %q: %q", ifname, iface.HardwareAddr.String())
+		matched = true
+		vmMAC, err = net.ParseMAC(network.MAC)
+		if err != nil {
+			return nil, nil, fmt.Errorf("parse guest MAC for %s: %w", ifaceName, err)
 		}
-		return ip4, iface.HardwareAddr, nil
+		if len(vmMAC) != 6 {
+			return nil, nil, fmt.Errorf("invalid guest MAC %q for %s", network.MAC, ifaceName)
+		}
+		for _, address := range network.IPs {
+			ip := net.ParseIP(address)
+			if ip == nil {
+				return nil, nil, fmt.Errorf("invalid guest IP %q for %s", address, ifaceName)
+			}
+			if ipv4 := ip.To4(); ipv4 != nil {
+				if vmIP != nil {
+					return nil, nil, fmt.Errorf("multiple guest IPv4 addresses for %s", ifaceName)
+				}
+				vmIP = ipv4
+			}
+		}
 	}
-	return nil, nil, fmt.Errorf("no IPv4 address found on %q", ifname)
+	if vmIP == nil {
+		return nil, nil, fmt.Errorf("no guest IPv4 address for %s in network status", ifaceName)
+	}
+	return vmIP, vmMAC, nil
 }
 
 // deleteLocalRouteForIP deletes the local route for an IP address.

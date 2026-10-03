@@ -12,3 +12,12 @@ patches:
       - op: add
         path: /spec/configuration/developerConfiguration/useEmulation
         value: true
+      - op: add
+        path: /spec/configuration/developerConfiguration/featureGates
+        value: [Sidecar]
+      - op: add
+        path: /spec/configuration/network
+        value:
+          binding:
+            l2bridge:
+              domainAttachmentType: managedTap

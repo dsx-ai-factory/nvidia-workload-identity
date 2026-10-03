@@ -6,6 +6,8 @@ resources:
   - tenant-udn.yaml
   - external-client.yaml
   - vm.yaml
+  - l2bridge.yaml
+  - l2bridge-cloud-init.yaml
 generatorOptions:
   disableNameSuffixHash: true
 secretGenerator:

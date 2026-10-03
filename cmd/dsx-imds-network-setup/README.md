@@ -27,31 +27,39 @@ flowchart LR
     Tap --> VM
 ```
 
-The command waits up to 60 seconds for the first Linux bridge whose name starts
-with `k6t-`, the primary `tap0` interface, and the replacement UDN interface
-with its IPv4 address. These conditions show that KubeVirt has finished its
-network namespace changes. The command then applies the changes below and
-remains running until it receives `SIGINT` or `SIGTERM`.
+The command supports KubeVirt's built-in `bridge` binding and a `l2bridge`
+binding with `managedTap` attachment. It waits up to 60 seconds for the `k6t-*`
+bridge, its `tap0` port, and KubeVirt's replacement dummy interface before
+changing routes. This avoids interfering with KubeVirt's network handoff.
+
+The guest IPv4 address and MAC come from the CNI `network-status` entry whose
+interface name matches the bridge name without `k6t-`. The chart mounts
+`metadata.annotations['k8s.v1.cni.cncf.io/network-status']` through the Downward
+API at `/var/run/dsx-imds/network-status`. The mount receives annotation updates
+and needs no Kubernetes API credentials. Discovery fails if the matching entry
+has no IPv4 address or its address or MAC is invalid or ambiguous.
+
+This works when the replacement interface has no IPv4 address or has a different
+MAC. An infrastructure interface such as `eth0` is not used when the guest's
+bridge belongs to `ovn-udn1`. The process stays alive after setup until shutdown.
 
 ## Manual reproduction
 
 Run these commands as root in the same network namespace as the
-`metadata-service` sidecar. Set `UDN_IF` to the value passed through
-`--udn-if-name`.
+`metadata-service` sidecar. Read the guest address from the mounted CNI
+network-status file.
 
 ### Identify the KubeVirt interfaces
 
 ```bash
-UDN_IF=eth0
 BRIDGE=$(ip -o link show type bridge | awk -F': ' '$2 ~ /^k6t-/ { print $2; exit }')
-VM_CIDR=$(ip -4 -o addr show dev "$UDN_IF" | awk 'NR == 1 { print $4 }')
-VM_IP=${VM_CIDR%/*}
-VM_MAC=$(cat "/sys/class/net/${UDN_IF}/address")
+UDN_IF=${BRIDGE#k6t-}
+VM_IP=$(jq -r --arg iface "$UDN_IF" 'map(select(.interface == $iface))[0].ips[] | select(contains(":") | not)' /var/run/dsx-imds/network-status)
+VM_MAC=$(jq -r --arg iface "$UDN_IF" 'map(select(.interface == $iface))[0].mac' /var/run/dsx-imds/network-status)
 ```
 
-`BRIDGE` is the KubeVirt bridge. `VM_IP` and `VM_MAC` are the first IPv4
-address and the hardware address on the UDN interface, matching the values read
-by the Go command.
+`BRIDGE` is the KubeVirt bridge. `VM_IP` and `VM_MAC` belong to its matching
+CNI network-status entry.
 
 ### Create the veth path
 
@@ -172,7 +180,7 @@ The identity chart injects the sidecar through
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
-| `--udn-if-name` | `eth0` | OVN-Kubernetes UDN interface carrying the VM IPv4 address |
+| `--network-status-file` | `/var/run/dsx-imds/network-status` | Downward API file containing CNI network-status |
 | `--log-level` | `info` | JSON log level: `debug`, `info`, `warn`, or `error` |
 
 The container must run as root with `NET_ADMIN` in the `virt-launcher` Pod
