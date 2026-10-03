@@ -56,6 +56,7 @@ spec:
               name: vm-service-account
           interfaces:
             - name: default
+              # Built-in bridge supplies DHCP for the CNI-assigned guest address.
               bridge: {}
         features:
           acpi:

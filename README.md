@@ -691,6 +691,32 @@ The KubeVirt VM contains no SPIRE agent. SPIFFE CSI exposes the attested second
 agent's Workload API socket to the virt-launcher Pod, and DSX IMDS uses that
 socket to fetch the VM SPIRE JWT-SVID.
 
+### VM network bindings
+
+Both VMs use the same primary layer-3 UDN and real DSX IMDS sidecars. The binding
+name describes the guest's Ethernet attachment, not the UDN topology.
+
+| VM | Binding | Guest network configuration |
+| --- | --- | --- |
+| `e2e-debian-vm` | Built-in `bridge` | KubeVirt DHCP supplies the CNI-assigned address |
+| `e2e-debian-vm-l2bridge` | `l2bridge` with `managedTap` | Cloud-init hook supplies the CNI-assigned address, MAC match, and gateway |
+
+Both bindings create a `k6t-*` bridge and tap, then replace the original CNI
+interface with a dummy. IMDS setup reads the matching CNI network-status entry
+through the Downward API, so it works even when the dummy has no guest IPv4.
+It installs the guest reply route and neighbor through the IMDS veth path.
+
+The l2bridge fixture registers `managedTap` in KubeVirt and enables its upstream
+cloud-init hook. An E2E-only admission policy mounts the OVN allocation into
+that hook before VM creation. The hook configures guest networking because
+`managedTap` supplies no DHCP server.
+
+For each binding, the external client SSHes to the CNI-assigned guest address,
+requests a VM identity from `169.254.169.254`, and authenticates the returned
+token through OpenBao. The checks verify the VM subject, signature, and allowed
+and forbidden secret access. See the [network setup README](cmd/dsx-imds-network-setup/README.md)
+for the packet path.
+
 ### Cross-shard OpenBao validation
 
 The local E2E topology deploys OpenBao in k1 as an external relying party. A VM

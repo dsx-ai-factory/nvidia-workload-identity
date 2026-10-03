@@ -7,6 +7,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CLUSTER_NAME="k2"
 CONTEXT="kind-${CLUSTER_NAME}"
+# bridge uses KubeVirt DHCP. l2bridge/managedTap uses the cloud-init hook.
+# Both must return their own signed VM identity and pass the same OpenBao checks.
 VM_NAMES=(e2e-debian-vm e2e-debian-vm-l2bridge)
 if [[ -n "${VM_NAME:-}" ]]; then
     VM_NAMES=("${VM_NAME}")

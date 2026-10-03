@@ -20,5 +20,6 @@ patches:
         path: /spec/configuration/network
         value:
           binding:
+            # Native managedTap creates the bridge/tap. Guest cloud-init replaces DHCP.
             l2bridge:
               domainAttachmentType: managedTap

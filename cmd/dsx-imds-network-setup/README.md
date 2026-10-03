@@ -17,20 +17,41 @@ path to the VM.
 
 ```mermaid
 flowchart LR
-    VM["KubeVirt VM"] -->|"request to 169.254.169.254"| Tap["virt-launcher Pod tap interface"]
-    Tap --> Bridge["virt-launcher Pod Linux bridge"]
-    Bridge -->|"nftables destination MAC rewrite"| Veth["imds-vm and imds-ctr veth pair"]
-    Veth --> Metadata["DSX IMDS sidecar"]
-    Metadata -->|"reply route and neighbor entry"| Veth
-    Veth --> Bridge
-    Bridge --> Tap
-    Tap --> VM
+    Guest["VM guest<br/>CNI-assigned IP/MAC"] <--> Tap["tap0"]
+    Tap <--> Bridge["k6t-* bridge"]
+    Bridge <--> Veth["imds-vm / imds-ctr"]
+    Veth <--> Metadata["metadata-service sidecar<br/>169.254.169.254"]
+    UDN["Primary layer-3 UDN"] <--> Uplink["CNI uplink"]
+    Uplink <--> Bridge
+
+    DHCP["bridge: KubeVirt DHCP"] -.-> Guest
+    CloudInit["l2bridge / managedTap:<br/>cloud-init network setup"] -.-> Guest
+    Status["CNI network-status<br/>Downward API file"] -.->|"guest IP/MAC"| Setup["network setup sidecar"]
+    Setup -.->|"MAC rewrite, reply route, neighbor"| Veth
 ```
 
-The command supports KubeVirt's built-in `bridge` binding and a `l2bridge`
-binding with `managedTap` attachment. It waits up to 60 seconds for the `k6t-*`
-bridge, its `tap0` port, and KubeVirt's replacement dummy interface before
-changing routes. This avoids interfering with KubeVirt's network handoff.
+Each VM uses one guest configuration branch. The tap, bridge, uplink, veth, and
+both sidecars share the virt-launcher Pod network namespace. Solid arrows carry
+packets. Dotted arrows configure networking. The original CNI interface name
+remains on a dummy after handoff. IMDS discovery uses the annotation allocation
+rather than that dummy's current addresses.
+
+## VM bindings
+
+- Built-in `bridge` moves the CNI link behind a Linux bridge and tap. KubeVirt
+  supplies DHCP so the guest receives the CNI-assigned address.
+- `l2bridge` uses KubeVirt's `managedTap` attachment for the same Ethernet path.
+  It supplies no DHCP server. Cloud-init or another guest network setup path
+  configures the CNI-assigned address and gateway on the matching guest MAC.
+
+These are VM interface bindings. Both can use an OVN-Kubernetes layer-3 UDN.
+Both replace the original CNI interface with a dummy. Its current address and
+MAC need not identify the guest, and a separate `eth0` can belong to the
+infrastructure network.
+
+The command waits up to 60 seconds for the `k6t-*` bridge, its `tap0` port, and
+KubeVirt's replacement dummy interface before changing routes. This avoids
+interfering with KubeVirt's network handoff.
 
 The guest IPv4 address and MAC come from the CNI `network-status` entry whose
 interface name matches the bridge name without `k6t-`. The chart mounts
@@ -119,13 +140,13 @@ nftables expressions.
 ### Remove the conflicting local route
 
 ```bash
+# Delete only when this local route exists.
 ip route del local "$VM_IP" table local
 ```
 
-OVN-Kubernetes assigns the VM IP to the bridged UDN interface in the
-`virt-launcher` namespace. This creates a local-table route that makes the
-kernel treat the VM IP as local. A metadata-service reply to that IP would
-terminate in the Pod namespace instead of crossing the bridge to the VM.
+If the replacement interface retains the VM IP, it has a local-table route that
+makes the kernel treat the VM IP as local. A metadata-service reply to that IP
+would terminate in the Pod namespace instead of crossing the bridge to the VM.
 
 Deleting only the local-table route preserves the UDN interface address while
 allowing the explicit route below to control replies.
@@ -148,7 +169,7 @@ ip neigh replace "$VM_IP" lladdr "$VM_MAC" dev imds-ctr nud permanent
 
 The host route is directly connected, so the kernel still needs a destination
 MAC before it can create each Ethernet reply frame. The permanent neighbor
-entry supplies the actual VM MAC read from the UDN interface and avoids ARP on
+entry supplies the guest MAC from CNI network-status and avoids ARP on
 the point-to-point veth path.
 
 ## Packet flow
@@ -193,5 +214,7 @@ UDN, and the KubeVirt bridge are runtime dependencies.
 go test ./cmd/dsx-imds-network-setup
 ```
 
-The focused tests cover setup completion, setup failure, and cancellation. The
-KubeVirt E2E path validates the resulting VM request flow.
+The focused tests cover guest metadata selection, invalid or ambiguous metadata,
+published annotation updates, setup completion, failure, and cancellation. The
+Linux E2E suite boots one VM per binding. Each guest requests its IMDS identity
+and authenticates the returned token through OpenBao.

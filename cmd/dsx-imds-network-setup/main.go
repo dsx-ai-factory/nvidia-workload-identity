@@ -115,8 +115,9 @@ func setupPodNetwork(ctx context.Context) error {
 	}
 	defer nlHandle.Close()
 
-	// Wait for KubeVirt to replace the CNI interface before changing routes.
-	// The annotation retains the guest address even when the dummy has no IPv4.
+	// bridge uses DHCP, while l2bridge/managedTap needs guest network configuration.
+	// Both hand the CNI link to a bridge and tap, then leave a dummy behind.
+	// Wait for that handoff and read guest IP/MAC from CNI, not the dummy or infra eth0.
 	slog.Debug("Waiting for KubeVirt network", "bridge_prefix", bridgePrefix)
 	bridgeLink, vmIP, vmMAC, err := waitForKubeVirtNetwork(ctx, nlHandle, *networkStatusFile)
 	if err != nil {
