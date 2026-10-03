@@ -8,8 +8,8 @@ The KubeVirt VM connects through a tap interface and a `k6t-*` Linux bridge in
 the `virt-launcher` Pod. The metadata-service shares the Pod network namespace,
 but it is not a port on that bridge. Assigning the IMDS address in the namespace
 is therefore insufficient. Requests carry the default gateway MAC and would
-leave through the bridge uplink. Replies also conflict with the local route for
-the VM IP that OVN-Kubernetes leaves on the bridged UDN interface.
+leave through the bridge uplink. Replies can also conflict with a local route
+when the replacement UDN interface retains the VM IP.
 
 The program creates a veth path from the bridge to the metadata-service,
 redirects IMDS request frames into that path, and installs an explicit return

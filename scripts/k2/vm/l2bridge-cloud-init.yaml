@@ -10,20 +10,23 @@ data:
     import argparse
     import json
     from pathlib import Path
+    from time import monotonic, sleep
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--vmi", required=True)
     parser.add_argument("--cloud-init", required=True)
     args = parser.parse_args()
-    annotations = Path("/var/run/kubevirt-private/downwardapi/podinfo/annotations")
-    networks = None
-    for line in annotations.read_text().splitlines():
-        key, _, value = line.partition("=")
-        if key == "k8s.ovn.org/pod-networks":
-            networks = json.loads(json.loads(value))
+    # The projection is mounted before CNI publishes the annotation.
+    path = Path("/var/run/e2e-l2bridge/pod-networks")
+    deadline = monotonic() + 60
+    while True:
+        status = path.read_text()
+        if status:
+            networks = json.loads(status)
             break
-    if networks is None:
-        raise RuntimeError("missing OVN network annotation")
+        if monotonic() >= deadline:
+            raise RuntimeError("timed out waiting for OVN guest network")
+        sleep(1)
     primary = [network for network in networks.values() if network.get("role") == "primary"]
     if len(primary) != 1:
         raise RuntimeError("expected one primary guest network")
