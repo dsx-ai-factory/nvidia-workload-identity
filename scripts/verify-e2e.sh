@@ -247,6 +247,7 @@ assert_exchange_rejects() {
     local name="$1"
     local identity_keys_url="$2"
     local token="$3"
+    local expected_status="${4:-401}" expected_error="${5:-invalid_grant}"
     local output status body
     output=$(external_curl -sS --max-time 10 -w $'\n%{http_code}' -X POST \
         -H 'Content-Type: application/x-www-form-urlencoded' \
@@ -256,8 +257,9 @@ assert_exchange_rejects() {
         "${identity_keys_url}/v1/exchange") || return 1
     status=${output##*$'\n'}
     body=${output%$'\n'*}
-    if [[ "${status}" != "401" ]] || ! jq -e '.error == "invalid_grant"' <<<"${body}" >/dev/null; then
-        log_error "${name} was not rejected as invalid_grant (HTTP ${status})"
+    if [[ "${status}" != "${expected_status}" ]] || \
+        ! jq -e --arg error "${expected_error}" '.error == $error' <<<"${body}" >/dev/null; then
+        log_error "${name} returned HTTP ${status}, expected ${expected_status} ${expected_error}"
         return 1
     fi
     log_success "${name} was rejected"
@@ -323,7 +325,8 @@ assert_full_aggregates() {
 main() {
     local script_started=${SECONDS} setup_started=${SECONDS} stage_started
     local k1_token k2_token k1_subject k2_subject k2_spire_subject k1_spire_id k2_spire_id
-    local k1_spire_svid k2_spire_svid
+    local k1_spire_svid k2_spire_svid generic_svid generic_token duplicate_svid
+    local generic_path="Cluster/Cluster-1/namespace/team-a/workload/api"
     local local_k1_token local_k2_token expected
 
     validate_context_exists "${K1_CONTEXT}"
@@ -384,12 +387,26 @@ main() {
         "${K1_IDENTITY_KEYS_URL}" "${k2_spire_svid}"
     assert_exchange_rejects "k1 SPIRE JWT-SVID at k2 DSX Identity Keys" \
         "${K2_IDENTITY_KEYS_URL}" "${k1_spire_svid}"
+    generic_svid=$(fetch_spire_jwt_svid \
+        "${K2_CONTEXT}" "${K2_SPIRE_POD}" \
+        "spiffe://${K2_TRUST_DOMAIN}/tenant/${OPERATOR_TENANT}/service/identity-probe/${generic_path}" \
+        "${AUDIENCE}" generic-path "${K2_SPIRE_NAMESPACE}")
+    generic_token=$(exchange_spire_svid "${K2_IDENTITY_KEYS_URL}" "${generic_svid}")
+    assert_token_contract "generic path exchange" "${generic_token}" \
+        "spiffe://${OPERATOR_TENANT}.ds9.identity-probe.nvid.id/${generic_path}"
+    duplicate_svid=$(fetch_spire_jwt_svid \
+        "${K2_CONTEXT}" "${K2_SPIRE_POD}" \
+        "spiffe://${K2_TRUST_DOMAIN}/tenant/${OPERATOR_TENANT}/service/identity-probe/cluster/cluster-1/namespace/team-a/namespace/team-b" \
+        "${AUDIENCE}" duplicate-path-key "${K2_SPIRE_NAMESPACE}")
+    assert_exchange_rejects "duplicate path key" \
+        "${K2_IDENTITY_KEYS_URL}" "${duplicate_svid}" 400 invalid_request
     log_timing "local exchange and shard rejection" "${stage_started}"
 
     stage_started=${SECONDS}
     expected=$(jq -cn --arg k1 "${K1_ORIGINAL_KID}" --arg k2 "${K2_ORIGINAL_KID}" '[$k1, $k2]')
     assert_nats_kv "${expected}"
-    assert_full_aggregates "${expected}" "${k1_token}" "${k2_token}" "${local_k1_token}" "${local_k2_token}"
+    assert_full_aggregates "${expected}" "${k1_token}" "${k2_token}" \
+        "${local_k1_token}" "${local_k2_token}" "${generic_token}"
     log_timing "NATS KV connectivity, entries, and aggregate JWKS" "${stage_started}"
 
     stage_started=${SECONDS}

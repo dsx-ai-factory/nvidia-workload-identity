@@ -411,11 +411,10 @@ admission](charts/dsx-token-fetcher/README.md) child charts.
 
 ## Identity contract
 
-DSX JWT subjects use:
+DSX JWT subjects use complete key/value pairs with unique keys:
 
 ```text
-spiffe://<tenant>.<region>.<service>.<partition>/<dpu|bm|vm>/<resource-id>
-  [/process/<name>][/role/<role>]
+spiffe://<tenant>.<region>.<service>.<partition>/<key>/<value>[/<key>/<value>...]
 spiffe://<operator-tenant>.<region>.<service>.<partition>/bm/<node-name>/pod/<pod-uuid>
   [/role/<role>]
 ```
@@ -426,20 +425,22 @@ DPU service identities use:
 spiffe://<operator-tenant>.<region>.<service>.<partition>/dpu/<serial>/dpuservice/<service-id>/namespace/<namespace>
 ```
 
-Only the resource type and resource ID have fixed parser semantics:
+Exchange preserves path keys and values exactly. For example:
 
 ```text
-spiffe://<tenant>.<region>.<service>.<partition>/<dpu|bm|vm>/<resource-id>[/...]
+local:     spiffe://<local-domain>/tenant/<tenant>/service/dsx/cluster/cluster-1/namespace/team-a/workload/api
+exchanged: spiffe://<tenant>.<region>.dsx.<partition>/cluster/cluster-1/namespace/team-a/workload/api
 ```
 
-Exchange preserves every remaining path segment without interpreting it.
+Path keys and values retain their case and order. Each segment starts with an
+ASCII letter or digit, followed by ASCII letters, digits, `.`, `_`, or `-`.
 
 Cluster-local SPIRE identities encode the same fields under the shard trust
 domain. Exchange takes the region and partition from explicit configuration,
 the tenant and service from the local subject, and preserves the resource path.
 
 ```text
-spiffe://<local-trust-domain>/tenant/<tenant>/service/<service>/<resource-type>/<resource-id>[/...]
+spiffe://<local-trust-domain>/tenant/<tenant>/service/<service>/<key>/<value>[/<key>/<value>...]
 ```
 
 | Resource | Tenant source | Subject resource path |
