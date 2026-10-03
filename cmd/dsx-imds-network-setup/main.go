@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"reflect"
 	"strings"
 	"syscall"
 	"time"
@@ -233,19 +234,28 @@ func waitForKubeVirtNetwork(ctx context.Context, nlHandle *netlink.Handle, statu
 	}
 }
 
-func findBridge(nlHandle *netlink.Handle) (netlink.Link, error) {
-	links, err := nlHandle.LinkList()
+type linkLookup interface {
+	LinkByName(string) (netlink.Link, error)
+	LinkByIndex(int) (netlink.Link, error)
+}
+
+func findBridge(nlHandle linkLookup) (netlink.Link, error) {
+	// tap0 belongs to the primary network. Other KubeVirt bridges may exist first.
+	tap, err := nlHandle.LinkByName(defaultTapIfName)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("finding primary tap: %w", err)
 	}
-
-	for _, link := range links {
-		if link.Type() == "bridge" && strings.HasPrefix(link.Attrs().Name, bridgePrefix) {
-			return link, nil
-		}
+	if tap.Attrs().MasterIndex == 0 {
+		return nil, fmt.Errorf("%s is not attached to a bridge", defaultTapIfName)
 	}
-
-	return nil, fmt.Errorf("no bridge found")
+	bridge, err := nlHandle.LinkByIndex(tap.Attrs().MasterIndex)
+	if err != nil {
+		return nil, fmt.Errorf("finding primary tap bridge: %w", err)
+	}
+	if bridge.Type() != "bridge" || !strings.HasPrefix(bridge.Attrs().Name, bridgePrefix) {
+		return nil, fmt.Errorf("%s is not attached to a KubeVirt bridge", defaultTapIfName)
+	}
+	return bridge, nil
 }
 
 // createVethPair creates a virtual ethernet pair for IMDS connectivity.
@@ -370,37 +380,20 @@ func nftAddChain(conn *nftables.Conn, table *nftables.Table) (*nftables.Chain, e
 	return chain, nil
 }
 
+type nftRules interface {
+	GetRules(*nftables.Table, *nftables.Chain) ([]*nftables.Rule, error)
+	AddRule(*nftables.Rule) *nftables.Rule
+	ReplaceRule(*nftables.Rule) *nftables.Rule
+	DelRule(*nftables.Rule) error
+	Flush() error
+}
+
 // nftAddIMDSRule adds the MAC rewrite rule for IMDS traffic.
 // Equivalent to: nft add rule bridge nat PREROUTING ip daddr 169.254.169.254 ether daddr set <mac>
-func nftAddIMDSRule(conn *nftables.Conn, table *nftables.Table, chain *nftables.Chain, vethMAC net.HardwareAddr) error {
+func nftAddIMDSRule(conn nftRules, table *nftables.Table, chain *nftables.Chain, vethMAC net.HardwareAddr) error {
 	imdsIPParsed := net.ParseIP(imdsIP).To4()
 	if imdsIPParsed == nil {
 		return fmt.Errorf("invalid IMDS IP: %s", imdsIP)
-	}
-
-	// Check if rule already exists
-	chains, err := conn.ListChainsOfTableFamily(nftables.TableFamilyBridge)
-	if err != nil {
-		return fmt.Errorf("listing chains: %w", err)
-	}
-	for _, existingChain := range chains {
-		if existingChain.Name != "PREROUTING" || existingChain.Table.Name != "nat" {
-			continue
-		}
-		rules, err := conn.GetRules(table, existingChain)
-		if err != nil {
-			return fmt.Errorf("getting rules: %w", err)
-		}
-		for _, rule := range rules {
-			for _, candidate := range rule.Exprs {
-				comparison, ok := candidate.(*expr.Cmp)
-				if ok && bytes.Equal(comparison.Data, imdsIPParsed) {
-					slog.Debug("nftables rule already exists", "dst_ip", imdsIP)
-					return nil
-				}
-			}
-		}
-		break
 	}
 
 	// Add the rule - matching shell command bytecode exactly:
@@ -410,7 +403,7 @@ func nftAddIMDSRule(conn *nftables.Conn, table *nftables.Table, chain *nftables.
 	// [ cmp eq reg 1 <imdsIP> ]
 	// [ immediate reg 1 <mac> ]
 	// [ payload write reg 1 => 6b @ link header + 0 ]
-	conn.AddRule(&nftables.Rule{
+	rule := &nftables.Rule{
 		Table: table,
 		Chain: chain,
 		Exprs: []expr.Any{
@@ -452,10 +445,44 @@ func nftAddIMDSRule(conn *nftables.Conn, table *nftables.Table, chain *nftables.
 				Len:            ethAddrLen,
 			},
 		},
-	})
+	}
+
+	rules, err := conn.GetRules(table, chain)
+	if err != nil {
+		return fmt.Errorf("getting IMDS chain rules: %w", err)
+	}
+	matched := false
+	for _, existing := range rules {
+		// Match our complete IPv4 destination test and MAC write. A comparison
+		// to the IMDS address alone may belong to another rule in this chain.
+		if len(existing.Exprs) != len(rule.Exprs) ||
+			!reflect.DeepEqual(existing.Exprs[:4], rule.Exprs[:4]) ||
+			!reflect.DeepEqual(existing.Exprs[5:], rule.Exprs[5:]) {
+			continue
+		}
+		rewrite, ok := existing.Exprs[4].(*expr.Immediate)
+		if !ok || rewrite.Register != 1 || len(rewrite.Data) != ethAddrLen {
+			continue
+		}
+		if matched {
+			if err := conn.DelRule(existing); err != nil {
+				return fmt.Errorf("removing duplicate IMDS rule: %w", err)
+			}
+			continue
+		}
+		matched = true
+		if !bytes.Equal(rewrite.Data, vethMAC) {
+			// Recreating the veth changes its MAC. Replace the stale rule in place.
+			existing.Exprs = rule.Exprs
+			conn.ReplaceRule(existing)
+		}
+	}
+	if !matched {
+		conn.AddRule(rule)
+	}
 
 	if err := conn.Flush(); err != nil {
-		return fmt.Errorf("nft add rule bridge nat PREROUTING ip daddr %s ether daddr set %s: %w", imdsIP, vethMAC, err)
+		return fmt.Errorf("reconcile IMDS MAC rewrite for %s to %s: %w", imdsIP, vethMAC, err)
 	}
 	return nil
 }
