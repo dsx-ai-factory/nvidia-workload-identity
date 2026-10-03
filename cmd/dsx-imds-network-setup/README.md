@@ -103,26 +103,23 @@ setup sidecar's `/var/run/dsx-imds/pod-networks` file.
 
 ```bash
 BRIDGE=$(ip -j link show dev tap0 | jq -er '.[0].master')
-VM_NETWORK=$(python3 - <<'PYTHON'
-import ipaddress
-import json
-import re
-
-with open("/var/run/dsx-imds/pod-networks") as source:
-    primary, = (n for n in json.load(source).values() if n.get("role") == "primary")
-addresses = map(ipaddress.ip_interface, primary["ip_addresses"])
-ip, = (address.ip for address in addresses if address.version == 4)
-mac = primary["mac_address"]
-if not re.fullmatch(r"(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}", mac):
-    raise ValueError("invalid guest MAC")
-print(ip, mac)
-PYTHON
-)
+VM_NETWORK=$(jq -er '
+  "(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])" as $octet
+  | [.[] | select(.role == "primary")]
+  | if length != 1 then error("expected one primary network") else .[0] end
+  | .mac_address as $mac
+  | [.ip_addresses[] | select(contains(":") | not)]
+  | if length != 1 then error("expected one IPv4 address") else .[0] end
+  | if test("^" + $octet + "(\\." + $octet + "){3}/([0-9]|[12][0-9]|3[0-2])$")
+      and ($mac | test("^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$"))
+    then [split("/")[0], $mac] | @tsv
+    else error("invalid IPv4 CIDR or MAC") end
+' /var/run/dsx-imds/pod-networks)
 read -r VM_IP VM_MAC <<< "$VM_NETWORK"
 ```
 
 `BRIDGE` is the KubeVirt primary bridge. Extraction requires one primary OVN
-entry, valid CIDRs, one IPv4 address, and a six-byte MAC. It preserves the IPv4
+entry, one valid IPv4 CIDR, and a six-byte MAC. It preserves the IPv4
 host bits and stops on invalid or ambiguous data.
 
 ### Create the veth path
