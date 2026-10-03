@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"reflect"
 	"strings"
 	"syscall"
 	"time"
@@ -26,13 +28,13 @@ import (
 )
 
 const (
-	imdsIP            = "169.254.169.254"
-	vethVMSide        = "imds-vm"  // max 15 chars for ifname
-	vethContainerSide = "imds-ctr" // max 15 chars for ifname
-	bridgePrefix      = "k6t-"
-	defaultUDNIfName  = "eth0"
-	defaultTapIfName  = "tap0"
-	metaCIDR          = "169.254.169.254/32"
+	imdsIP                 = "169.254.169.254"
+	vethVMSide             = "imds-vm"  // max 15 chars for ifname
+	vethContainerSide      = "imds-ctr" // max 15 chars for ifname
+	bridgePrefix           = "k6t-"
+	defaultPodNetworksFile = "/var/run/dsx-imds/pod-networks"
+	defaultTapIfName       = "tap0"
+	metaCIDR               = "169.254.169.254/32"
 
 	// IPv4 header offsets (RFC 791)
 	ipv4DstAddrOffset = 16 // Destination IP address offset in IPv4 header
@@ -44,13 +46,13 @@ const (
 )
 
 var (
-	logLevel  slog.Level
-	udnIfName *string
+	logLevel        slog.Level
+	podNetworksFile *string
 )
 
 func runCommand() (runErr error) {
 	flag.TextVar(&logLevel, "log-level", slog.LevelInfo, "log level (debug, info, warn, error)")
-	udnIfName = flag.String("udn-if-name", defaultUDNIfName, "UDN interface name")
+	podNetworksFile = flag.String("pod-networks-file", defaultPodNetworksFile, "Downward API OVN pod-networks file")
 	flag.Parse()
 
 	sdk, err := telemetry.Setup(context.Background(), "dsx-imds-network-setup", os.Stdout, logLevel)
@@ -114,12 +116,11 @@ func setupPodNetwork(ctx context.Context) error {
 	}
 	defer nlHandle.Close()
 
-	// Wait until KubeVirt finishes moving the pod interface and creating the
-	// bridge, tap, and replacement interface. Mutating the namespace before the
-	// replacement interface has its address can interrupt KubeVirt's netlink
-	// address dump and make VMI startup fail.
+	// bridge uses DHCP, while l2bridge/managedTap needs guest network configuration.
+	// Both hand the CNI link to a bridge and tap, then leave a dummy behind.
+	// Wait for QEMU to open the tap, then read guest IP/MAC from OVN.
 	slog.Debug("Waiting for KubeVirt network", "bridge_prefix", bridgePrefix)
-	bridgeLink, vmIP, vmMAC, err := waitForKubeVirtNetwork(ctx, nlHandle)
+	bridgeLink, vmIP, vmMAC, err := waitForKubeVirtNetwork(ctx, nlHandle, *podNetworksFile)
 	if err != nil {
 		return fmt.Errorf("waiting for KubeVirt network: %w", err)
 	}
@@ -170,7 +171,8 @@ func setupPodNetwork(ctx context.Context) error {
 		return err
 	}
 
-	// Add neighbor entry for VM MAC
+	// Use the OVN allocation MAC for deterministic replies without ARP.
+	// Supported guests retain this MAC rather than overriding it in the VMI.
 	if err := addVMNeighbor(nlHandle, vethCtr, vmIP, vmMAC); err != nil {
 		return err
 	}
@@ -178,49 +180,83 @@ func setupPodNetwork(ctx context.Context) error {
 	return nil
 }
 
-func waitForKubeVirtNetwork(ctx context.Context, nlHandle *netlink.Handle) (netlink.Link, net.IP, net.HardwareAddr, error) {
+func waitForKubeVirtNetwork(ctx context.Context, nlHandle *netlink.Handle, statusFile string) (netlink.Link, net.IP, net.HardwareAddr, error) {
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
+	lastErr := errors.New("KubeVirt network is not ready")
 
 	for {
 		select {
 		case <-ctx.Done():
 			if ctx.Err() == context.DeadlineExceeded {
-				return nil, nil, nil, fmt.Errorf("timeout waiting for KubeVirt network")
+				return nil, nil, nil, fmt.Errorf("timeout waiting for KubeVirt network: %w", lastErr)
 			}
 			return nil, nil, nil, ctx.Err()
 		case <-ticker.C:
 			bridge, err := findBridge(nlHandle)
 			if err != nil {
+				lastErr = err
 				continue
 			}
-			if _, err := nlHandle.LinkByName(defaultTapIfName); err != nil {
+			tap, err := nlHandle.LinkByName(defaultTapIfName)
+			if err != nil {
+				lastErr = err
 				continue
 			}
-			vmIP, vmMAC, err := getInterfaceIPv4AndMAC(*udnIfName)
+			if tap.Attrs().MasterIndex != bridge.Attrs().Index {
+				lastErr = fmt.Errorf("%s is not attached to %s", defaultTapIfName, bridge.Attrs().Name)
+				continue
+			}
+			ifaceName := strings.TrimPrefix(bridge.Attrs().Name, bridgePrefix)
+			iface, err := nlHandle.LinkByName(ifaceName)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			if iface.Type() != "dummy" {
+				lastErr = fmt.Errorf("waiting for KubeVirt to replace %s", ifaceName)
+				continue
+			}
+			// The dummy appears before KubeVirt finishes its address updates.
+			// Carrier returns when QEMU opens the persistent tap after that setup.
+			if tap.Attrs().RawFlags&unix.IFF_LOWER_UP == 0 {
+				lastErr = fmt.Errorf("waiting for guest to open %s", defaultTapIfName)
+				continue
+			}
+			vmIP, vmMAC, err := readVMNetwork(statusFile)
 			if err == nil {
 				return bridge, vmIP, vmMAC, nil
 			}
+			lastErr = err
 		}
 	}
 }
 
-func findBridge(nlHandle *netlink.Handle) (netlink.Link, error) {
-	links, err := nlHandle.LinkList()
+type linkLookup interface {
+	LinkByName(string) (netlink.Link, error)
+	LinkByIndex(int) (netlink.Link, error)
+}
+
+func findBridge(nlHandle linkLookup) (netlink.Link, error) {
+	// tap0 belongs to the primary network. Other KubeVirt bridges may exist first.
+	tap, err := nlHandle.LinkByName(defaultTapIfName)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("finding primary tap: %w", err)
 	}
-
-	for _, link := range links {
-		if link.Type() == "bridge" && strings.HasPrefix(link.Attrs().Name, bridgePrefix) {
-			return link, nil
-		}
+	if tap.Attrs().MasterIndex == 0 {
+		return nil, fmt.Errorf("%s is not attached to a bridge", defaultTapIfName)
 	}
-
-	return nil, fmt.Errorf("no bridge found")
+	bridge, err := nlHandle.LinkByIndex(tap.Attrs().MasterIndex)
+	if err != nil {
+		return nil, fmt.Errorf("finding primary tap bridge: %w", err)
+	}
+	if bridge.Type() != "bridge" || !strings.HasPrefix(bridge.Attrs().Name, bridgePrefix) {
+		return nil, fmt.Errorf("%s is not attached to a KubeVirt bridge", defaultTapIfName)
+	}
+	return bridge, nil
 }
 
 // createVethPair creates a virtual ethernet pair for IMDS connectivity.
@@ -345,37 +381,20 @@ func nftAddChain(conn *nftables.Conn, table *nftables.Table) (*nftables.Chain, e
 	return chain, nil
 }
 
+type nftRules interface {
+	GetRules(*nftables.Table, *nftables.Chain) ([]*nftables.Rule, error)
+	AddRule(*nftables.Rule) *nftables.Rule
+	ReplaceRule(*nftables.Rule) *nftables.Rule
+	DelRule(*nftables.Rule) error
+	Flush() error
+}
+
 // nftAddIMDSRule adds the MAC rewrite rule for IMDS traffic.
 // Equivalent to: nft add rule bridge nat PREROUTING ip daddr 169.254.169.254 ether daddr set <mac>
-func nftAddIMDSRule(conn *nftables.Conn, table *nftables.Table, chain *nftables.Chain, vethMAC net.HardwareAddr) error {
+func nftAddIMDSRule(conn nftRules, table *nftables.Table, chain *nftables.Chain, vethMAC net.HardwareAddr) error {
 	imdsIPParsed := net.ParseIP(imdsIP).To4()
 	if imdsIPParsed == nil {
 		return fmt.Errorf("invalid IMDS IP: %s", imdsIP)
-	}
-
-	// Check if rule already exists
-	chains, err := conn.ListChainsOfTableFamily(nftables.TableFamilyBridge)
-	if err != nil {
-		return fmt.Errorf("listing chains: %w", err)
-	}
-	for _, existingChain := range chains {
-		if existingChain.Name != "PREROUTING" || existingChain.Table.Name != "nat" {
-			continue
-		}
-		rules, err := conn.GetRules(table, existingChain)
-		if err != nil {
-			return fmt.Errorf("getting rules: %w", err)
-		}
-		for _, rule := range rules {
-			for _, candidate := range rule.Exprs {
-				comparison, ok := candidate.(*expr.Cmp)
-				if ok && bytes.Equal(comparison.Data, imdsIPParsed) {
-					slog.Debug("nftables rule already exists", "dst_ip", imdsIP)
-					return nil
-				}
-			}
-		}
-		break
 	}
 
 	// Add the rule - matching shell command bytecode exactly:
@@ -385,7 +404,7 @@ func nftAddIMDSRule(conn *nftables.Conn, table *nftables.Table, chain *nftables.
 	// [ cmp eq reg 1 <imdsIP> ]
 	// [ immediate reg 1 <mac> ]
 	// [ payload write reg 1 => 6b @ link header + 0 ]
-	conn.AddRule(&nftables.Rule{
+	rule := &nftables.Rule{
 		Table: table,
 		Chain: chain,
 		Exprs: []expr.Any{
@@ -427,39 +446,100 @@ func nftAddIMDSRule(conn *nftables.Conn, table *nftables.Table, chain *nftables.
 				Len:            ethAddrLen,
 			},
 		},
-	})
+	}
+
+	rules, err := conn.GetRules(table, chain)
+	if err != nil {
+		return fmt.Errorf("getting IMDS chain rules: %w", err)
+	}
+	matched := false
+	for _, existing := range rules {
+		// Match our complete IPv4 destination test and MAC write. A comparison
+		// to the IMDS address alone may belong to another rule in this chain.
+		if len(existing.Exprs) != len(rule.Exprs) ||
+			!reflect.DeepEqual(existing.Exprs[:4], rule.Exprs[:4]) ||
+			!reflect.DeepEqual(existing.Exprs[5:], rule.Exprs[5:]) {
+			continue
+		}
+		rewrite, ok := existing.Exprs[4].(*expr.Immediate)
+		if !ok || rewrite.Register != 1 || len(rewrite.Data) != ethAddrLen {
+			continue
+		}
+		if matched {
+			if err := conn.DelRule(existing); err != nil {
+				return fmt.Errorf("removing duplicate IMDS rule: %w", err)
+			}
+			continue
+		}
+		matched = true
+		if !bytes.Equal(rewrite.Data, vethMAC) {
+			// Recreating the veth changes its MAC. Replace the stale rule in place.
+			existing.Exprs = rule.Exprs
+			conn.ReplaceRule(existing)
+		}
+	}
+	if !matched {
+		conn.AddRule(rule)
+	}
 
 	if err := conn.Flush(); err != nil {
-		return fmt.Errorf("nft add rule bridge nat PREROUTING ip daddr %s ether daddr set %s: %w", imdsIP, vethMAC, err)
+		return fmt.Errorf("reconcile IMDS MAC rewrite for %s to %s: %w", imdsIP, vethMAC, err)
 	}
 	return nil
 }
 
-// getInterfaceIPv4AndMAC gets the IPv4 address and MAC address of an interface.
-func getInterfaceIPv4AndMAC(ifname string) (net.IP, net.HardwareAddr, error) {
-	iface, err := net.InterfaceByName(ifname)
+// tap0 attaches the primary network. OVN preserves its allocation across
+// KubeVirt's handoff, including when eth0 belongs to the infrastructure network.
+func readVMNetwork(path string) (net.IP, net.HardwareAddr, error) {
+	file, err := os.Open(path)
 	if err != nil {
-		return nil, nil, fmt.Errorf("getting interface %q: %w", ifname, err)
+		return nil, nil, fmt.Errorf("open OVN pod networks: %w", err)
 	}
-	addrs, err := iface.Addrs()
-	if err != nil {
-		return nil, nil, fmt.Errorf("listing addresses for %q: %w", ifname, err)
+	defer file.Close()
+
+	var networks map[string]struct {
+		Role string   `json:"role"`
+		IPs  []string `json:"ip_addresses"`
+		MAC  string   `json:"mac_address"`
 	}
-	for _, a := range addrs {
-		ipNet, ok := a.(*net.IPNet)
-		if !ok || ipNet.IP == nil {
+	if err := json.NewDecoder(file).Decode(&networks); err != nil {
+		return nil, nil, fmt.Errorf("decode OVN pod networks: %w", err)
+	}
+	var vmIP net.IP
+	var vmMAC net.HardwareAddr
+	matched := false
+	for name, network := range networks {
+		if network.Role != "primary" {
 			continue
 		}
-		ip4 := ipNet.IP.To4()
-		if ip4 == nil {
-			continue
+		if matched {
+			return nil, nil, fmt.Errorf("multiple primary OVN networks")
 		}
-		if len(iface.HardwareAddr) != 6 {
-			return nil, nil, fmt.Errorf("unexpected MAC for %q: %q", ifname, iface.HardwareAddr.String())
+		matched = true
+		vmMAC, err = net.ParseMAC(network.MAC)
+		if err != nil {
+			return nil, nil, fmt.Errorf("parse guest MAC for %s: %w", name, err)
 		}
-		return ip4, iface.HardwareAddr, nil
+		if len(vmMAC) != 6 {
+			return nil, nil, fmt.Errorf("invalid guest MAC %q for %s", network.MAC, name)
+		}
+		for _, address := range network.IPs {
+			ip, _, err := net.ParseCIDR(address)
+			if err != nil {
+				return nil, nil, fmt.Errorf("parse guest CIDR %q for %s: %w", address, name, err)
+			}
+			if ipv4 := ip.To4(); ipv4 != nil {
+				if vmIP != nil {
+					return nil, nil, fmt.Errorf("multiple guest IPv4 addresses for %s", name)
+				}
+				vmIP = ipv4
+			}
+		}
 	}
-	return nil, nil, fmt.Errorf("no IPv4 address found on %q", ifname)
+	if vmIP == nil {
+		return nil, nil, fmt.Errorf("no guest IPv4 address in primary OVN network")
+	}
+	return vmIP, vmMAC, nil
 }
 
 // deleteLocalRouteForIP deletes the local route for an IP address.

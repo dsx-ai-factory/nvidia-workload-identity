@@ -241,12 +241,14 @@ vmSupport:
     registrar:
       requests: {cpu: 10m, memory: 16Mi}
       limits: {cpu: 50m, memory: 32Mi}
+    # Injected sidecars need equal requests and limits to preserve Guaranteed
+    # QoS, which KubeVirt requires for VMs with dedicated CPU placement.
     metadata:
       requests: {cpu: 50m, memory: 64Mi}
-      limits: {cpu: 100m, memory: 128Mi}
+      limits: {cpu: 50m, memory: 64Mi}
     networkSetup:
       requests: {cpu: 10m, memory: 32Mi}
-      limits: {cpu: 100m, memory: 64Mi}
+      limits: {cpu: 10m, memory: 32Mi}
   policy:
     annotation: spiffe.nvidia.com/inject-dsx-imds
     podSelector:

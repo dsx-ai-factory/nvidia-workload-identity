@@ -8,50 +8,119 @@ The KubeVirt VM connects through a tap interface and a `k6t-*` Linux bridge in
 the `virt-launcher` Pod. The metadata-service shares the Pod network namespace,
 but it is not a port on that bridge. Assigning the IMDS address in the namespace
 is therefore insufficient. Requests carry the default gateway MAC and would
-leave through the bridge uplink. Replies also conflict with the local route for
-the VM IP that OVN-Kubernetes leaves on the bridged UDN interface.
+leave through the bridge uplink. Replies can also conflict with a local route
+when the replacement UDN interface retains the VM IP.
 
 The program creates a veth path from the bridge to the metadata-service,
 redirects IMDS request frames into that path, and installs an explicit return
 path to the VM.
 
-```mermaid
-flowchart LR
-    VM["KubeVirt VM"] -->|"request to 169.254.169.254"| Tap["virt-launcher Pod tap interface"]
-    Tap --> Bridge["virt-launcher Pod Linux bridge"]
-    Bridge -->|"nftables destination MAC rewrite"| Veth["imds-vm and imds-ctr veth pair"]
-    Veth --> Metadata["DSX IMDS sidecar"]
-    Metadata -->|"reply route and neighbor entry"| Veth
-    Veth --> Bridge
-    Bridge --> Tap
-    Tap --> VM
+## Chart integration
+
+Enable `vmSupport` in the [identity chart](../../charts/dsx-identity/README.md).
+Its admission policy injects the network setup and metadata-service sidecars
+into KubeVirt launcher Pods whose VM template has this annotation:
+
+```yaml
+spec:
+  template:
+    metadata:
+      annotations:
+        spiffe.nvidia.com/inject-dsx-imds: "true"
 ```
 
-The command waits up to 60 seconds for the first Linux bridge whose name starts
-with `k6t-`, the primary `tap0` interface, and the replacement UDN interface
-with its IPv4 address. These conditions show that KubeVirt has finished its
-network namespace changes. The command then applies the changes below and
-remains running until it receives `SIGINT` or `SIGTERM`.
+The chart mounts OVN pod-networks through the Downward API. The network setup
+container runs as root with `NET_ADMIN` in the launcher network namespace.
+KubeVirt creates the guest bridge and tap. This sidecar adds only the IMDS path.
+Injection is defined in `charts/dsx-identity/templates/vm-injection-policy.yaml`.
+
+## Network layout
+
+```mermaid
+flowchart LR
+    Guest["VM guest<br/>CNI-assigned IP/MAC"] <--> Tap["tap0"]
+    Tap <--> Bridge["k6t-* bridge"]
+    Bridge <--> Veth["imds-vm / imds-ctr"]
+    Veth <--> Metadata["metadata-service sidecar<br/>169.254.169.254"]
+    UDN["Primary layer-3 UDN"] <--> Uplink["CNI uplink"]
+    Uplink <--> Bridge
+
+    DHCP["bridge: KubeVirt DHCP"] -.-> Guest
+    CloudInit["l2bridge / managedTap:<br/>cloud-init network setup"] -.-> Guest
+    Status["OVN pod-networks<br/>primary guest IPv4 + MAC"] -.-> File["Downward API file"]
+    File -.-> Setup["network setup sidecar"]
+    Setup -.->|"guest /32 reply route + MAC neighbor"| Veth
+    Setup -.->|"IMDS MAC rewrite"| Bridge
+```
+
+Each VM uses one guest configuration branch. The tap, bridge, uplink, veth, and
+both sidecars share the virt-launcher Pod network namespace. Solid arrows carry
+packets. Dotted arrows configure networking. The Downward API supplies the
+guest address for the reply route and the guest MAC for its neighbor entry.
+
+## VM bindings
+
+- Built-in `bridge` moves the CNI link behind a Linux bridge and tap. KubeVirt
+  supplies DHCP so the guest receives the CNI-assigned address.
+- `l2bridge` uses KubeVirt's `managedTap` attachment for the same Ethernet path.
+  It supplies no DHCP server. Cloud-init or another guest network setup path
+  configures the CNI-assigned address and gateway on the matching guest MAC.
+
+These are VM interface bindings. Both can use an OVN-Kubernetes layer-3 UDN.
+Both replace the original CNI interface with a dummy. Its current address and
+MAC need not identify the guest, and a separate `eth0` can belong to the
+infrastructure network.
+
+The command waits up to 60 seconds for the `k6t-*` bridge, its `tap0` port, and
+KubeVirt's replacement dummy interface. It also waits for tap carrier, which
+returns when QEMU opens the tap after network preparation. The dummy alone
+appears before address updates finish. This ordering keeps IMDS route changes
+out of KubeVirt's network handoff.
+
+The Downward API file supplies the guest IPv4 reply destination and MAC. The
+sidecar uses them for the guest `/32` route and permanent neighbor entry. It
+reads the single entry with `role: primary` in OVN's `pod-networks` annotation,
+which describes the network attached to `tap0`. Infrastructure and secondary
+entries are excluded. The chart mounts
+`metadata.annotations['k8s.ovn.org/pod-networks']` through the Downward API at
+`/var/run/dsx-imds/pod-networks`. The mount receives annotation updates
+and needs no Kubernetes API credentials. Discovery fails if the primary
+entry is missing or ambiguous, or its IPv4 CIDR or MAC is invalid. OVN must
+publish the primary network role and allocation for both bindings.
+
+The guest must use the MAC in that allocation. Set any VMI `macAddress` to the
+same value or leave it unset. A different guest MAC is unsupported because
+IMDS replies use a permanent neighbor entry, bypassing ARP resolution.
+
+The process stays alive after setup until shutdown.
 
 ## Manual reproduction
 
-Run these commands as root in the same network namespace as the
-`metadata-service` sidecar. Set `UDN_IF` to the value passed through
-`--udn-if-name`.
+Run as root in the launcher Pod network namespace, with access to the network
+setup sidecar's `/var/run/dsx-imds/pod-networks` file.
 
 ### Identify the KubeVirt interfaces
 
 ```bash
-UDN_IF=eth0
-BRIDGE=$(ip -o link show type bridge | awk -F': ' '$2 ~ /^k6t-/ { print $2; exit }')
-VM_CIDR=$(ip -4 -o addr show dev "$UDN_IF" | awk 'NR == 1 { print $4 }')
-VM_IP=${VM_CIDR%/*}
-VM_MAC=$(cat "/sys/class/net/${UDN_IF}/address")
+BRIDGE=$(ip -j link show dev tap0 | jq -er '.[0].master')
+VM_NETWORK=$(jq -er '
+  "(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])" as $octet
+  | [.[] | select(.role == "primary")]
+  | if length != 1 then error("expected one primary network") else .[0] end
+  | .mac_address as $mac
+  | [.ip_addresses[] | select(contains(":") | not)]
+  | if length != 1 then error("expected one IPv4 address") else .[0] end
+  | if test("^" + $octet + "(\\." + $octet + "){3}/([0-9]|[12][0-9]|3[0-2])$")
+      and ($mac | test("^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$"))
+    then [split("/")[0], $mac] | @tsv
+    else error("invalid IPv4 CIDR or MAC") end
+' /var/run/dsx-imds/pod-networks)
+read -r VM_IP VM_MAC <<< "$VM_NETWORK"
 ```
 
-`BRIDGE` is the KubeVirt bridge. `VM_IP` and `VM_MAC` are the first IPv4
-address and the hardware address on the UDN interface, matching the values read
-by the Go command.
+`BRIDGE` is the KubeVirt primary bridge. Extraction requires one primary OVN
+entry, one valid IPv4 CIDR, and a six-byte MAC. It preserves the IPv4
+host bits and stops on invalid or ambiguous data.
 
 ### Create the veth path
 
@@ -62,10 +131,8 @@ ip link set imds-vm up
 ip link set imds-ctr up
 ```
 
-`imds-vm` is the bridge-facing end. Attaching it to the KubeVirt bridge gives
-the bridge a port for IMDS frames. `imds-ctr` is the metadata-service end in the
-same network namespace. Enabling both ends allows frames to cross the pair. The
-Go command reuses the pair when it already exists.
+`imds-vm` joins the KubeVirt bridge. Its peer, `imds-ctr`, delivers frames to
+metadata-service. The command reuses an existing pair.
 
 ### Assign the IMDS address
 
@@ -73,10 +140,7 @@ Go command reuses the pair when it already exists.
 ip addr replace 169.254.169.254/32 dev imds-ctr
 ```
 
-This assigns the IMDS address to the container-facing end of the veth pair.
-The metadata-service listening on port 80 can then accept packets delivered to
-that address. `replace` matches the netlink address replacement used by the
-command.
+Metadata-service listens on port 80 at this address.
 
 ### Redirect request frames
 
@@ -97,27 +161,16 @@ destination and replaces the gateway MAC with the `imds-ctr` MAC. The bridge
 then forwards the frame through `imds-vm`, and the peer delivers it on
 `imds-ctr` to the metadata-service.
 
-The rule uses names instead of unexplained packet constants:
-
-- `ip daddr` selects IPv4 EtherType `0x0800`, then reads the four-byte IPv4
-  destination address at byte offset 16 of the IPv4 header.
-- `ether daddr set` writes the six-byte Ethernet destination MAC at byte offset
-  0 of the Ethernet header.
-- `dstnat` names the destination NAT chain priority.
-
-These are the same protocol value, offsets, and field widths encoded by the Go
-nftables expressions.
-
 ### Remove the conflicting local route
 
 ```bash
+# Delete only when this local route exists.
 ip route del local "$VM_IP" table local
 ```
 
-OVN-Kubernetes assigns the VM IP to the bridged UDN interface in the
-`virt-launcher` namespace. This creates a local-table route that makes the
-kernel treat the VM IP as local. A metadata-service reply to that IP would
-terminate in the Pod namespace instead of crossing the bridge to the VM.
+If the replacement interface retains the VM IP, it has a local-table route that
+makes the kernel treat the VM IP as local. A metadata-service reply to that IP
+would terminate in the Pod namespace instead of crossing the bridge to the VM.
 
 Deleting only the local-table route preserves the UDN interface address while
 allowing the explicit route below to control replies.
@@ -140,7 +193,7 @@ ip neigh replace "$VM_IP" lladdr "$VM_MAC" dev imds-ctr nud permanent
 
 The host route is directly connected, so the kernel still needs a destination
 MAC before it can create each Ethernet reply frame. The permanent neighbor
-entry supplies the actual VM MAC read from the UDN interface and avoids ARP on
+entry supplies the guest MAC from OVN pod-networks and avoids ARP on
 the point-to-point veth path.
 
 ## Packet flow
@@ -158,32 +211,19 @@ following the gateway MAC to the bridge uplink.
 Reply path:
 
 ```text
-DSX IMDS sidecar -> imds-ctr -> VM /32 route and permanent neighbor
+DSX IMDS sidecar -> VM /32 route and permanent neighbor -> imds-ctr
   -> imds-vm -> KubeVirt bridge -> tap interface -> KubeVirt VM
 ```
 
 The local-route deletion allows the `/32` route to win. The route chooses the
 veth path and the neighbor entry supplies the VM MAC used by the bridge.
 
-The identity chart injects the sidecar through
-`charts/dsx-identity/templates/vm-support.yaml`.
-
 ## Flags
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
-| `--udn-if-name` | `eth0` | OVN-Kubernetes UDN interface carrying the VM IPv4 address |
+| `--pod-networks-file` | `/var/run/dsx-imds/pod-networks` | Downward API file containing OVN pod-networks |
 | `--log-level` | `info` | JSON log level: `debug`, `info`, `warn`, or `error` |
 
-The container must run as root with `NET_ADMIN` in the `virt-launcher` Pod
-network namespace. Linux netlink, bridge nftables, an OVN-Kubernetes layer-3
-UDN, and the KubeVirt bridge are runtime dependencies.
-
-## Testing
-
-```bash
-go test ./cmd/dsx-imds-network-setup
-```
-
-The focused tests cover setup completion, setup failure, and cancellation. The
-KubeVirt E2E path validates the resulting VM request flow.
+Linux netlink, bridge nftables, an OVN-Kubernetes layer-3 UDN, and the KubeVirt
+bridge are runtime dependencies.

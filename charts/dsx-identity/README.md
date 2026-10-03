@@ -147,6 +147,12 @@ dpuService:
   identityKeysURL: https://identity-keys.shard.example.com/v1/exchange
 ```
 
+`vmSupport.resources.networkSetup` and `vmSupport.resources.metadata` configure
+the injected VM sidecars. Defaults are `10m` CPU / `32Mi` memory for network
+setup and `50m` / `64Mi` for metadata-service. Set both `requests` and `limits`
+when overriding them. Equal CPU and memory requests and limits preserve the
+Guaranteed QoS required for dedicated CPU placement.
+
 Each Pod selected for token-fetcher injection must set both
 `spiffe.nvidia.com/inject-dsx-token-fetcher: "true"` and its relying-party
 audience in `spiffe.nvidia.com/token-audience`. The

@@ -56,6 +56,7 @@ spec:
               name: vm-service-account
           interfaces:
             - name: default
+              # Built-in bridge supplies DHCP for the CNI-assigned guest address.
               bridge: {}
         features:
           acpi:
@@ -130,9 +131,11 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
-              kubectl wait --for=create pod -l kubevirt.io=virt-launcher --timeout=300s
-              uid=$(kubectl get pod -l kubevirt.io=virt-launcher -o jsonpath='{.items[0].metadata.uid}')
-              kubectl patch virtualinstance e2e-debian-vm --subresource=status --type=merge -p "{\"status\":{\"pod_uid\":\"$uid\"}}"
+              for vm in e2e-debian-vm e2e-debian-vm-l2bridge; do
+                kubectl wait --for=create pod -l "kubevirt.io/domain=$vm" --timeout=300s
+                uid=$(kubectl get pod -l "kubevirt.io/domain=$vm" -o jsonpath='{.items[0].metadata.uid}')
+                kubectl patch virtualinstance "$vm" --subresource=status --type=merge -p "{\"status\":{\"pod_uid\":\"$uid\"}}"
+              done
           resources:
             requests:
               cpu: 10m
