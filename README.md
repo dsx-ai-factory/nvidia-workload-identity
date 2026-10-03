@@ -707,9 +707,9 @@ through the Downward API, so it works even when the dummy has no guest IPv4.
 It installs the guest reply route and neighbor through the IMDS veth path.
 
 The l2bridge fixture registers `managedTap` in KubeVirt and enables its upstream
-cloud-init hook. An E2E-only admission policy mounts the OVN allocation into
-that hook before VM creation. The hook configures guest networking because
-`managedTap` supplies no DHCP server.
+cloud-init hook. An E2E-only admission policy projects the Pod's OVN allocation
+into that hook. The hook configures guest networking because `managedTap`
+supplies no DHCP server.
 
 For each binding, the external client SSHes to the CNI-assigned guest address,
 requests a VM identity from `169.254.169.254`, and authenticates the returned

@@ -50,8 +50,10 @@ MAC need not identify the guest, and a separate `eth0` can belong to the
 infrastructure network.
 
 The command waits up to 60 seconds for the `k6t-*` bridge, its `tap0` port, and
-KubeVirt's replacement dummy interface before changing routes. This avoids
-interfering with KubeVirt's network handoff.
+KubeVirt's replacement dummy interface. It also waits for tap carrier, which
+returns when QEMU opens the tap after network preparation. The dummy alone
+appears before address updates finish. This ordering keeps IMDS route changes
+out of KubeVirt's network handoff.
 
 The guest IPv4 address and MAC come from the CNI `network-status` entry whose
 interface name matches the bridge name without `k6t-`. The chart mounts
@@ -60,9 +62,7 @@ API at `/var/run/dsx-imds/network-status`. The mount receives annotation updates
 and needs no Kubernetes API credentials. Discovery fails if the matching entry
 has no IPv4 address or its address or MAC is invalid or ambiguous.
 
-This works when the replacement interface has no IPv4 address or has a different
-MAC. An infrastructure interface such as `eth0` is not used when the guest's
-bridge belongs to `ovn-udn1`. The process stays alive after setup until shutdown.
+The process stays alive after setup until shutdown.
 
 ## Manual reproduction
 
@@ -195,7 +195,7 @@ The local-route deletion allows the `/32` route to win. The route chooses the
 veth path and the neighbor entry supplies the VM MAC used by the bridge.
 
 The identity chart injects the sidecar through
-`charts/dsx-identity/templates/vm-support.yaml`.
+`charts/dsx-identity/templates/vm-injection-policy.yaml`.
 
 ## Flags
 

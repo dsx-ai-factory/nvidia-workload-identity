@@ -117,7 +117,7 @@ func setupPodNetwork(ctx context.Context) error {
 
 	// bridge uses DHCP, while l2bridge/managedTap needs guest network configuration.
 	// Both hand the CNI link to a bridge and tap, then leave a dummy behind.
-	// Wait for that handoff and read guest IP/MAC from CNI, not the dummy or infra eth0.
+	// Wait for QEMU to open the tap, then read guest IP/MAC from CNI.
 	slog.Debug("Waiting for KubeVirt network", "bridge_prefix", bridgePrefix)
 	bridgeLink, vmIP, vmMAC, err := waitForKubeVirtNetwork(ctx, nlHandle, *networkStatusFile)
 	if err != nil {
@@ -216,6 +216,12 @@ func waitForKubeVirtNetwork(ctx context.Context, nlHandle *netlink.Handle, statu
 			}
 			if iface.Type() != "dummy" {
 				lastErr = fmt.Errorf("waiting for KubeVirt to replace %s", ifaceName)
+				continue
+			}
+			// The dummy appears before KubeVirt finishes its address updates.
+			// Carrier returns when QEMU opens the persistent tap after that setup.
+			if tap.Attrs().RawFlags&unix.IFF_LOWER_UP == 0 {
+				lastErr = fmt.Errorf("waiting for guest to open %s", defaultTapIfName)
 				continue
 			}
 			vmIP, vmMAC, err := readVMNetwork(statusFile, ifaceName)

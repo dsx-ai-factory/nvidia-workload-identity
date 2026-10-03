@@ -4,7 +4,7 @@ metadata:
   name: e2e-l2bridge-cloud-init
 data:
   # managedTap supplies no DHCP server. Configure the CNI-allocated guest address
-  # through KubeVirt's upstream cloud-init hook, as Launch Layer does for its VMs.
+  # through KubeVirt's upstream cloud-init hook.
   preCloudInitIso: |
     #!/usr/bin/env python3
     import argparse
