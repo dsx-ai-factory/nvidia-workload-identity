@@ -111,6 +111,15 @@ for the Transit key ring. Every loaded key must support that algorithm:
 {"active_kid":"<kid>","alg":"ES256"}
 ```
 
+Each instance watches both mounted sources with filesystem notifications and
+polls for content changes every 30 seconds. `--file-watch-poll-interval` sets
+the polling interval. Both watchers detect Kubernetes Secret symlink updates.
+Each file change validates the keyset and active-key pair. A valid pair replaces the active
+signer and local public keys without a restart and triggers NATS publication. Missing,
+malformed, or mismatched sources retain the last valid signer and keys until
+both sources validate. Invalid sources at startup prevent the process from
+starting.
+
 Rotation first adds and publishes the new key while the old kid remains active.
 Activation changes only the active-kid Secret. Removing an expired old key
 stops its lease refresh, after which it disappears from aggregate JWKS
@@ -147,6 +156,7 @@ do not expose parser or verifier details.
 | `--region` | required | Region encoded in exchanged DSX identities |
 | `--partition` | required | Partition encoded in exchanged DSX identities |
 | `--signing-keyset` | `/run/secrets/dsx-identity-keys/keyset.json` | JSON file containing private PEM keys |
+| `--file-watch-poll-interval` | `30s` | Positive interval for checking file contents when filesystem notifications are missed |
 | `--active-kid` | `/run/secrets/dsx-identity-keys-active-kid/active-kid.json` | JSON file containing the active signing `kid` and algorithm |
 | `--shard-id` | NATS enabled | Globally unique shard ID in the Event Bus subject space |
 | `--disable-nats` | `false` | Serve local public keys without NATS synchronization |
@@ -160,16 +170,3 @@ do not expose parser or verifier details.
 | `--nats-oauth-issuer-url` | OAuth2 mode | OAuth2 issuer whose discovery document advertises the token endpoint |
 | `--nats-oauth-scopes` | `nats` | Comma-separated scopes; empty requests none |
 | `--log-level` | `info` | JSON log level: `debug`, `info`, `warn`, or `error` |
-
-## Testing
-
-```bash
-go test ./cmd/dsx-identity-keys
-```
-
-The focused tests cover signing configuration, RFC 8693 behavior, flat `kid`
-aggregation, deterministic KV expiry, rotation overlap, replay after restart,
-watched updates, and every supported authentication mode. Live NATS and
-deployed aggregate checks use the
-`DSX_E2E_NATS_*` and
-`DSX_E2E_VERIFY_*` environment variables used by the E2E scripts.

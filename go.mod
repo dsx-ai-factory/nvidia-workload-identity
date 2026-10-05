@@ -5,6 +5,7 @@ go 1.26
 require (
 	github.com/container-storage-interface/spec v1.11.0
 	github.com/coreos/go-oidc/v3 v3.17.0
+	github.com/fsnotify/fsnotify v1.7.0
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/go-logr/logr v1.4.3
 	github.com/google/nftables v0.3.0
@@ -46,7 +47,6 @@ require (
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/fsnotify/fsnotify v1.7.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect

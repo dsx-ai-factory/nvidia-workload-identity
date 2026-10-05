@@ -179,17 +179,3 @@ DPU file delivery, Pod and VM identity delivery through both bindings, shard iso
 propagation, aggregate JWKS behavior, OpenBao authorization, restart recovery,
 and signing-key rotation. External DPU and standalone-host hardware is not
 modeled as Kubernetes Nodes.
-
-## Network setup tests
-
-```bash
-go test ./cmd/dsx-imds-network-setup
-```
-
-The focused tests cover guest metadata selection, invalid or ambiguous metadata,
-published annotation updates, setup completion, failure, and cancellation. They
-also cover primary bridge selection, invalid attachments, stale rule repair,
-duplicate removal, and preservation of unrelated nftables rules.
-
-The E2E suite boots one VM per binding. Each guest requests its IMDS identity
-and authenticates the returned token through OpenBao.

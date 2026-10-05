@@ -52,12 +52,3 @@ shard's source CRs through
 
 The command uses the active Kubernetes client configuration and requires the
 SPIRE CRDs plus the external source APIs.
-
-## Testing
-
-```bash
-go test ./cmd/dsx-identity-controller ./internal/identitycontroller
-```
-
-The focused tests cover DPU and LaunchLayer reconciliation, conflicts, recovery,
-invalid source handling, and cleanup.

@@ -16,8 +16,11 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go test -c -o /out/spire-svid-probe ./cmd/dsx-token-fetcher && \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go test -c -o /out/identity-keys-probe ./cmd/dsx-identity-keys
+    go test -c -o /out/identity-keys-probe ./cmd/dsx-identity-keys && \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go test -c -o /out/key-distribution-probe ./internal/keydistribution
 
 FROM ${RUNTIME_IMG}
 COPY --from=builder /out/spire-svid-probe /usr/local/bin/spire-svid-probe
 COPY --from=builder /out/identity-keys-probe /usr/local/bin/identity-keys-probe
+COPY --from=builder /out/key-distribution-probe /usr/local/bin/key-distribution-probe
