@@ -112,7 +112,7 @@ for the Transit key ring. Every loaded key must support that algorithm:
 ```
 
 Each instance watches both mounted sources with filesystem notifications and
-polls for content changes every 30 seconds. `--poll-interval` sets
+polls for content changes every 30 seconds. `--file-watch-poll-interval` sets
 the polling interval. Both watchers detect Kubernetes Secret symlink updates.
 A change to either file reloads both sources. A valid pair replaces the active
 signer and local public keys without a restart and triggers NATS publication. Missing,
@@ -156,7 +156,7 @@ do not expose parser or verifier details.
 | `--region` | required | Region encoded in exchanged DSX identities |
 | `--partition` | required | Partition encoded in exchanged DSX identities |
 | `--signing-keyset` | `/run/secrets/dsx-identity-keys/keyset.json` | JSON file containing private PEM keys |
-| `--poll-interval` | `30s` | Positive polling interval for signing source changes missed by filesystem notifications |
+| `--file-watch-poll-interval` | `30s` | Positive interval for checking file contents when filesystem notifications are missed |
 | `--active-kid` | `/run/secrets/dsx-identity-keys-active-kid/active-kid.json` | JSON file containing the active signing `kid` and algorithm |
 | `--shard-id` | NATS enabled | Globally unique shard ID in the Event Bus subject space |
 | `--disable-nats` | `false` | Serve local public keys without NATS synchronization |

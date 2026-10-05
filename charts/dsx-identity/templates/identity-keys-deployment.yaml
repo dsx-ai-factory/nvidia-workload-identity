@@ -96,7 +96,7 @@ spec:
             - --partition={{ required "global.dsx.partition is required" .Values.global.dsx.partition }}
             - --signing-keyset=/run/secrets/dsx-identity-keys/keyset.json
             - --active-kid=/run/secrets/dsx-identity-keys-active-kid/active-kid.json
-            - --poll-interval={{ .Values.identityKeys.pollInterval }}
+            - --file-watch-poll-interval={{ .Values.identityKeys.fileWatchPollInterval }}
             {{- if $natsEnabled }}
             - --shard-id={{ required "identityKeys.shardID is required" .Values.identityKeys.shardID }}
             - --nats-server={{ required "identityKeys.nats.serverURL is required" .Values.identityKeys.nats.serverURL }}
