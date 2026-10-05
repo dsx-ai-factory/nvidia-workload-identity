@@ -31,6 +31,8 @@ identityKeys:
 
 podTokenFetcher:
   identityKeysURL: http://dsx-identity-keys.dsx-identity.svc.cluster.local:8080/v1/exchange
+  # Exercise port validation without Kubernetes probe-port validation.
+  startupProbe: null
 
 vmSupport:
   enabled: true

@@ -180,6 +180,9 @@ propagation, aggregate JWKS behavior, OpenBao authorization, restart recovery,
 and signing-key rotation. External DPU and standalone-host hardware is not
 modeled as Kubernetes Nodes.
 
+k2 disables the token-fetcher startup probe. Its Pod still delivers a real DSX
+JWT, and admission rejects health port annotations of `0`, `-1`, and `65536`.
+
 ## Network setup tests
 
 ```bash
