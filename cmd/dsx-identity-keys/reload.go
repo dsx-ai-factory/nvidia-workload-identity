@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
@@ -12,10 +11,8 @@ import (
 )
 
 type signingKeys struct {
-	signer    *tokenSigner
-	public    map[string]jose.JSONWebKey
-	rawKeyset []byte
-	rawActive []byte
+	signer *tokenSigner
+	public map[string]jose.JSONWebKey
 }
 
 func newSigningKeys(signer *tokenSigner, keys []jose.JSONWebKey) *signingKeys {
@@ -54,18 +51,12 @@ func (s *signingKeySource) reload() error {
 	if err != nil {
 		return fmt.Errorf("read active kid: %w", err)
 	}
-	current := s.current.Load()
-	if current != nil && bytes.Equal(current.rawKeyset, rawKeyset) && bytes.Equal(current.rawActive, rawActive) {
-		return nil
-	}
 	signer, publicKeys, err := parseSigningKeys(rawKeyset, rawActive)
 	if err != nil {
 		return err
 	}
-	next := newSigningKeys(signer, publicKeys)
-	next.rawKeyset, next.rawActive = rawKeyset, rawActive
 	// Consumers share one immutable snapshot of the validated source pair.
-	s.current.Store(next)
+	s.current.Store(newSigningKeys(signer, publicKeys))
 	// Coalesce notifications. The publisher always reads the current snapshot.
 	select {
 	case s.updated <- struct{}{}:
