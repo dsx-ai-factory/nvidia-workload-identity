@@ -1,4 +1,4 @@
-package main
+package signingkey
 
 import (
 	"crypto"
@@ -8,18 +8,11 @@ import (
 	"crypto/rsa"
 	"encoding/json"
 	"fmt"
-	"os"
 	"slices"
+	"strings"
 
 	"github.com/go-jose/go-jose/v4"
-
-	"dsx-identity/internal/signingkey"
 )
-
-type tokenSigner struct {
-	keyID  string
-	signer jose.Signer
-}
 
 // privateKeyset reads keyset.json as
 // {"keys":["<Transit-exported private PEM>", ...]}.
@@ -36,41 +29,33 @@ type activeKeysetDocument struct {
 	Algorithm jose.SignatureAlgorithm `json:"alg"`
 }
 
-func loadSigningKeys(keysetPath, activeKIDPath string) (*tokenSigner, []jose.JSONWebKey, error) {
-	rawKeyset, err := os.ReadFile(keysetPath)
-	if err != nil {
-		return nil, nil, fmt.Errorf("read signing keyset: %w", err)
-	}
-	rawKID, err := os.ReadFile(activeKIDPath)
-	if err != nil {
-		return nil, nil, fmt.Errorf("read active kid: %w", err)
-	}
+func parseSigningKeys(rawKeyset, rawKID []byte) (*Snapshot, error) {
 	var activeDocument activeKeysetDocument
 	if err := json.Unmarshal(rawKID, &activeDocument); err != nil {
-		return nil, nil, fmt.Errorf("parse active kid: %w", err)
+		return nil, fmt.Errorf("parse active kid: %w", err)
 	}
-	if err := validateKeyID(activeDocument.ActiveKID); err != nil {
-		return nil, nil, fmt.Errorf("active kid: %w", err)
+	if err := ValidateKeyID(activeDocument.ActiveKID); err != nil {
+		return nil, fmt.Errorf("active kid: %w", err)
 	}
 
 	var document privateKeyset
 	if err := json.Unmarshal(rawKeyset, &document); err != nil {
-		return nil, nil, fmt.Errorf("parse signing keyset: %w", err)
+		return nil, fmt.Errorf("parse signing keyset: %w", err)
 	}
 	if len(document.Keys) == 0 {
-		return nil, nil, fmt.Errorf("signing keyset contains no keys")
+		return nil, fmt.Errorf("signing keyset contains no keys")
 	}
 
 	seen := make(map[string]struct{}, len(document.Keys))
 	public := make([]jose.JSONWebKey, 0, len(document.Keys))
 	var active *jose.JSONWebKey
 	for i, encoded := range document.Keys {
-		key, err := parsePrivateSigningKey(encoded, activeDocument.Algorithm)
+		key, err := ParsePrivate(encoded, activeDocument.Algorithm)
 		if err != nil {
-			return nil, nil, fmt.Errorf("signing keyset key %d: %w", i, err)
+			return nil, fmt.Errorf("signing keyset key %d: %w", i, err)
 		}
 		if _, ok := seen[key.KeyID]; ok {
-			return nil, nil, fmt.Errorf("signing keyset contains duplicate kid %q", key.KeyID)
+			return nil, fmt.Errorf("signing keyset contains duplicate kid %q", key.KeyID)
 		}
 		seen[key.KeyID] = struct{}{}
 		public = append(public, key.Public())
@@ -79,7 +64,7 @@ func loadSigningKeys(keysetPath, activeKIDPath string) (*tokenSigner, []jose.JSO
 		}
 	}
 	if active == nil {
-		return nil, nil, fmt.Errorf("active kid %q not found in signing keyset", activeDocument.ActiveKID)
+		return nil, fmt.Errorf("active kid %q not found in signing keyset", activeDocument.ActiveKID)
 	}
 
 	signer, err := jose.NewSigner(
@@ -87,29 +72,29 @@ func loadSigningKeys(keysetPath, activeKIDPath string) (*tokenSigner, []jose.JSO
 		(&jose.SignerOptions{}).WithHeader(jose.HeaderKey("kid"), activeDocument.ActiveKID),
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("create signer for active kid %q: %w", activeDocument.ActiveKID, err)
+		return nil, fmt.Errorf("create signer for active kid %q: %w", activeDocument.ActiveKID, err)
 	}
-	return &tokenSigner{keyID: activeDocument.ActiveKID, signer: signer}, public, nil
+	return newSnapshot(activeDocument.ActiveKID, signer, public), nil
 }
 
-func parsePrivateSigningKey(encoded string, algorithm jose.SignatureAlgorithm) (jose.JSONWebKey, error) {
-	key, err := signingkey.ParsePrivatePEM(encoded)
+func ParsePrivate(encoded string, algorithm jose.SignatureAlgorithm) (jose.JSONWebKey, error) {
+	key, err := ParsePrivatePEM(encoded)
 	if err != nil {
 		return jose.JSONWebKey{}, err
 	}
 	key.Algorithm = string(algorithm)
 	key.Use = "sig"
-	if err := validateSigningKey(&key, false); err != nil {
+	if err := Validate(&key, false); err != nil {
 		return jose.JSONWebKey{}, err
 	}
 	return key, nil
 }
 
-func validateSigningKey(key *jose.JSONWebKey, publicOnly bool) error {
+func Validate(key *jose.JSONWebKey, publicOnly bool) error {
 	if !key.Valid() {
 		return fmt.Errorf("invalid JWK")
 	}
-	if err := validateKeyID(key.KeyID); err != nil {
+	if err := ValidateKeyID(key.KeyID); err != nil {
 		return err
 	}
 	if key.Use != "" && key.Use != "sig" {
@@ -142,6 +127,15 @@ func supportedSignatureAlgorithms(key any) []jose.SignatureAlgorithm {
 		}
 	case *rsa.PublicKey:
 		return []jose.SignatureAlgorithm{jose.RS256, jose.RS384, jose.RS512, jose.PS256, jose.PS384, jose.PS512}
+	}
+	return nil
+}
+
+func ValidateKeyID(keyID string) error {
+	// A kid occupies one NATS subject token. Wildcards and separators would
+	// change subscription scope instead of naming a key.
+	if keyID == "" || strings.ContainsAny(keyID, ".>* \t\r\n") {
+		return fmt.Errorf("kid %q is not a valid NATS subject token", keyID)
 	}
 	return nil
 }

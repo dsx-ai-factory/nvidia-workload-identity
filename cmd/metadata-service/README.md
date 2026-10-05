@@ -130,12 +130,3 @@ checks, not a replacement for that network boundary.
 | `--spire-socket` | `/var/run/secrets/spire.io/spire-agent.sock` | SPIRE Workload API socket path |
 | `--svid-hint` | `dsx-imds` | Exact identity hint, either `dsx-imds` or `dsx-imds-vm` |
 | `--log-level` | `info` | JSON log level: `debug`, `info`, `warn`, or `error` |
-
-## Testing
-
-```bash
-go test ./cmd/metadata-service
-```
-
-The focused tests cover request validation, response format, response TTL,
-identity selection, and DSX Identity Keys transport.

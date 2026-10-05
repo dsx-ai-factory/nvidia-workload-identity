@@ -219,7 +219,10 @@ Every key must support the algorithm selected by `active-kid.json`, and
 `EdDSA`, `ES256`, `ES384`, `ES512`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`,
 and `PS512`.
 
-Identity Keys reads `keyset.json` and `active-kid.json` only at process start.
+Identity Keys reloads `keyset.json` and `active-kid.json` when either mounted
+file changes. Filesystem notifications trigger reloads, and
+`identityKeys.fileWatchPollInterval` sets the polling interval (default `30s`).
+Invalid or mismatched sources retain the last valid signer and public keys.
 It rereads OAuth2 credentials when its cached access token expires.
 
 #### Vault Secrets Operator example
@@ -240,9 +243,6 @@ spec:
   path: export/signing-key/<transit-key>
   requestHTTPMethod: GET
   refreshAfter: 1m
-  rolloutRestartTargets:
-    - kind: Deployment
-      name: dsx-identity-keys
   destination:
     name: dsx-identity-keys-signing-keyset
     create: true
@@ -267,9 +267,6 @@ spec:
   mount: <kv-mount>
   path: <active-kid-path>
   refreshAfter: 1m
-  rolloutRestartTargets:
-    - kind: Deployment
-      name: dsx-identity-keys
   destination:
     name: dsx-identity-keys-active-kid
     create: true
@@ -318,18 +315,14 @@ remain valid:
 
 1. Add the new private key to the exported keyset without changing the active
    key.
-2. Wait for Secret synchronization, a completed rolling restart, and the new
-   `kid` in `/.well-known/jwks.json`.
-3. Change `active_kid` and `alg`, then wait for another completed rolling
-   restart.
+2. Wait for Secret synchronization and the new `kid` in
+   `/.well-known/jwks.json`.
+3. Change `active_kid` and `alg`, then wait for exchanged JWTs to use the new
+   key.
 4. Wait for JWTs signed by the old key to expire and downstream JWKS caches to
    refresh.
-5. Remove the old private key from the exported keyset, then complete the final
-   rolling restart.
-
-External secret controllers without restart targeting must trigger a rolling
-restart of `Deployment/dsx-identity-keys` after signing keyset or active-key
-changes.
+5. Remove the old private key from the exported keyset. Its public key remains
+   available until its NATS lease expires.
 
 OAuth2 credential rotation does not require a restart. Create the replacement
 credential at the issuer, update Vault, wait for the mounted Secret to change and
@@ -356,9 +349,3 @@ helm dependency build charts/dsx-identity
 ```
 
 Use `./charts/dsx-identity` as `<oci-chart-reference>`.
-
-## Validation
-
-```bash
-make test-chart
-```

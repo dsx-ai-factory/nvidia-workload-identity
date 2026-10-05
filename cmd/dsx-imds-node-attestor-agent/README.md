@@ -82,12 +82,3 @@ HTTP client connects directly, ignores ambient proxy settings, and rejects
 redirects. `Dockerfile.spire` embeds the plugin in the DSX SPIRE agent image.
 The local E2E fixture selects that image through
 `scripts/dsx-imds-host-agent-values.yaml` plus its shard override.
-
-## Testing
-
-```bash
-go test ./cmd/dsx-imds-node-attestor-agent ./internal/dsximds
-```
-
-The focused tests cover configuration, IMDS token retrieval, proxy and redirect
-handling, and the complete agent-to-server attestation exchange.

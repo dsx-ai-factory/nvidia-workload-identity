@@ -33,9 +33,11 @@ repository is a legacy mirror.
 - Explain supported VM network modes beside the sidecar code and E2E fixtures
   that depend on them, and in the relevant READMEs.
 - Root and component READMEs describe the chart and applications users run.
-  Document testing capabilities local to this repository in `scripts/README.md`,
-  including setup, fixtures, harness details, and test commands. Link to that
-  guide instead of duplicating its content.
+  Keep special test setup, fixtures, and E2E workflow instructions in
+  `scripts/README.md`. Link there when those instructions are needed.
+- Ordinary tests run through standard validation. Do not add README test
+  sections, per-package test commands, or test coverage lists for them.
+  Adding or changing an ordinary test does not require a README update.
 - Keep current documentation in these READMEs. Do not add a `docs` directory or
   standalone implementation plans unless the user explicitly requests one.
 - Show user-facing API contracts with concrete request and response examples.
@@ -51,6 +53,10 @@ repository is a legacy mirror.
 - Prefer existing code, standard libraries, native Kubernetes and Helm features,
   maintained dependencies, and upstream APIs. Do not add speculative abstractions,
   compatibility paths, wrappers, or configuration.
+- Compose independent components around immutable state. Prefer atomic pointer
+  swaps for shared snapshots.
+- Keep runtime ownership separate from shared data. Use consumer-owned interfaces
+  for dependency boundaries and test control. Cover acceptance and rejection.
 - Keep supplied values exact. Do not trim, normalize, case-fold, or coerce input.
 - `charts/dsx-identity` installs each management-cluster shard.
 - `charts/dsx-imds` and `charts/dsx-spiffe-csi` are DPUService payloads. Keep external
@@ -96,6 +102,8 @@ repository is a legacy mirror.
 - Keep Kubernetes test resources in manifest files. Deploy them through Skaffold,
   Helm, or Kustomize. Do not embed YAML or manually apply, create, or patch test
   resources with `kubectl` from test scripts.
+- Keep tests deterministic. Do not commit tests that fail because of valid
+  timing, scheduling, or event loss.
 - Synchronize on observable conditions with bounded deadlines. Do not use sleeps
   or rerun-dependent acceptance.
 - Use focused unit or integration tests for protocol matrices, lifecycle behavior,
