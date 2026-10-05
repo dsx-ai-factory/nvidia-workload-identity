@@ -4,85 +4,78 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"iter"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"golang.org/x/sync/errgroup"
 )
 
-// Watcher owns its resources until iteration stops or ctx ends.
-type Watcher[T any] func(ctx context.Context) iter.Seq2[T, error]
+// Watcher delivers values synchronously. A nil callback error accepts a value.
+type Watcher[T any] func(ctx context.Context, notify func(T) error) error
 
-// Change contains immutable bytes from one read. Consumers must not modify them.
+// Change holds bytes from one read. Nil contents invalidate an unavailable file.
+// Consumers must not modify the contents.
 type Change struct {
 	Path     string
 	Contents []byte
 }
 
 func FSNotify(path string) Watcher[struct{}] {
-	return func(ctx context.Context) iter.Seq2[struct{}, error] {
-		return func(yield func(struct{}, error) bool) {
-			watcher, err := fsnotify.NewWatcher()
-			if err != nil {
-				yield(struct{}{}, fmt.Errorf("create file watcher: %w", err))
-				return
-			}
-			defer watcher.Close()
-			// Parent watches survive atomic replacements and Kubernetes ..data swaps.
-			if err := watcher.Add(filepath.Dir(path)); err != nil {
-				yield(struct{}{}, fmt.Errorf("watch parent of %q: %w", path, err))
-				return
-			}
-			if !yield(struct{}{}, nil) {
-				return
-			}
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case _, ok := <-watcher.Events:
-					if !ok {
-						yield(struct{}{}, fmt.Errorf("file watcher for %q closed", path))
-						return
-					}
-				case _, ok := <-watcher.Errors:
-					if !ok {
-						yield(struct{}{}, fmt.Errorf("file watcher for %q closed", path))
-						return
-					}
-					// Removal and backend overflow errors require another content check.
+	return func(ctx context.Context, notify func(struct{}) error) error {
+		watcher, err := fsnotify.NewWatcher()
+		if err != nil {
+			return fmt.Errorf("create file watcher: %w", err)
+		}
+		defer watcher.Close()
+		// Parent watches survive atomic replacements and Kubernetes ..data swaps.
+		if err := watcher.Add(filepath.Dir(path)); err != nil {
+			return fmt.Errorf("watch parent of %q: %w", path, err)
+		}
+		if err := notify(struct{}{}); err != nil {
+			return err
+		}
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case _, ok := <-watcher.Events:
+				if !ok {
+					return fmt.Errorf("file watcher for %q closed", path)
 				}
-				if !yield(struct{}{}, nil) {
-					return
+			case _, ok := <-watcher.Errors:
+				if !ok {
+					return fmt.Errorf("file watcher for %q closed", path)
 				}
+				// Removal and backend overflow errors require another content check.
+			}
+			if err := notify(struct{}{}); err != nil {
+				return err
 			}
 		}
 	}
 }
 
 func Polling(interval time.Duration) Watcher[struct{}] {
-	return func(ctx context.Context) iter.Seq2[struct{}, error] {
-		return func(yield func(struct{}, error) bool) {
-			if interval <= 0 {
-				yield(struct{}{}, fmt.Errorf("file polling interval must be positive"))
-				return
-			}
-			ticker := time.NewTicker(interval)
-			defer ticker.Stop()
-			if !yield(struct{}{}, nil) {
-				return
-			}
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					if !yield(struct{}{}, nil) {
-						return
-					}
+	return func(ctx context.Context, notify func(struct{}) error) error {
+		if interval <= 0 {
+			return fmt.Errorf("file polling interval must be positive")
+		}
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		if err := notify(struct{}{}); err != nil {
+			return err
+		}
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-ticker.C:
+				if err := notify(struct{}{}); err != nil {
+					return err
 				}
 			}
 		}
@@ -90,78 +83,51 @@ func Polling(interval time.Duration) Watcher[struct{}] {
 }
 
 func Composite[T any](watchers ...Watcher[T]) Watcher[T] {
-	return func(ctx context.Context) iter.Seq2[T, error] {
-		return func(yield func(T, error) bool) {
-			ctx, cancel := context.WithCancel(ctx)
-			type result struct {
-				value  T
-				err    error
-				resume chan struct{}
-			}
-			results := make(chan result)
-			var workers sync.WaitGroup
-			defer func() { cancel(); workers.Wait() }()
-			for _, watcher := range watchers {
-				workers.Go(func() {
-					for value, err := range watcher(ctx) {
-						resume := make(chan struct{})
-						select {
-						case <-ctx.Done():
-							return
-						case results <- result{value, err, resume}:
-						}
-						// Keep the producer's yield suspended until the consumer finishes.
-						select {
-						case <-ctx.Done():
-							return
-						case <-resume:
-						}
+	return func(ctx context.Context, notify func(T) error) error {
+		group, watchContext := errgroup.WithContext(ctx)
+		var callbacks sync.Mutex
+		for _, watcher := range watchers {
+			group.Go(func() error {
+				return watcher(watchContext, func(value T) error {
+					callbacks.Lock()
+					defer callbacks.Unlock()
+					if err := watchContext.Err(); err != nil {
+						return err
 					}
+					return notify(value)
 				})
-			}
-			go func() { workers.Wait(); close(results) }()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case result, ok := <-results:
-					if !ok || !yield(result.value, result.err) {
-						return
-					}
-					close(result.resume)
-				}
-			}
+			})
 		}
+		return group.Wait()
 	}
 }
 
-// Contents serializes reads and comparisons after composing event watchers.
-// Read errors include the file path. Watch failures end with an empty Change.
+// Contents owns the comparison baseline and advances it only on acceptance.
 func Contents(path string, events Watcher[struct{}]) Watcher[Change] {
-	return func(ctx context.Context) iter.Seq2[Change, error] {
-		return func(yield func(Change, error) bool) {
-			var previous []byte
-			var previousError string
-			first := true
-			for _, err := range events(ctx) {
-				if err != nil {
-					yield(Change{}, err)
-					return
+	return func(ctx context.Context, notify func(Change) error) error {
+		var previous []byte
+		var lastReadError string
+		retry := true
+		return events(ctx, func(struct{}) error {
+			data, readErr := os.ReadFile(path)
+			if readErr != nil {
+				if readErr.Error() != lastReadError {
+					slog.WarnContext(ctx, "Failed to read watched file", "path", path, "error", readErr)
+					lastReadError = readErr.Error()
 				}
-				data, readErr := os.ReadFile(path)
-				var errorText string
-				if readErr != nil {
-					errorText = readErr.Error()
-				}
-				if !first && previousError == errorText && bytes.Equal(previous, data) {
-					continue
-				}
-				if !yield(Change{Path: path, Contents: data}, readErr) {
-					return
-				}
-				// The comparison baseline advances only after delivery to the consumer.
-				previous, previousError, first = data, errorText, false
+				data = nil
+			} else {
+				lastReadError = ""
 			}
-		}
+			if !retry && readErr == nil && bytes.Equal(previous, data) {
+				return nil
+			}
+			// A rejected observation is retried even if the file returns to accepted bytes.
+			retry = true
+			if err := notify(Change{Path: path, Contents: data}); err == nil && readErr == nil {
+				previous, retry = data, false
+			}
+			return nil
+		})
 	}
 }

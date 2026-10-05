@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"iter"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -313,31 +312,30 @@ func TestSigningSourceAcceptsObservedContentsBeforeWatcherAdvances(t *testing.T)
 	}
 	// Disk differs from the observations that the watcher delivers below.
 	copySigningFile(t, activePath, secondPath)
-	events := filewatch.Watcher[filewatch.Change](func(context.Context) iter.Seq2[filewatch.Change, error] {
-		return func(yield func(filewatch.Change, error) bool) {
-			if !yield(filewatch.Change{Path: keysetPath, Contents: rawKeyset}, nil) {
-				return
+	events := filewatch.Watcher[filewatch.Change](func(_ context.Context, notify func(filewatch.Change) error) error {
+		if err := notify(filewatch.Change{Path: keysetPath, Contents: rawKeyset}); err != nil {
+			return err
+		}
+		for _, step := range []struct {
+			data     []byte
+			rejected bool
+			want     string
+		}{
+			{firstActive, false, firstID},
+			{secondActive, false, secondID},
+			{[]byte(`{"active_kid":`), true, secondID},
+			{nil, true, secondID},
+			{firstActive, false, firstID},
+		} {
+			err := notify(filewatch.Change{Path: activePath, Contents: step.data})
+			if (err != nil) != step.rejected {
+				return fmt.Errorf("consumer reply = %v, want rejected %v", err, step.rejected)
 			}
-			for _, step := range []struct {
-				data    []byte
-				readErr error
-				want    string
-			}{
-				{firstActive, nil, firstID},
-				{secondActive, nil, secondID},
-				{[]byte(`{"active_kid":`), nil, secondID},
-				{nil, os.ErrNotExist, secondID},
-				{firstActive, nil, firstID},
-			} {
-				if !yield(filewatch.Change{Path: activePath, Contents: step.data}, step.readErr) {
-					return
-				}
-				if got := source.current.Load().signer.keyID; got != step.want {
-					yield(filewatch.Change{}, fmt.Errorf("watcher resumed with signer %q, want %q", got, step.want))
-					return
-				}
+			if got := source.current.Load().signer.keyID; got != step.want {
+				return fmt.Errorf("watcher resumed with signer %q, want %q", got, step.want)
 			}
 		}
+		return nil
 	})
 	if err := source.run(t.Context(), filewatch.Composite(events)); err != nil {
 		t.Fatal(err)

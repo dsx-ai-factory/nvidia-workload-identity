@@ -3,7 +3,7 @@ package filewatch
 import (
 	"context"
 	"errors"
-	"iter"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -82,9 +82,7 @@ func TestPollingRecoversMissedEventsAtConfiguredInterval(t *testing.T) {
 		t.Fatal(err)
 	}
 	synctest.Test(t, func(t *testing.T) {
-		silent := Watcher[struct{}](func(ctx context.Context) iter.Seq2[struct{}, error] {
-			return func(func(struct{}, error) bool) { <-ctx.Done() }
-		})
+		silent := Watcher[struct{}](func(ctx context.Context, _ func(struct{}) error) error { <-ctx.Done(); return nil })
 		changed := startWatcher(t, Contents(path, Composite(silent, Polling(30*time.Second))))
 		waitContents(t, changed, "first")
 		synctest.Wait()
@@ -124,18 +122,11 @@ func TestCompositeCancelsOtherWatchersOnFailure(t *testing.T) {
 	stopped := make(chan struct{})
 	expected := errors.New("watch failed")
 	composite := Composite(
-		Watcher[struct{}](func(ctx context.Context) iter.Seq2[struct{}, error] {
-			return func(func(struct{}, error) bool) { <-ctx.Done(); close(stopped) }
-		}),
-		Watcher[struct{}](func(context.Context) iter.Seq2[struct{}, error] {
-			return func(yield func(struct{}, error) bool) { yield(struct{}{}, expected) }
-		}),
+		Watcher[struct{}](func(ctx context.Context, _ func(struct{}) error) error { <-ctx.Done(); close(stopped); return nil }),
+		Watcher[struct{}](func(context.Context, func(struct{}) error) error { return expected }),
 	)
-	for _, err := range composite(t.Context()) {
-		if !errors.Is(err, expected) {
-			t.Fatalf("composite error = %v, want %v", err, expected)
-		}
-		break
+	if err := composite(t.Context(), func(struct{}) error { return nil }); !errors.Is(err, expected) {
+		t.Fatalf("composite error = %v, want %v", err, expected)
 	}
 	select {
 	case <-stopped:
@@ -146,42 +137,70 @@ func TestCompositeCancelsOtherWatchersOnFailure(t *testing.T) {
 
 func TestPollingRejectsNonpositiveInterval(t *testing.T) {
 	for _, interval := range []time.Duration{0, -time.Second} {
-		for _, err := range Polling(interval)(t.Context()) {
-			if err == nil {
-				t.Fatalf("accepted interval %s", interval)
-			}
+		if err := Polling(interval)(t.Context(), func(struct{}) error { return nil }); err == nil {
+			t.Fatalf("accepted interval %s", interval)
 		}
+	}
+}
+
+func TestCompositeReturnsConsumerErrorsToProducer(t *testing.T) {
+	rejected := errors.New("change rejected")
+	watcher := Watcher[int](func(_ context.Context, notify func(int) error) error {
+		if err := notify(1); !errors.Is(err, rejected) {
+			return fmt.Errorf("first reply = %v, want %v", err, rejected)
+		}
+		return notify(2)
+	})
+	var received []int
+	err := Composite(watcher)(t.Context(), func(value int) error {
+		received = append(received, value)
+		if value == 1 {
+			return rejected
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(received) != 2 || received[0] != 1 || received[1] != 2 {
+		t.Fatalf("received = %v", received)
 	}
 }
 
 func TestCompositeDeliversRapidChangesWithBackpressure(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		delivered := make(chan int, 2)
-		watcher := Watcher[int](func(context.Context) iter.Seq2[int, error] {
-			return func(yield func(int, error) bool) {
-				for _, value := range []int{1, 2} {
-					if !yield(value, nil) {
-						return
-					}
-					delivered <- value
+		received := make(chan int)
+		accept := make(chan struct{})
+		done := make(chan error, 1)
+		watcher := Watcher[int](func(_ context.Context, notify func(int) error) error {
+			for _, value := range []int{1, 2} {
+				if err := notify(value); err != nil {
+					return err
 				}
+				delivered <- value
 			}
+			return nil
 		})
-		next, stop := iter.Pull2(Composite(watcher)(t.Context()))
-		defer stop()
-		value, err, ok := next()
-		if !ok || err != nil || value != 1 {
-			t.Fatalf("first result = %v, %v, %v", value, err, ok)
+		go func() {
+			done <- Composite(watcher)(t.Context(), func(value int) error {
+				received <- value
+				<-accept
+				return nil
+			})
+		}()
+		if value := <-received; value != 1 {
+			t.Fatalf("first result = %d", value)
 		}
 		synctest.Wait()
 		select {
 		case <-delivered:
-			t.Fatal("watcher advanced before consumer accepted first change")
+			t.Fatal("producer advanced before first acceptance")
 		default:
 		}
-		value, err, ok = next()
-		if !ok || err != nil || value != 2 {
-			t.Fatalf("second result = %v, %v, %v", value, err, ok)
+		accept <- struct{}{}
+		if value := <-received; value != 2 {
+			t.Fatalf("second result = %d", value)
 		}
 		synctest.Wait()
 		if value := <-delivered; value != 1 {
@@ -189,74 +208,109 @@ func TestCompositeDeliversRapidChangesWithBackpressure(t *testing.T) {
 		}
 		select {
 		case <-delivered:
-			t.Fatal("watcher advanced before consumer accepted second change")
+			t.Fatal("producer advanced before second acceptance")
 		default:
 		}
-		if _, _, ok := next(); ok {
-			t.Fatal("unexpected third result")
+		accept <- struct{}{}
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		if value := <-delivered; value != 2 {
+			t.Fatalf("delivered = %d", value)
 		}
 	})
+}
+
+func TestContentsRetriesRejectedChangesAndRestoredAcceptedContents(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "watched")
+	writeFile(t, path, "first")
+	events := Watcher[struct{}](func(_ context.Context, notify func(struct{}) error) error {
+		if err := notify(struct{}{}); err != nil {
+			return err
+		}
+		writeFile(t, path, "rejected")
+		if err := notify(struct{}{}); err != nil {
+			return err
+		}
+		if err := notify(struct{}{}); err != nil {
+			return err
+		}
+		// Restoring accepted bytes must clear the consumer's rejected observation.
+		writeFile(t, path, "first")
+		if err := notify(struct{}{}); err != nil {
+			return err
+		}
+		return notify(struct{}{})
+	})
+	var received []string
+	err := Contents(path, events)(t.Context(), func(change Change) error {
+		received = append(received, string(change.Contents))
+		if string(change.Contents) == "rejected" {
+			return errors.New("invalid content")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(received) != 4 || received[0] != "first" || received[1] != "rejected" || received[2] != "rejected" || received[3] != "first" {
+		t.Fatalf("observations = %v", received)
+	}
 }
 
 func TestContentsDeliversObservedBytesAcrossTransientChanges(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "watched")
 	writeFile(t, path, "first")
-	events := Watcher[struct{}](func(context.Context) iter.Seq2[struct{}, error] {
-		return func(yield func(struct{}, error) bool) {
-			if !yield(struct{}{}, nil) {
-				return
-			}
-			writeFile(t, path, "second")
-			if !yield(struct{}{}, nil) {
-				return
-			}
-			// The consumer temporarily changed the file while handling this observation.
-			if !yield(struct{}{}, nil) {
-				return
-			}
+	events := Watcher[struct{}](func(_ context.Context, notify func(struct{}) error) error {
+		if err := notify(struct{}{}); err != nil {
+			return err
 		}
+		writeFile(t, path, "second")
+		if err := notify(struct{}{}); err != nil {
+			return err
+		}
+		return notify(struct{}{})
 	})
 	var received []string
-	for change, err := range Contents(path, events)(t.Context()) {
-		if err != nil {
-			t.Fatal(err)
-		}
+	err := Contents(path, events)(t.Context(), func(change Change) error {
 		received = append(received, string(change.Contents))
 		writeFile(t, path, "transient")
 		if string(change.Contents) != received[len(received)-1] {
 			t.Fatal("observation changed with file contents")
 		}
 		writeFile(t, path, received[len(received)-1])
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	if len(received) != 2 || received[0] != "first" || received[1] != "second" {
 		t.Fatalf("observations = %v", received)
 	}
 }
 
-type observation struct {
-	change Change
-	err    error
-}
-
-func startWatcher(t *testing.T, watcher Watcher[Change]) <-chan observation {
+func startWatcher(t *testing.T, watcher Watcher[Change]) <-chan Change {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
-	changed := make(chan observation)
-	done := make(chan struct{})
+	changed := make(chan Change)
+	done := make(chan error, 1)
 	go func() {
-		defer close(done)
-		for change, err := range watcher(ctx) {
+		done <- watcher(ctx, func(change Change) error {
 			select {
 			case <-ctx.Done():
-				return
-			case changed <- observation{change, err}:
+				return ctx.Err()
+			case changed <- change:
+				return nil
 			}
-		}
+		})
 	}()
 	t.Cleanup(func() {
 		cancel()
 		select {
-		case <-done:
+		case err := <-done:
+			if err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("watcher: %v", err)
+			}
 		case <-time.After(5 * time.Second):
 			t.Error("watcher did not stop")
 		}
@@ -271,7 +325,7 @@ func writeFile(t *testing.T, path, data string) {
 	}
 }
 
-func assertNoNotification(t *testing.T, changed <-chan observation) {
+func assertNoNotification(t *testing.T, changed <-chan Change) {
 	t.Helper()
 	select {
 	case <-changed:
@@ -280,20 +334,19 @@ func assertNoNotification(t *testing.T, changed <-chan observation) {
 	}
 }
 
-func waitContents(t *testing.T, changed <-chan observation, want string) {
+func waitContents(t *testing.T, changed <-chan Change, want string) {
 	t.Helper()
 	deadline := time.NewTimer(5 * time.Second)
 	defer deadline.Stop()
 	for {
 		select {
-		case observed := <-changed:
-			if want == "" && errors.Is(observed.err, os.ErrNotExist) {
+		case change := <-changed:
+			if want == "" && change.Contents == nil {
 				return
 			}
-			if want != "" && observed.err == nil && string(observed.change.Contents) == want {
+			if want != "" && string(change.Contents) == want {
 				return
 			}
-			t.Logf("intermediate observation: %q, %v", observed.change.Contents, observed.err)
 		case <-deadline.C:
 			t.Fatalf("file contents %q not observed", want)
 		}

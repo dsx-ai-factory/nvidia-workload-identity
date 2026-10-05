@@ -30,14 +30,11 @@ type signingKeySource struct {
 	activeKIDPath string
 	current       atomic.Pointer[signingKeys]
 	updated       chan struct{}
+	initialKeyset []byte
+	initialActive []byte
 }
 
 func newSigningKeySource(keysetPath, activeKIDPath string) (*signingKeySource, error) {
-	source := &signingKeySource{
-		keysetPath:    keysetPath,
-		activeKIDPath: activeKIDPath,
-		updated:       make(chan struct{}, 1),
-	}
 	rawKeyset, err := os.ReadFile(keysetPath)
 	if err != nil {
 		return nil, fmt.Errorf("read signing keyset: %w", err)
@@ -45,6 +42,13 @@ func newSigningKeySource(keysetPath, activeKIDPath string) (*signingKeySource, e
 	rawActive, err := os.ReadFile(activeKIDPath)
 	if err != nil {
 		return nil, fmt.Errorf("read active kid: %w", err)
+	}
+	source := &signingKeySource{
+		keysetPath:    keysetPath,
+		activeKIDPath: activeKIDPath,
+		initialKeyset: rawKeyset,
+		initialActive: rawActive,
+		updated:       make(chan struct{}, 1),
 	}
 	if err := source.load(rawKeyset, rawActive); err != nil {
 		return nil, err
@@ -69,37 +73,19 @@ func (s *signingKeySource) load(rawKeyset, rawActive []byte) error {
 }
 
 func (s *signingKeySource) run(ctx context.Context, watcher filewatch.Watcher[filewatch.Change]) error {
-	type observedFile struct {
-		data []byte
-		err  error
-	}
-	var keyset, active *observedFile
+	keyset, active := s.initialKeyset, s.initialActive
 	var lastError string
-	for change, err := range watcher(ctx) {
+	err := watcher(ctx, func(change filewatch.Change) error {
 		if ctx.Err() != nil {
-			return nil
+			return ctx.Err()
 		}
-		if change.Path == "" {
-			return err
-		}
-		observed := &observedFile{change.Contents, err}
 		switch change.Path {
 		case s.keysetPath:
-			keyset = observed
+			keyset = change.Contents
 		case s.activeKIDPath:
-			active = observed
+			active = change.Contents
 		}
-		if keyset == nil || active == nil {
-			continue
-		}
-		switch {
-		case keyset.err != nil:
-			err = fmt.Errorf("read signing keyset: %w", keyset.err)
-		case active.err != nil:
-			err = fmt.Errorf("read active kid: %w", active.err)
-		default:
-			err = s.load(keyset.data, active.data)
-		}
+		err := s.load(keyset, active)
 		if err != nil {
 			if err.Error() != lastError {
 				slog.WarnContext(ctx, "Signing key reload failed, retaining current keys", "error", err)
@@ -108,6 +94,10 @@ func (s *signingKeySource) run(ctx context.Context, watcher filewatch.Watcher[fi
 		} else {
 			lastError = ""
 		}
+		return err
+	})
+	if ctx.Err() != nil {
+		return nil
 	}
-	return nil
+	return err
 }
