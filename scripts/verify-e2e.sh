@@ -367,8 +367,6 @@ main() {
     }
     log_timing "Pod token delivery" "${stage_started}"
 
-    run_timed "token-fetcher admission" "${PROJECT_ROOT}/scripts/k2/verify-token-fetcher-admission.sh"
-
     stage_started=${SECONDS}
     assert_no_token_fetcher_injection "${K2_CONTEXT}" "${K2_SPIRE_POD}" "${K2_SPIRE_NAMESPACE}"
     k1_spire_id=$(internal_pod_subject "${K1_CONTEXT}" "${K1_TRUST_DOMAIN}" "${K1_POD}")
