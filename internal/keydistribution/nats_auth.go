@@ -1,4 +1,4 @@
-package main
+package keydistribution
 
 import (
 	"context"
@@ -18,51 +18,51 @@ import (
 )
 
 const (
-	natsAuthNone           = "none"
-	natsAuthOAuth2         = "oauth2"
+	AuthNone               = "none"
+	AuthOAuth2             = "oauth2"
 	natsOAuthRejectedToken = "invalid-oauth-token"
 )
 
-type natsAuthConfig struct {
-	mode            string
-	credentialsFile string
-	oauthIssuerURL  string
-	oauthScopes     []string
+type AuthConfig struct {
+	Mode            string
+	CredentialsFile string
+	OAuthIssuerURL  string
+	OAuthScopes     []string
 }
 
-func (c natsAuthConfig) options(ctx context.Context) ([]nats.Option, error) {
-	switch c.mode {
-	case natsAuthNone:
+func (c AuthConfig) options(ctx context.Context) ([]nats.Option, error) {
+	switch c.Mode {
+	case AuthNone:
 		return nil, nil
-	case natsAuthOAuth2:
+	case AuthOAuth2:
 		source, err := c.oauthTokenSource(ctx)
 		if err != nil {
 			return nil, err
 		}
 		return []nats.Option{nats.TokenHandler(natsOAuthTokenHandler(source))}, nil
 	default:
-		return nil, fmt.Errorf("NATS auth mode %q must be none or oauth2", c.mode)
+		return nil, fmt.Errorf("NATS auth mode %q must be none or oauth2", c.Mode)
 	}
 }
 
-func (c natsAuthConfig) oauthTokenSource(ctx context.Context) (oauth2.TokenSource, error) {
-	if c.oauthIssuerURL == "" || c.credentialsFile == "" {
+func (c AuthConfig) oauthTokenSource(ctx context.Context) (oauth2.TokenSource, error) {
+	if c.OAuthIssuerURL == "" || c.CredentialsFile == "" {
 		return nil, fmt.Errorf("NATS OAuth2 issuer URL and credentials file are required")
 	}
-	if _, err := readNATSOAuthCredentials(c.credentialsFile); err != nil {
+	if _, err := readNATSOAuthCredentials(c.CredentialsFile); err != nil {
 		return nil, err
 	}
 	tokenContext := context.WithValue(ctx, oauth2.HTTPClient, &http.Client{
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
 		Timeout:   10 * time.Second,
 	})
-	provider, err := oidc.NewProvider(tokenContext, c.oauthIssuerURL)
+	provider, err := oidc.NewProvider(tokenContext, c.OAuthIssuerURL)
 	if err != nil {
 		return nil, fmt.Errorf("discover NATS OAuth2 issuer: %w", err)
 	}
 	return oauth2.ReuseTokenSource(nil, natsOAuthTokenSource{
-		ctx: tokenContext, tokenURL: provider.Endpoint().TokenURL, scopes: slices.Clone(c.oauthScopes),
-		credentialsFile: c.credentialsFile,
+		ctx: tokenContext, tokenURL: provider.Endpoint().TokenURL, scopes: slices.Clone(c.OAuthScopes),
+		credentialsFile: c.CredentialsFile,
 	}), nil
 }
 

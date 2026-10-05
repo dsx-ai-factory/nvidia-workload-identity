@@ -43,8 +43,8 @@ external_curl() {
 }
 
 external_probe() {
-    local test_pattern=$1
-    shift
+    local probe=$1 test_pattern=$2
+    shift 2
     local docker_env=() environment
     for environment in "$@"; do
         docker_env+=(--env "${environment}")
@@ -52,7 +52,7 @@ external_probe() {
     docker run --rm --network kind \
         --add-host "${GATEWAY_HOST}:${GATEWAY_ADDRESS}" \
         "${docker_env[@]}" \
-        --entrypoint /usr/local/bin/identity-keys-probe "${E2E_PROBE_IMAGE}" \
+        --entrypoint "/usr/local/bin/${probe}" "${E2E_PROBE_IMAGE}" \
         -test.v -test.run "${test_pattern}"
 }
 
@@ -75,7 +75,7 @@ initialize_external_test_process() {
 assert_nats_kv() {
     local expected="$1" output deadline=$((SECONDS + 60))
     while ((SECONDS < deadline)); do
-        if output=$(external_probe '^TestLiveNATSKV$' \
+        if output=$(external_probe key-distribution-probe '^TestLiveNATSKV$' \
             "DSX_E2E_NATS_URL=${NATS_SERVER}" \
             "DSX_E2E_NATS_EXPECTED_KIDS=${expected}" 2>&1); then
             printf '%s\n' "${output}"
@@ -267,7 +267,7 @@ assert_exchange_rejects() {
 
 assert_relying_party_subject_validation() {
     local valid_token="$1"
-    external_probe '^TestLiveRelyingPartyRejectsMalformedSubject$' \
+    external_probe identity-keys-probe '^TestLiveRelyingPartyRejectsMalformedSubject$' \
         "DSX_E2E_RELYING_PARTY_URL=${OPENBAO_URL}/v1/auth/jwt/cel/login" \
         "DSX_E2E_SIGNING_KEYSET=${K1_ORIGINAL_KEYSET}" \
         "DSX_E2E_ACTIVE_KID=${K1_ORIGINAL_KID}" \
@@ -282,7 +282,7 @@ verify_tokens_with_jwks() {
     for token in "$@"; do
         tokens=$(jq -cn --argjson tokens "${tokens}" --arg token "${token}" '$tokens + [$token]')
     done
-    external_probe '^TestLiveAggregateVerifiesTokens$' \
+    external_probe identity-keys-probe '^TestLiveAggregateVerifiesTokens$' \
         "DSX_E2E_VERIFY_JWKS=${jwks}" \
         "DSX_E2E_VERIFY_TOKENS=${tokens}"
 }

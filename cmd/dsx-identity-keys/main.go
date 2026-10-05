@@ -29,8 +29,12 @@ import (
 	"google.golang.org/grpc"
 
 	"dsx-identity/internal/dsxidentity"
+	"dsx-identity/internal/filewatch"
+	"dsx-identity/internal/keydistribution"
+	"dsx-identity/internal/signingkey"
 	"dsx-identity/internal/spireidentity"
 	"dsx-identity/internal/telemetry"
+	"dsx-identity/internal/watch"
 )
 
 const (
@@ -54,21 +58,25 @@ type TokenExchangeErrorResponse struct {
 }
 
 type publicKeyRegistry interface {
-	keyset() jose.JSONWebKeySet
-	isReady() bool
+	Keyset() jose.JSONWebKeySet
+	Ready() bool
+}
+
+type signingSource interface {
+	Get() *signingkey.Snapshot
 }
 
 type identityKeysServer struct {
-	signer    *tokenSigner
-	registry  publicKeyRegistry
-	jwtSource *workloadapi.JWTSource
-	jwksURL   string
-	issuer    string
-	region    string
-	partition string
+	signingKeys signingSource
+	registry    publicKeyRegistry
+	jwtSource   *workloadapi.JWTSource
+	jwksURL     string
+	issuer      string
+	region      string
+	partition   string
 }
 
-func newIdentityKeysServer(ctx context.Context, issuer, region, partition string, signer *tokenSigner, registry publicKeyRegistry, socketPath, jwksURL string) (*identityKeysServer, error) {
+func newIdentityKeysServer(ctx context.Context, issuer, region, partition string, signingKeys signingSource, registry publicKeyRegistry, socketPath, jwksURL string) (*identityKeysServer, error) {
 	if err := dsxidentity.ValidateIssuer(issuer); err != nil {
 		return nil, err
 	}
@@ -86,7 +94,7 @@ func newIdentityKeysServer(ctx context.Context, issuer, region, partition string
 		return nil, fmt.Errorf("create JWT source: %w", err)
 	}
 	return &identityKeysServer{
-		signer: signer, registry: registry, jwtSource: jwts, jwksURL: jwksURL,
+		signingKeys: signingKeys, registry: registry, jwtSource: jwts, jwksURL: jwksURL,
 		issuer: issuer, region: region, partition: partition,
 	}, nil
 }
@@ -106,7 +114,8 @@ func (s *identityKeysServer) resignJWT(originalClaims map[string]any, newSubject
 	newClaims["sub"] = newSubject.String()
 	newClaims["iss"] = s.issuer
 
-	token, err := jwt.Signed(s.signer.signer).Claims(newClaims).Serialize()
+	signer := s.signingKeys.Get().Signer()
+	token, err := jwt.Signed(signer).Claims(newClaims).Serialize()
 	if err != nil {
 		return "", fmt.Errorf("sign JWT: %w", err)
 	}
@@ -206,7 +215,7 @@ func exchangeSubject(region, partition string, id spiffeid.ID) (spiffeid.ID, err
 }
 
 func (s *identityKeysServer) handleJWKS(w http.ResponseWriter, _ *http.Request) {
-	responseBody, err := json.Marshal(s.registry.keyset())
+	responseBody, err := json.Marshal(s.registry.Keyset())
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -223,7 +232,7 @@ func (s *identityKeysServer) handleOIDCDiscovery(w http.ResponseWriter, _ *http.
 	responseBody, err := json.Marshal(oidc.ProviderConfig{
 		IssuerURL:  s.issuer,
 		JWKSURL:    s.jwksURL,
-		Algorithms: signingAlgorithms(s.registry.keyset()),
+		Algorithms: keydistribution.SigningAlgorithms(s.registry.Keyset()),
 	})
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -238,7 +247,7 @@ func (s *identityKeysServer) handleOIDCDiscovery(w http.ResponseWriter, _ *http.
 }
 
 func (s *identityKeysServer) handleReady(w http.ResponseWriter, _ *http.Request) {
-	if !s.registry.isReady() {
+	if !s.registry.Ready() {
 		http.Error(w, "public key registry is not ready", http.StatusServiceUnavailable)
 		return
 	}
@@ -294,27 +303,31 @@ func run() (runErr error) {
 	var logLevel slog.Level
 	flag.TextVar(&logLevel, "log-level", slog.LevelInfo, "log level (debug, info, warn, error)")
 	var (
-		listenAddr      = flag.String("listen", ":8080", "HTTP server listen address")
-		socketPath      = flag.String("socket", "", "SPIFFE Workload API socket path")
-		jwksURL         = flag.String("jwks-url", "", "public JWKS URL advertised through discovery")
-		issuer          = flag.String("issuer", "", "HTTPS issuer for exchanged DSX JWTs")
-		region          = flag.String("region", "", "region encoded in exchanged DSX identities")
-		partition       = flag.String("partition", "", "partition encoded in exchanged DSX identities")
-		signingKeyset   = flag.String("signing-keyset", "/run/secrets/dsx-identity-keys/keyset.json", "private signing keyset file")
-		activeKID       = flag.String("active-kid", "/run/secrets/dsx-identity-keys-active-kid/active-kid.json", "JSON file containing the active signing kid and algorithm")
-		shardID         = flag.String("shard-id", "", "stable DSX Identity Keys shard identifier")
-		disableNATS     = flag.Bool("disable-nats", false, "disable NATS public key synchronization")
-		natsServer      = flag.String("nats-server", "", "NATS server URL")
-		natsClientName  = flag.String("nats-client-name", "", "NATS client name (defaults to dsx-identity-keys-<shard-id>)")
-		publicKeyTTL    = flag.Duration("public-key-ttl", 10*time.Minute, "public key NATS KV entry TTL")
-		natsKVBucket    = flag.String("nats-kv-bucket", defaultNATSKVBucket, "NATS KV bucket for public keys")
-		natsKVReplicas  = flag.Int("nats-kv-replicas", 1, "NATS KV stream replica count")
-		natsAuthMode    = flag.String("nats-auth-mode", natsAuthNone, "NATS authentication mode: none or oauth2")
-		natsCredentials = flag.String("nats-credentials-file", "", "JSON file containing OAuth2 client credentials")
-		natsIssuerURL   = flag.String("nats-oauth-issuer-url", "", "OAuth2 issuer for NATS token authentication")
-		natsScopes      = flag.String("nats-oauth-scopes", "nats", "comma-separated OAuth2 scopes for NATS; empty requests no scopes")
+		listenAddr            = flag.String("listen", ":8080", "HTTP server listen address")
+		socketPath            = flag.String("socket", "", "SPIFFE Workload API socket path")
+		jwksURL               = flag.String("jwks-url", "", "public JWKS URL advertised through discovery")
+		issuer                = flag.String("issuer", "", "HTTPS issuer for exchanged DSX JWTs")
+		region                = flag.String("region", "", "region encoded in exchanged DSX identities")
+		partition             = flag.String("partition", "", "partition encoded in exchanged DSX identities")
+		signingKeyset         = flag.String("signing-keyset", "/run/secrets/dsx-identity-keys/keyset.json", "private signing keyset file")
+		fileWatchPollInterval = flag.Duration("file-watch-poll-interval", 30*time.Second, "file watcher polling interval")
+		activeKID             = flag.String("active-kid", "/run/secrets/dsx-identity-keys-active-kid/active-kid.json", "JSON file containing the active signing kid and algorithm")
+		shardID               = flag.String("shard-id", "", "stable DSX Identity Keys shard identifier")
+		disableNATS           = flag.Bool("disable-nats", false, "disable NATS public key synchronization")
+		natsServer            = flag.String("nats-server", "", "NATS server URL")
+		natsClientName        = flag.String("nats-client-name", "", "NATS client name (defaults to dsx-identity-keys-<shard-id>)")
+		publicKeyTTL          = flag.Duration("public-key-ttl", 10*time.Minute, "public key NATS KV entry TTL")
+		natsKVBucket          = flag.String("nats-kv-bucket", keydistribution.DefaultBucket, "NATS KV bucket for public keys")
+		natsKVReplicas        = flag.Int("nats-kv-replicas", 1, "NATS KV stream replica count")
+		natsAuthMode          = flag.String("nats-auth-mode", keydistribution.AuthNone, "NATS authentication mode: none or oauth2")
+		natsCredentials       = flag.String("nats-credentials-file", "", "JSON file containing OAuth2 client credentials")
+		natsIssuerURL         = flag.String("nats-oauth-issuer-url", "", "OAuth2 issuer for NATS token authentication")
+		natsScopes            = flag.String("nats-oauth-scopes", "nats", "comma-separated OAuth2 scopes for NATS; empty requests no scopes")
 	)
 	flag.Parse()
+	if *fileWatchPollInterval <= 0 {
+		return fmt.Errorf("file watcher polling interval must be positive")
+	}
 	if *issuer == "" {
 		return fmt.Errorf("issuer is required")
 	}
@@ -330,13 +343,14 @@ func run() (runErr error) {
 		runErr = errors.Join(runErr, sdk.Shutdown(context.Background()))
 	}()
 
-	signer, publicKeys, err := loadSigningKeys(*signingKeyset, *activeKID)
+	signingReloader, err := signingkey.NewReloader(*signingKeyset, *activeKID)
 	if err != nil {
 		return fmt.Errorf("load signing keyset: %w", err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	registry := newKeyRegistry(publicKeys)
+	signingKeys := signingReloader.Source()
+	registry := keydistribution.NewRegistry(signingKeys)
 	var publicRegistry publicKeyRegistry = registry
 	if *disableNATS {
 		defer registry.Close()
@@ -348,25 +362,25 @@ func run() (runErr error) {
 		if *natsScopes != "" {
 			scopes = strings.Split(*natsScopes, ",")
 		}
-		natsAuth := natsAuthConfig{
-			mode:            *natsAuthMode,
-			credentialsFile: *natsCredentials,
-			oauthIssuerURL:  *natsIssuerURL,
-			oauthScopes:     scopes,
+		natsAuth := keydistribution.AuthConfig{
+			Mode:            *natsAuthMode,
+			CredentialsFile: *natsCredentials,
+			OAuthIssuerURL:  *natsIssuerURL,
+			OAuthScopes:     scopes,
 		}
-		synchronizer, err := newNATSKeySynchronizer(ctx, *natsServer, *natsClientName, *shardID, publicKeys, *publicKeyTTL, natsKVConfig{
-			bucket: *natsKVBucket, replicas: *natsKVReplicas,
+		synchronizer, err := keydistribution.NewSynchronizer(ctx, *natsServer, *natsClientName, *shardID, signingKeys, *publicKeyTTL, keydistribution.KVConfig{
+			Bucket: *natsKVBucket, Replicas: *natsKVReplicas,
 		}, registry, natsAuth)
 		if err != nil {
 			registry.Close()
 			return fmt.Errorf("start public key synchronization: %w", err)
 		}
-		registryWithSync := &synchronizedKeyRegistry{keyRegistry: registry, natsKeySynchronizer: synchronizer}
+		registryWithSync := &keydistribution.SynchronizedRegistry{Registry: registry, Synchronizer: synchronizer}
 		defer registryWithSync.Close()
 		publicRegistry = registryWithSync
 	}
 
-	server, err := newIdentityKeysServer(ctx, *issuer, *region, *partition, signer, publicRegistry, *socketPath, *jwksURL)
+	server, err := newIdentityKeysServer(ctx, *issuer, *region, *partition, signingKeys, publicRegistry, *socketPath, *jwksURL)
 	if err != nil {
 		return fmt.Errorf("create DSX Identity Keys server: %w", err)
 	}
@@ -387,11 +401,21 @@ func run() (runErr error) {
 		"listen_addr", *listenAddr,
 		"issuer", *issuer,
 		"shard_id", *shardID,
-		"active_kid", signer.keyID,
+		"active_kid", signingKeys.Get().KeyID(),
 		"nats_enabled", !*disableNATS,
 	)
-	if err := serveHTTP(ctx, httpServer); err != nil {
-		return fmt.Errorf("serve HTTP: %w", err)
+	group, runContext := errgroup.WithContext(ctx)
+	watchers := make([]watch.Watcher[filewatch.Change], 0, 2)
+	for _, path := range []string{*signingKeyset, *activeKID} {
+		watchers = append(watchers, filewatch.Contents(path,
+			watch.Composite(filewatch.FSNotify(path), watch.Polling(*fileWatchPollInterval))))
+	}
+	group.Go(func() error { return signingReloader.Run(runContext, watch.Composite(watchers...)) })
+	group.Go(func() error {
+		return serveHTTP(runContext, httpServer)
+	})
+	if err := group.Wait(); err != nil {
+		return fmt.Errorf("run DSX Identity Keys: %w", err)
 	}
 	return nil
 }

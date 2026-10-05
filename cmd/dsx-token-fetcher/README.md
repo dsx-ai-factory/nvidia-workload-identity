@@ -39,14 +39,3 @@ the consumer-readable token file. A failed refresh keeps an unexpired token
 available. An expired token is removed and readiness returns HTTP 503.
 Long-running fetchers refresh after 80 percent of the remaining lifetime. The
 fetcher retries failed refreshes once per second.
-
-## Testing
-
-```bash
-go test ./cmd/dsx-token-fetcher
-```
-
-The focused tests cover identity selection, refresh timing, atomic writes,
-expiry handling, and readiness. The optional
-live Workload API test uses `DSX_E2E_SPIFFE_ENDPOINT_SOCKET`,
-`DSX_E2E_SPIRE_JWT_AUDIENCE`, and `DSX_E2E_SPIRE_JWT_ID`.

@@ -78,10 +78,3 @@ In the future, CID filtering may be added, but today Kata selects guest CIDs ran
 so this is not feasible.
 
 The host proxy caps concurrent connections at 1024.
-
-## Testing
-
-`make test-rust` runs `cargo fmt --check`, `cargo clippy -D warnings`, and the
-unit tests, and `make validate` includes it. The unit tests cover cgroup path
-parsing and QEMU discovery; the cgroup test degrades to a no-op when the host is
-not running cgroup v2.

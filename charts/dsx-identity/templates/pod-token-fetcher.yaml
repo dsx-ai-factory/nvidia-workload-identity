@@ -38,12 +38,19 @@ spec:
         !has(object.spec.initContainers) ||
         !object.spec.initContainers.exists(container, container.name == "dsx-token-fetcher")
   variables:
-    # One port drives the process and its startup probe for each admitted Pod.
-    - name: healthPort
+    - name: requestedHealthPort
       expression: >-
         "spiffe.nvidia.com/token-fetcher-health-port" in object.metadata.annotations
           ? int(object.metadata.annotations["spiffe.nvidia.com/token-fetcher-health-port"])
           : {{ $healthPort }}
+    # The invalid-port branch raises a CEL conversion error so failurePolicy
+    # rejects the Pod even when the startup probe is disabled.
+    - name: healthPort
+      expression: >-
+        variables.requestedHealthPort >= 1 && variables.requestedHealthPort <= 65535
+          ? variables.requestedHealthPort
+          : int("token-fetcher health port must be between 1 and 65535, got " +
+                string(variables.requestedHealthPort))
     # The Kata proxy must start before the fetcher can obtain a token.
     - name: guestProxyIndex
       expression: >-
