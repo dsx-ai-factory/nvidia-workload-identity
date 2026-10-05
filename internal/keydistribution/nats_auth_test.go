@@ -1,4 +1,4 @@
-package main
+package keydistribution
 
 import (
 	"fmt"
@@ -29,8 +29,8 @@ func TestNATSOAuthOptionsUseNativeToken(t *testing.T) {
 	if err := os.WriteFile(credentialsPath, []byte(`{"client_id":"identity","client_secret":"secret"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	options, err := (natsAuthConfig{
-		mode: natsAuthOAuth2, credentialsFile: credentialsPath, oauthIssuerURL: issuerURL, oauthScopes: []string{"nats"},
+	options, err := (AuthConfig{
+		Mode: AuthOAuth2, CredentialsFile: credentialsPath, OAuthIssuerURL: issuerURL, OAuthScopes: []string{"nats"},
 	}).options(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -54,13 +54,13 @@ func TestNATSOAuthOptionsUseNativeToken(t *testing.T) {
 
 func TestNATSAuthOptions(t *testing.T) {
 	t.Run("none", func(t *testing.T) {
-		options, err := (natsAuthConfig{mode: natsAuthNone}).options(t.Context())
+		options, err := (AuthConfig{Mode: AuthNone}).options(t.Context())
 		if err != nil || len(options) != 0 {
 			t.Fatalf("none options = %d, error = %v", len(options), err)
 		}
 	})
 	t.Run("oauth2 missing configuration", func(t *testing.T) {
-		if _, err := (natsAuthConfig{mode: natsAuthOAuth2}).options(t.Context()); err == nil {
+		if _, err := (AuthConfig{Mode: AuthOAuth2}).options(t.Context()); err == nil {
 			t.Fatal("incomplete OAuth2 configuration was accepted")
 		}
 	})
@@ -69,19 +69,19 @@ func TestNATSAuthOptions(t *testing.T) {
 		if err := os.WriteFile(credentialsPath, []byte(`{"client_id":"","client_secret":""}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := (natsAuthConfig{
-			mode: natsAuthOAuth2, credentialsFile: credentialsPath, oauthIssuerURL: "https://example.invalid",
+		if _, err := (AuthConfig{
+			Mode: AuthOAuth2, CredentialsFile: credentialsPath, OAuthIssuerURL: "https://example.invalid",
 		}).options(t.Context()); err == nil {
 			t.Fatal("empty OAuth2 credentials were accepted")
 		}
 	})
 	t.Run("invalid", func(t *testing.T) {
-		if _, err := (natsAuthConfig{mode: "invalid"}).options(t.Context()); err == nil {
+		if _, err := (AuthConfig{Mode: "invalid"}).options(t.Context()); err == nil {
 			t.Fatal("invalid NATS auth mode was accepted")
 		}
 	})
 	t.Run("basic", func(t *testing.T) {
-		if _, err := (natsAuthConfig{mode: "basic"}).options(t.Context()); err == nil {
+		if _, err := (AuthConfig{Mode: "basic"}).options(t.Context()); err == nil {
 			t.Fatal("basic NATS authentication was accepted")
 		}
 	})
@@ -93,13 +93,13 @@ func TestNATSAuthOptions(t *testing.T) {
 	})
 }
 
-func testNATSOAuthConfig(t *testing.T, token string) natsAuthConfig {
+func testNATSOAuthConfig(t *testing.T, token string) AuthConfig {
 	t.Helper()
 	credentialsPath := filepath.Join(t.TempDir(), "credentials.json")
 	if err := os.WriteFile(credentialsPath, []byte(`{"client_id":"identity","client_secret":"secret"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return natsAuthConfig{mode: natsAuthOAuth2, credentialsFile: credentialsPath, oauthIssuerURL: testOAuthIssuer(t, token, nil), oauthScopes: []string{"nats"}}
+	return AuthConfig{Mode: AuthOAuth2, CredentialsFile: credentialsPath, OAuthIssuerURL: testOAuthIssuer(t, token, nil), OAuthScopes: []string{"nats"}}
 }
 
 func testOAuthIssuer(t *testing.T, token string, inspectTokenRequest func(*http.Request)) string {

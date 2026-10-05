@@ -1,4 +1,4 @@
-package main
+package keydistribution
 
 import (
 	"context"
@@ -13,10 +13,12 @@ import (
 	"github.com/go-jose/go-jose/v4"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+
+	"dsx-identity/internal/signingkey"
 )
 
 const (
-	defaultNATSKVBucket = "DSX_IDENTITY_KEYS"
+	DefaultBucket = "DSX_IDENTITY_KEYS"
 	// Stored keys use shard.<shard-id>.kid.<kid>.
 	keyKVPrefix = "shard."
 	// The watch filter shard.> receives every shard's stored keys.
@@ -25,23 +27,29 @@ const (
 	natsKVBucketDescription = "DSX Identity Keys public signing keys"
 )
 
-type natsKeySynchronizer struct {
+type Synchronizer struct {
 	connection *nats.Conn
 	cancel     context.CancelFunc
 	workers    sync.WaitGroup
 	publisher  keyPublisher
-	kv         natsKVConfig
+	kv         KVConfig
+}
+
+// SigningSource supplies snapshots and publication wake-ups.
+type SigningSource interface {
+	Get() *signingkey.Snapshot
+	Watch() <-chan struct{}
 }
 
 type keyPublisher struct {
 	shardID string
-	source  *signingKeySource
+	source  SigningSource
 	ttl     time.Duration
 }
 
 type remoteKeyRegistry interface {
-	replaceRemote(string, jose.JSONWebKey, time.Time) error
-	removeRemote(string)
+	ReplaceRemote(string, jose.JSONWebKey, time.Time) error
+	RemoveRemote(string)
 }
 
 type keySubscriber struct {
@@ -55,45 +63,45 @@ type keyWatcher struct {
 	watcher    jetstream.KeyWatcher
 }
 
-// synchronizedKeyRegistry composes key storage with its independent NATS
+// SynchronizedRegistry composes key storage with its independent NATS
 // lifecycle. The embedded registry remains responsible only for local and
 // remote key aggregation.
-type synchronizedKeyRegistry struct {
-	*keyRegistry
-	*natsKeySynchronizer
+type SynchronizedRegistry struct {
+	*Registry
+	*Synchronizer
 }
 
-func (r *synchronizedKeyRegistry) isReady() bool {
-	return r.natsKeySynchronizer.isReady()
+func (r *SynchronizedRegistry) Ready() bool {
+	return r.Synchronizer.Ready()
 }
 
-func (r *synchronizedKeyRegistry) Close() {
-	r.natsKeySynchronizer.Close()
-	r.keyRegistry.Close()
+func (r *SynchronizedRegistry) Close() {
+	r.Synchronizer.Close()
+	r.Registry.Close()
 }
 
-type natsKVConfig struct {
-	bucket   string
-	replicas int
+type KVConfig struct {
+	Bucket   string
+	Replicas int
 }
 
-func newNATSKeySynchronizer(ctx context.Context, serverURL, clientName, shardID string, source *signingKeySource, ttl time.Duration, kvConfig natsKVConfig, registry remoteKeyRegistry, auth natsAuthConfig) (*natsKeySynchronizer, error) {
+func NewSynchronizer(ctx context.Context, serverURL, clientName, shardID string, source SigningSource, ttl time.Duration, kvConfig KVConfig, registry remoteKeyRegistry, auth AuthConfig) (*Synchronizer, error) {
 	if serverURL == "" {
 		return nil, fmt.Errorf("NATS server URL is required")
 	}
 	if clientName == "" {
 		return nil, fmt.Errorf("NATS client name is required")
 	}
-	if len(source.Get().public) == 0 {
+	if len(source.Get().PublicKeys()) == 0 {
 		return nil, fmt.Errorf("at least one public key is required")
 	}
 	if ttl <= 0 {
 		return nil, fmt.Errorf("public key KV TTL must be positive")
 	}
-	if kvConfig.bucket == "" {
+	if kvConfig.Bucket == "" {
 		return nil, fmt.Errorf("NATS KV bucket is required")
 	}
-	if kvConfig.replicas <= 0 {
+	if kvConfig.Replicas <= 0 {
 		return nil, fmt.Errorf("NATS KV replicas must be positive")
 	}
 	syncContext, cancel := context.WithCancel(ctx)
@@ -102,7 +110,7 @@ func newNATSKeySynchronizer(ctx context.Context, serverURL, clientName, shardID 
 		cancel()
 		return nil, err
 	}
-	synchronizer := &natsKeySynchronizer{
+	synchronizer := &Synchronizer{
 		connection: connection,
 		cancel:     cancel,
 		publisher: keyPublisher{
@@ -134,7 +142,7 @@ func newNATSKeySynchronizer(ctx context.Context, serverURL, clientName, shardID 
 	return synchronizer, nil
 }
 
-func connectNATS(ctx context.Context, serverURL, clientName string, auth natsAuthConfig) (*nats.Conn, error) {
+func connectNATS(ctx context.Context, serverURL, clientName string, auth AuthConfig) (*nats.Conn, error) {
 	authOptions, err := auth.options(ctx)
 	if err != nil {
 		return nil, err
@@ -159,23 +167,23 @@ func connectNATS(ctx context.Context, serverURL, clientName string, auth natsAut
 	return connection, nil
 }
 
-func (s *natsKeySynchronizer) openBucket(ctx context.Context, js jetstream.JetStream) (jetstream.KeyValue, error) {
+func (s *Synchronizer) openBucket(ctx context.Context, js jetstream.JetStream) (jetstream.KeyValue, error) {
 	// Expiration markers notify watchers promptly. NATS requires them to live
 	// for at least one second, even when focused tests use a shorter key TTL.
 	config := jetstream.KeyValueConfig{
-		Bucket:         s.kv.bucket,
+		Bucket:         s.kv.Bucket,
 		Description:    natsKVBucketDescription,
 		History:        1,
 		TTL:            s.publisher.ttl,
 		Storage:        jetstream.MemoryStorage,
-		Replicas:       s.kv.replicas,
+		Replicas:       s.kv.Replicas,
 		LimitMarkerTTL: max(s.publisher.ttl, time.Second),
 	}
 	// Every instance owns the same bucket contract. Reconcile an existing
 	// bucket so configuration drift does not prevent synchronization startup.
 	bucket, err := js.CreateOrUpdateKeyValue(ctx, config)
 	if err != nil {
-		return nil, fmt.Errorf("open NATS KV bucket %q: %w", s.kv.bucket, err)
+		return nil, fmt.Errorf("open NATS KV bucket %q: %w", s.kv.Bucket, err)
 	}
 	return bucket, nil
 }
@@ -219,7 +227,7 @@ func (w *keyWatcher) replaceWatcher(ctx context.Context) error {
 	return nil
 }
 
-func (s *natsKeySynchronizer) publishLocalKeys(ctx context.Context, bucket jetstream.KeyValue) {
+func (s *Synchronizer) publishLocalKeys(ctx context.Context, bucket jetstream.KeyValue) {
 	// Refreshing every quarter TTL lets a live replica miss three consecutive
 	// writes before its local keys can expire from the shared bucket.
 	refresh := time.NewTicker(max(s.publisher.ttl/4, time.Nanosecond))
@@ -286,11 +294,11 @@ func (w *keyWatcher) rebuild(ctx context.Context) bool {
 	}
 }
 
-func (s *natsKeySynchronizer) isReady() bool {
+func (s *Synchronizer) Ready() bool {
 	return s.connection.IsConnected()
 }
 
-func (s *natsKeySynchronizer) Close() {
+func (s *Synchronizer) Close() {
 	// The background loop owns its watcher. Let it stop the watcher before the
 	// connection it uses is closed.
 	s.cancel()
@@ -299,7 +307,7 @@ func (s *natsKeySynchronizer) Close() {
 }
 
 func (p *keyPublisher) publish(ctx context.Context, bucket jetstream.KeyValue) error {
-	for _, key := range p.source.Get().public {
+	for _, key := range p.source.Get().PublicKeys() {
 		payload, err := json.Marshal(key)
 		if err != nil {
 			return fmt.Errorf("serialize public key %q: %w", key.KeyID, err)
@@ -318,7 +326,7 @@ func (s *keySubscriber) receive(entry jetstream.KeyValueEntry) {
 		return
 	}
 	if entry.Operation() != jetstream.KeyValuePut {
-		s.registry.removeRemote(keyID)
+		s.registry.RemoveRemote(keyID)
 		return
 	}
 	var key jose.JSONWebKey
@@ -326,11 +334,11 @@ func (s *keySubscriber) receive(entry jetstream.KeyValueEntry) {
 		slog.Warn("Ignoring invalid public JWK", "key", entry.Key(), "error", err)
 		return
 	}
-	if err := validateSigningKey(&key, true); err != nil {
+	if err := signingkey.Validate(&key, true); err != nil {
 		slog.Warn("Ignoring invalid public JWK", "key", entry.Key(), "error", err)
 		return
 	}
-	if err := s.registry.replaceRemote(keyID, key, entry.Created().Add(s.ttl)); err != nil {
+	if err := s.registry.ReplaceRemote(keyID, key, entry.Created().Add(s.ttl)); err != nil {
 		slog.Warn("Ignoring public JWK", "key", entry.Key(), "error", err)
 		return
 	}
@@ -348,7 +356,7 @@ func parseKeyKVKey(key string) (string, bool) {
 		return "", false
 	}
 	keyID := parts[3]
-	if validateKeyID(keyID) != nil {
+	if signingkey.ValidateKeyID(keyID) != nil {
 		return "", false
 	}
 	return keyID, true

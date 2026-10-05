@@ -55,6 +55,8 @@ repository is a legacy mirror.
   compatibility paths, wrappers, or configuration.
 - Compose independent components around immutable state. Prefer atomic pointer
   swaps for shared snapshots.
+- Keep runtime ownership separate from shared data. Use consumer-owned interfaces
+  for dependency boundaries and test control. Cover acceptance and rejection.
 - Keep supplied values exact. Do not trim, normalize, case-fold, or coerce input.
 - `charts/dsx-identity` installs each management-cluster shard.
 - `charts/dsx-imds` and `charts/dsx-spiffe-csi` are DPUService payloads. Keep external

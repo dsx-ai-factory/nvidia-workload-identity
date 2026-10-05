@@ -3,18 +3,19 @@ package filewatch
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"dsx-identity/internal/watch"
 )
 
 func TestCompositeTracksOneFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "watched")
 	writeFile(t, path, "first")
-	changed := startWatcher(t, Contents(path, Composite(FSNotify(path), Polling(30*time.Millisecond))))
+	changed := startWatcher(t, Contents(path, watch.Composite(FSNotify(path), watch.Polling(30*time.Millisecond))))
 	waitContents(t, changed, "first")
 
 	writeFile(t, filepath.Join(filepath.Dir(path), "unrelated"), "other")
@@ -59,7 +60,7 @@ func TestCompositeTracksProjectedSecret(t *testing.T) {
 	if err := os.Symlink("..data/keyset.json", path); err != nil {
 		t.Fatal(err)
 	}
-	changed := startWatcher(t, Contents(path, Composite(FSNotify(path), Polling(30*time.Millisecond))))
+	changed := startWatcher(t, Contents(path, watch.Composite(FSNotify(path), watch.Polling(30*time.Millisecond))))
 	waitContents(t, changed, "first")
 	if err := os.Symlink("second", filepath.Join(dir, "..data_tmp")); err != nil {
 		t.Fatal(err)
@@ -82,8 +83,8 @@ func TestPollingRecoversMissedEventsAtConfiguredInterval(t *testing.T) {
 		t.Fatal(err)
 	}
 	synctest.Test(t, func(t *testing.T) {
-		silent := Watcher[struct{}](func(ctx context.Context, _ func(struct{}) error) error { <-ctx.Done(); return nil })
-		changed := startWatcher(t, Contents(path, Composite(silent, Polling(30*time.Second))))
+		silent := watch.Watcher[struct{}](func(ctx context.Context, _ func(struct{}) error) error { <-ctx.Done(); return nil })
+		changed := startWatcher(t, Contents(path, watch.Composite(silent, watch.Polling(30*time.Second))))
 		waitContents(t, changed, "first")
 		synctest.Wait()
 		writeFile(t, target, "second")
@@ -118,113 +119,10 @@ func TestPollingRecoversMissedEventsAtConfiguredInterval(t *testing.T) {
 	})
 }
 
-func TestCompositeCancelsOtherWatchersOnFailure(t *testing.T) {
-	stopped := make(chan struct{})
-	expected := errors.New("watch failed")
-	composite := Composite(
-		Watcher[struct{}](func(ctx context.Context, _ func(struct{}) error) error { <-ctx.Done(); close(stopped); return nil }),
-		Watcher[struct{}](func(context.Context, func(struct{}) error) error { return expected }),
-	)
-	if err := composite(t.Context(), func(struct{}) error { return nil }); !errors.Is(err, expected) {
-		t.Fatalf("composite error = %v, want %v", err, expected)
-	}
-	select {
-	case <-stopped:
-	default:
-		t.Fatal("composite left watcher running")
-	}
-}
-
-func TestPollingRejectsNonpositiveInterval(t *testing.T) {
-	for _, interval := range []time.Duration{0, -time.Second} {
-		if err := Polling(interval)(t.Context(), func(struct{}) error { return nil }); err == nil {
-			t.Fatalf("accepted interval %s", interval)
-		}
-	}
-}
-
-func TestCompositeReturnsConsumerErrorsToProducer(t *testing.T) {
-	rejected := errors.New("change rejected")
-	watcher := Watcher[int](func(_ context.Context, notify func(int) error) error {
-		if err := notify(1); !errors.Is(err, rejected) {
-			return fmt.Errorf("first reply = %v, want %v", err, rejected)
-		}
-		return notify(2)
-	})
-	var received []int
-	err := Composite(watcher)(t.Context(), func(value int) error {
-		received = append(received, value)
-		if value == 1 {
-			return rejected
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(received) != 2 || received[0] != 1 || received[1] != 2 {
-		t.Fatalf("received = %v", received)
-	}
-}
-
-func TestCompositeDeliversRapidChangesWithBackpressure(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		delivered := make(chan int, 2)
-		received := make(chan int)
-		accept := make(chan struct{})
-		done := make(chan error, 1)
-		watcher := Watcher[int](func(_ context.Context, notify func(int) error) error {
-			for _, value := range []int{1, 2} {
-				if err := notify(value); err != nil {
-					return err
-				}
-				delivered <- value
-			}
-			return nil
-		})
-		go func() {
-			done <- Composite(watcher)(t.Context(), func(value int) error {
-				received <- value
-				<-accept
-				return nil
-			})
-		}()
-		if value := <-received; value != 1 {
-			t.Fatalf("first result = %d", value)
-		}
-		synctest.Wait()
-		select {
-		case <-delivered:
-			t.Fatal("producer advanced before first acceptance")
-		default:
-		}
-		accept <- struct{}{}
-		if value := <-received; value != 2 {
-			t.Fatalf("second result = %d", value)
-		}
-		synctest.Wait()
-		if value := <-delivered; value != 1 {
-			t.Fatalf("delivered = %d", value)
-		}
-		select {
-		case <-delivered:
-			t.Fatal("producer advanced before second acceptance")
-		default:
-		}
-		accept <- struct{}{}
-		if err := <-done; err != nil {
-			t.Fatal(err)
-		}
-		if value := <-delivered; value != 2 {
-			t.Fatalf("delivered = %d", value)
-		}
-	})
-}
-
 func TestContentsRetriesRejectedChangesAndRestoredAcceptedContents(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "watched")
 	writeFile(t, path, "first")
-	events := Watcher[struct{}](func(_ context.Context, notify func(struct{}) error) error {
+	events := watch.Watcher[struct{}](func(_ context.Context, notify func(struct{}) error) error {
 		if err := notify(struct{}{}); err != nil {
 			return err
 		}
@@ -261,7 +159,7 @@ func TestContentsRetriesRejectedChangesAndRestoredAcceptedContents(t *testing.T)
 func TestContentsDeliversObservedBytesAcrossTransientChanges(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "watched")
 	writeFile(t, path, "first")
-	events := Watcher[struct{}](func(_ context.Context, notify func(struct{}) error) error {
+	events := watch.Watcher[struct{}](func(_ context.Context, notify func(struct{}) error) error {
 		if err := notify(struct{}{}); err != nil {
 			return err
 		}
@@ -289,7 +187,7 @@ func TestContentsDeliversObservedBytesAcrossTransientChanges(t *testing.T) {
 	}
 }
 
-func startWatcher(t *testing.T, watcher Watcher[Change]) <-chan Change {
+func startWatcher(t *testing.T, watcher watch.Watcher[Change]) <-chan Change {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
 	changed := make(chan Change)

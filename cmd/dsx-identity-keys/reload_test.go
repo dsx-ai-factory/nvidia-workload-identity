@@ -19,6 +19,10 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"dsx-identity/internal/filewatch"
+	"dsx-identity/internal/keydistribution"
+	"dsx-identity/internal/keytest"
+	"dsx-identity/internal/signingkey"
+	"dsx-identity/internal/watch"
 )
 
 func TestReloadSigningSources(t *testing.T) {
@@ -28,10 +32,10 @@ func TestReloadSigningSources(t *testing.T) {
 			name = "projected Secret symlinks"
 		}
 		t.Run(name, func(t *testing.T) {
-			first := testJWK(t, "", false)
-			second := testJWK(t, "", false)
-			firstID, secondID := signingKID(t, first), signingKID(t, second)
-			keysetPath, activePath := writeSigningFiles(t, []jose.JSONWebKey{first}, firstID)
+			first := keytest.TestJWK(t, "", false)
+			second := keytest.TestJWK(t, "", false)
+			firstID, secondID := keytest.SigningKID(t, first), keytest.SigningKID(t, second)
+			keysetPath, activePath := keytest.WriteSigningFiles(t, []jose.JSONWebKey{first}, firstID)
 			sourceKeyset, sourceActive := keysetPath, activePath
 			if projected {
 				keysetPath = filepath.Join(t.TempDir(), "keyset.json")
@@ -39,21 +43,21 @@ func TestReloadSigningSources(t *testing.T) {
 				replaceSigningSymlink(t, keysetPath, sourceKeyset)
 				replaceSigningSymlink(t, activePath, sourceActive)
 			}
-			reloader, err := newSigningKeyReloader(keysetPath, activePath)
+			reloader, err := signingkey.NewReloader(keysetPath, activePath)
 			if err != nil {
 				t.Fatal(err)
 			}
 			synctest.Test(t, func(t *testing.T) {
-				registry := newKeyRegistry(reloader.source)
+				registry := keydistribution.NewRegistry(reloader.Source())
 				defer registry.Close()
-				server := &identityKeysServer{signingKeys: reloader.source, registry: registry, issuer: testIssuer}
+				server := &identityKeysServer{signingKeys: reloader.Source(), registry: registry, issuer: testIssuer}
 				ctx, cancel := context.WithCancel(t.Context())
 				done := make(chan struct{})
 				go func() {
 					defer close(done)
-					if err := reloader.run(ctx, filewatch.Composite(
-						filewatch.Contents(keysetPath, filewatch.Polling(30*time.Second)),
-						filewatch.Contents(activePath, filewatch.Polling(30*time.Second)),
+					if err := reloader.Run(ctx, watch.Composite(
+						filewatch.Contents(keysetPath, watch.Polling(30*time.Second)),
+						filewatch.Contents(activePath, watch.Polling(30*time.Second)),
 					)); err != nil {
 						t.Error(err)
 					}
@@ -62,7 +66,7 @@ func TestReloadSigningSources(t *testing.T) {
 				synctest.Wait()
 				assertReloadedKeys(t, server, firstID, firstID)
 				update := func(keys []jose.JSONWebKey, active string) {
-					newKeyset, newActive := writeSigningFiles(t, keys, active)
+					newKeyset, newActive := keytest.WriteSigningFiles(t, keys, active)
 					if projected {
 						replaceSigningSymlink(t, keysetPath, newKeyset)
 						replaceSigningSymlink(t, activePath, newActive)
@@ -187,66 +191,66 @@ func assertReloadedKeys(t *testing.T, server *identityKeysServer, active string,
 }
 
 func TestReloadPublishesNewKeysAndStopsRemovedLeases(t *testing.T) {
-	broker := runTestNATSServer(t, "")
-	first, second := testJWK(t, "", false), testJWK(t, "", false)
-	firstID, secondID := signingKID(t, first), signingKID(t, second)
-	keysetPath, activePath := writeSigningFiles(t, []jose.JSONWebKey{first}, firstID)
-	reloader, err := newSigningKeyReloader(keysetPath, activePath)
+	broker := keytest.RunTestNATSServer(t, "")
+	first, second := keytest.TestJWK(t, "", false), keytest.TestJWK(t, "", false)
+	firstID, secondID := keytest.SigningKID(t, first), keytest.SigningKID(t, second)
+	keysetPath, activePath := keytest.WriteSigningFiles(t, []jose.JSONWebKey{first}, firstID)
+	reloader, err := signingkey.NewReloader(keysetPath, activePath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	config := testNATSKVConfig("RELOAD")
-	local := startTestSourceRegistry(t, broker.ClientURL(), "local", "local", reloader.source, time.Second, config, natsAuthConfig{mode: natsAuthNone})
-	peerKey := testJWK(t, "peer", true)
-	peer := startTestKeyRegistry(t, broker.ClientURL(), "peer", "peer", []jose.JSONWebKey{peerKey}, time.Second, config, natsAuthConfig{mode: natsAuthNone})
-	server := &identityKeysServer{signingKeys: reloader.source, registry: local, issuer: testIssuer}
+	local := startTestSourceRegistry(t, broker.ClientURL(), "local", "local", reloader.Source(), time.Second, config, keydistribution.AuthConfig{Mode: keydistribution.AuthNone})
+	peerKey := keytest.TestJWK(t, "peer", true)
+	peer := startTestKeyRegistry(t, broker.ClientURL(), "peer", "peer", []jose.JSONWebKey{peerKey}, time.Second, config, keydistribution.AuthConfig{Mode: keydistribution.AuthNone})
+	server := &identityKeysServer{signingKeys: reloader.Source(), registry: local, issuer: testIssuer}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		if err := reloader.run(ctx, filewatch.Composite(
-			filewatch.Contents(keysetPath, filewatch.Composite(filewatch.FSNotify(keysetPath), filewatch.Polling(30*time.Millisecond))),
-			filewatch.Contents(activePath, filewatch.Composite(filewatch.FSNotify(activePath), filewatch.Polling(30*time.Millisecond))),
+		if err := reloader.Run(ctx, watch.Composite(
+			filewatch.Contents(keysetPath, watch.Composite(filewatch.FSNotify(keysetPath), watch.Polling(30*time.Millisecond))),
+			filewatch.Contents(activePath, watch.Composite(filewatch.FSNotify(activePath), watch.Polling(30*time.Millisecond))),
 		)); err != nil {
 			t.Error(err)
 		}
 	}()
 	defer func() { cancel(); <-done }()
-	requireKeyIDs(t, peer, firstID, "peer")
-	newKeyset, newActive := writeSigningFiles(t, []jose.JSONWebKey{first, second}, secondID)
+	keytest.RequireKeyIDs(t, peer, firstID, "peer")
+	newKeyset, newActive := keytest.WriteSigningFiles(t, []jose.JSONWebKey{first, second}, secondID)
 	copySigningFile(t, keysetPath, newKeyset)
 	copySigningFile(t, activePath, newActive)
-	requireKeyIDs(t, peer, firstID, secondID, "peer")
-	requireCondition(t, "new active signer", func() bool {
+	keytest.RequireKeyIDs(t, peer, firstID, secondID, "peer")
+	keytest.RequireCondition(t, "new active signer", func() bool {
 		token, err := server.resignJWT(map[string]any{"aud": []string{"test"}}, spiffeid.RequireFromString("spiffe://operator-1.ds9.dsx.nvid.id/bm/host-1"))
 		if err != nil {
 			return false
 		}
 		parsed, err := jwt.ParseSigned(token, []jose.SignatureAlgorithm{jose.ES256})
-		return err == nil && parsed.Headers[0].KeyID == secondID && verifyTestToken(peer.keyset(), token)
+		return err == nil && parsed.Headers[0].KeyID == secondID && keytest.VerifyTestToken(peer.Keyset(), token)
 	})
 	assertReloadedKeys(t, server, secondID, firstID, secondID, "peer")
-	newKeyset, _ = writeSigningFiles(t, []jose.JSONWebKey{second}, secondID)
+	newKeyset, _ = keytest.WriteSigningFiles(t, []jose.JSONWebKey{second}, secondID)
 	copySigningFile(t, keysetPath, newKeyset)
-	requireKeyIDs(t, peer, secondID, "peer")
-	requireKeyIDs(t, local, secondID, "peer")
+	keytest.RequireKeyIDs(t, peer, secondID, "peer")
+	keytest.RequireKeyIDs(t, local, secondID, "peer")
 	assertReloadedKeys(t, server, secondID, secondID, "peer")
 }
 
 func TestSigningDuringSourceSwaps(t *testing.T) {
-	first, second := testJWK(t, "", false), testJWK(t, "", false)
-	firstID, secondID := signingKID(t, first), signingKID(t, second)
-	keysetPath, activePath := writeSigningFiles(t, []jose.JSONWebKey{first, second}, firstID)
-	reloader, err := newSigningKeyReloader(keysetPath, activePath)
+	first, second := keytest.TestJWK(t, "", false), keytest.TestJWK(t, "", false)
+	firstID, secondID := keytest.SigningKID(t, first), keytest.SigningKID(t, second)
+	keysetPath, activePath := keytest.WriteSigningFiles(t, []jose.JSONWebKey{first, second}, firstID)
+	reloader, err := signingkey.NewReloader(keysetPath, activePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry := newKeyRegistry(reloader.source)
+	registry := keydistribution.NewRegistry(reloader.Source())
 	defer registry.Close()
-	server := &identityKeysServer{signingKeys: reloader.source, registry: registry, issuer: testIssuer}
+	server := &identityKeysServer{signingKeys: reloader.Source(), registry: registry, issuer: testIssuer}
 	subject := spiffeid.RequireFromString("spiffe://operator-1.ds9.dsx.nvid.id/bm/host-1")
-	firstActive := writeActiveKeysetFile(t, firstID, jose.ES256)
-	secondActive := writeActiveKeysetFile(t, secondID, jose.ES256)
+	firstActive := keytest.WriteActiveKeysetFile(t, firstID, jose.ES256)
+	secondActive := keytest.WriteActiveKeysetFile(t, secondID, jose.ES256)
 	var readers errgroup.Group
 	for range 8 {
 		readers.Go(func() error {
@@ -261,28 +265,29 @@ func TestSigningDuringSourceSwaps(t *testing.T) {
 				if err := json.Unmarshal(response.Body.Bytes(), &keys); err != nil {
 					return err
 				}
-				if !verifyTestToken(keys, token) {
+				if !keytest.VerifyTestToken(keys, token) {
 					return fmt.Errorf("token failed verification during reloader swap")
 				}
 			}
 			return nil
 		})
 	}
-	rawKeyset, err := os.ReadFile(keysetPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for range 20 {
-		for _, active := range []string{secondActive, firstActive} {
-			copySigningFile(t, activePath, active)
-			rawActive, err := os.ReadFile(activePath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := reloader.load(rawKeyset, rawActive); err != nil {
-				t.Error(err)
+	events := watch.Watcher[filewatch.Change](func(_ context.Context, notify func(filewatch.Change) error) error {
+		for range 20 {
+			for _, active := range []string{secondActive, firstActive} {
+				rawActive, err := os.ReadFile(active)
+				if err != nil {
+					return err
+				}
+				if err := notify(filewatch.Change{Path: activePath, Contents: rawActive}); err != nil {
+					return err
+				}
 			}
 		}
+		return nil
+	})
+	if err := reloader.Run(t.Context(), events); err != nil {
+		t.Error(err)
 	}
 	if err := readers.Wait(); err != nil {
 		t.Fatal(err)
@@ -290,10 +295,10 @@ func TestSigningDuringSourceSwaps(t *testing.T) {
 }
 
 func TestSigningReloaderAcceptsObservedContentsBeforeWatcherAdvances(t *testing.T) {
-	first, second := testJWK(t, "", false), testJWK(t, "", false)
-	firstID, secondID := signingKID(t, first), signingKID(t, second)
-	keysetPath, activePath := writeSigningFiles(t, []jose.JSONWebKey{first, second}, firstID)
-	reloader, err := newSigningKeyReloader(keysetPath, activePath)
+	first, second := keytest.TestJWK(t, "", false), keytest.TestJWK(t, "", false)
+	firstID, secondID := keytest.SigningKID(t, first), keytest.SigningKID(t, second)
+	keysetPath, activePath := keytest.WriteSigningFiles(t, []jose.JSONWebKey{first, second}, firstID)
+	reloader, err := signingkey.NewReloader(keysetPath, activePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,14 +310,14 @@ func TestSigningReloaderAcceptsObservedContentsBeforeWatcherAdvances(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondPath := writeActiveKeysetFile(t, secondID, jose.ES256)
+	secondPath := keytest.WriteActiveKeysetFile(t, secondID, jose.ES256)
 	secondActive, err := os.ReadFile(secondPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Disk differs from the observations that the watcher delivers below.
 	copySigningFile(t, activePath, secondPath)
-	events := filewatch.Watcher[filewatch.Change](func(_ context.Context, notify func(filewatch.Change) error) error {
+	events := watch.Watcher[filewatch.Change](func(_ context.Context, notify func(filewatch.Change) error) error {
 		if err := notify(filewatch.Change{Path: keysetPath, Contents: rawKeyset}); err != nil {
 			return err
 		}
@@ -331,16 +336,16 @@ func TestSigningReloaderAcceptsObservedContentsBeforeWatcherAdvances(t *testing.
 			if (err != nil) != step.rejected {
 				return fmt.Errorf("consumer reply = %v, want rejected %v", err, step.rejected)
 			}
-			if got := reloader.source.Get().signer.keyID; got != step.want {
+			if got := reloader.Source().Get().KeyID(); got != step.want {
 				return fmt.Errorf("watcher resumed with signer %q, want %q", got, step.want)
 			}
 		}
 		return nil
 	})
-	if err := reloader.run(t.Context(), filewatch.Composite(events)); err != nil {
+	if err := reloader.Run(t.Context(), watch.Composite(events)); err != nil {
 		t.Fatal(err)
 	}
-	if got := reloader.source.Get().signer.keyID; got != firstID {
+	if got := reloader.Source().Get().KeyID(); got != firstID {
 		t.Fatalf("final signer = %q, want %q", got, firstID)
 	}
 }

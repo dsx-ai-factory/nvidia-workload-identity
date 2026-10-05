@@ -1,4 +1,4 @@
-package main
+package keydistribution
 
 import (
 	"fmt"
@@ -9,15 +9,22 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/jellydator/ttlcache/v3"
+
+	"dsx-identity/internal/signingkey"
 )
 
-type keyRegistry struct {
-	local  *signingKeySource
+// LocalSource supplies the current local public keys.
+type LocalSource interface {
+	Get() *signingkey.Snapshot
+}
+
+type Registry struct {
+	local  LocalSource
 	remote *ttlcache.Cache[string, jose.JSONWebKey]
 }
 
-func newKeyRegistry(local *signingKeySource) *keyRegistry {
-	registry := &keyRegistry{
+func NewRegistry(local LocalSource) *Registry {
+	registry := &Registry{
 		local:  local,
 		remote: ttlcache.New[string, jose.JSONWebKey](),
 	}
@@ -25,15 +32,15 @@ func newKeyRegistry(local *signingKeySource) *keyRegistry {
 	return registry
 }
 
-func (r *keyRegistry) Close() {
+func (r *Registry) Close() {
 	r.remote.Stop()
 }
 
-func (r *keyRegistry) isReady() bool {
+func (r *Registry) Ready() bool {
 	return true
 }
 
-func (r *keyRegistry) replaceRemote(keyID string, key jose.JSONWebKey, expiresAt time.Time) error {
+func (r *Registry) ReplaceRemote(keyID string, key jose.JSONWebKey, expiresAt time.Time) error {
 	if key.KeyID != keyID {
 		return fmt.Errorf("KV key kid %q does not match JWK kid %q", keyID, key.KeyID)
 	}
@@ -47,12 +54,12 @@ func (r *keyRegistry) replaceRemote(keyID string, key jose.JSONWebKey, expiresAt
 	return nil
 }
 
-func (r *keyRegistry) removeRemote(keyID string) {
+func (r *Registry) RemoveRemote(keyID string) {
 	r.remote.Delete(keyID)
 }
 
-func (r *keyRegistry) keyset() jose.JSONWebKeySet {
-	local := r.local.Get().public
+func (r *Registry) Keyset() jose.JSONWebKeySet {
+	local := r.local.Get().PublicKeys()
 	keys := slices.Collect(maps.Values(local))
 	for _, item := range r.remote.Items() {
 		if _, present := local[item.Key()]; !present {
@@ -65,19 +72,10 @@ func (r *keyRegistry) keyset() jose.JSONWebKeySet {
 	return jose.JSONWebKeySet{Keys: keys}
 }
 
-func signingAlgorithms(keys jose.JSONWebKeySet) []string {
+func SigningAlgorithms(keys jose.JSONWebKeySet) []string {
 	algorithms := make(map[string]struct{}, len(keys.Keys))
 	for _, key := range keys.Keys {
 		algorithms[key.Algorithm] = struct{}{}
 	}
 	return slices.Sorted(maps.Keys(algorithms))
-}
-
-func validateKeyID(keyID string) error {
-	// A kid occupies one NATS subject token. Wildcards and separators would
-	// change subscription scope instead of naming a key.
-	if keyID == "" || strings.ContainsAny(keyID, ".>* \t\r\n") {
-		return fmt.Errorf("kid %q is not a valid NATS subject token", keyID)
-	}
-	return nil
 }
