@@ -45,6 +45,10 @@ func loadSigningKeys(keysetPath, activeKIDPath string) (*tokenSigner, []jose.JSO
 	if err != nil {
 		return nil, nil, fmt.Errorf("read active kid: %w", err)
 	}
+	return parseSigningKeys(rawKeyset, rawKID)
+}
+
+func parseSigningKeys(rawKeyset, rawKID []byte) (*tokenSigner, []jose.JSONWebKey, error) {
 	var activeDocument activeKeysetDocument
 	if err := json.Unmarshal(rawKID, &activeDocument); err != nil {
 		return nil, nil, fmt.Errorf("parse active kid: %w", err)

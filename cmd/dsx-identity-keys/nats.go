@@ -32,9 +32,11 @@ type natsKeySynchronizer struct {
 	workers    sync.WaitGroup
 	publisher  keyPublisher
 	kv         natsKVConfig
+	updates    chan struct{}
 }
 
 type keyPublisher struct {
+	keysMu  sync.RWMutex
 	shardID string
 	keys    []jose.JSONWebKey
 	ttl     time.Duration
@@ -111,7 +113,8 @@ func newNATSKeySynchronizer(ctx context.Context, serverURL, clientName, shardID 
 			keys:    slices.Clone(keys),
 			ttl:     ttl,
 		},
-		kv: kvConfig,
+		kv:      kvConfig,
+		updates: make(chan struct{}, 1),
 	}
 	js, err := jetstream.New(connection)
 	if err != nil {
@@ -236,6 +239,7 @@ func (s *natsKeySynchronizer) publishLocalKeys(ctx context.Context, bucket jetst
 		case <-ctx.Done():
 			return
 		case <-refresh.C:
+		case <-s.updates:
 		}
 	}
 }
@@ -298,7 +302,10 @@ func (s *natsKeySynchronizer) Close() {
 }
 
 func (p *keyPublisher) publish(ctx context.Context, bucket jetstream.KeyValue) error {
-	for _, key := range p.keys {
+	p.keysMu.RLock()
+	keys := slices.Clone(p.keys)
+	p.keysMu.RUnlock()
+	for _, key := range keys {
 		payload, err := json.Marshal(key)
 		if err != nil {
 			return fmt.Errorf("serialize public key %q: %w", key.KeyID, err)
@@ -351,4 +358,14 @@ func parseKeyKVKey(key string) (string, bool) {
 		return "", false
 	}
 	return keyID, true
+}
+
+func (s *natsKeySynchronizer) replaceLocal(keys []jose.JSONWebKey) {
+	s.publisher.keysMu.Lock()
+	s.publisher.keys = slices.Clone(keys)
+	s.publisher.keysMu.Unlock()
+	select {
+	case s.updates <- struct{}{}:
+	default:
+	}
 }

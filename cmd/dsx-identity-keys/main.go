@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -59,6 +60,7 @@ type publicKeyRegistry interface {
 }
 
 type identityKeysServer struct {
+	signerMu  sync.RWMutex
 	signer    *tokenSigner
 	registry  publicKeyRegistry
 	jwtSource *workloadapi.JWTSource
@@ -106,6 +108,8 @@ func (s *identityKeysServer) resignJWT(originalClaims map[string]any, newSubject
 	newClaims["sub"] = newSubject.String()
 	newClaims["iss"] = s.issuer
 
+	s.signerMu.RLock()
+	defer s.signerMu.RUnlock()
 	token, err := jwt.Signed(s.signer.signer).Claims(newClaims).Serialize()
 	if err != nil {
 		return "", fmt.Errorf("sign JWT: %w", err)
@@ -338,6 +342,7 @@ func run() (runErr error) {
 	defer stop()
 	registry := newKeyRegistry(publicKeys)
 	var publicRegistry publicKeyRegistry = registry
+	var synchronizer *natsKeySynchronizer
 	if *disableNATS {
 		defer registry.Close()
 	} else {
@@ -354,7 +359,7 @@ func run() (runErr error) {
 			oauthIssuerURL:  *natsIssuerURL,
 			oauthScopes:     scopes,
 		}
-		synchronizer, err := newNATSKeySynchronizer(ctx, *natsServer, *natsClientName, *shardID, publicKeys, *publicKeyTTL, natsKVConfig{
+		synchronizer, err = newNATSKeySynchronizer(ctx, *natsServer, *natsClientName, *shardID, publicKeys, *publicKeyTTL, natsKVConfig{
 			bucket: *natsKVBucket, replicas: *natsKVReplicas,
 		}, registry, natsAuth)
 		if err != nil {
@@ -375,6 +380,16 @@ func run() (runErr error) {
 			runErr = errors.Join(runErr, fmt.Errorf("close JWT source: %w", err))
 		}
 	}()
+	reloadContext, cancelReload := context.WithCancel(ctx)
+	var reloadWorkers sync.WaitGroup
+	reloadWorkers.Go(func() {
+		server.reloadSigningKeys(reloadContext, *signingKeyset, *activeKID, registry, synchronizer)
+	})
+	defer func() {
+		cancelReload()
+		reloadWorkers.Wait()
+	}()
+
 	httpServer := &http.Server{
 		Addr: *listenAddr,
 		Handler: otelhttp.NewHandler(server.handler(), "dsx-identity-keys",

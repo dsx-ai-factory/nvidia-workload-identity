@@ -5,6 +5,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
@@ -12,8 +13,9 @@ import (
 )
 
 type keyRegistry struct {
-	local  map[string]jose.JSONWebKey
-	remote *ttlcache.Cache[string, jose.JSONWebKey]
+	localMu sync.RWMutex
+	local   map[string]jose.JSONWebKey
+	remote  *ttlcache.Cache[string, jose.JSONWebKey]
 }
 
 func newKeyRegistry(localKeys []jose.JSONWebKey) *keyRegistry {
@@ -45,23 +47,24 @@ func (r *keyRegistry) replaceRemote(keyID string, key jose.JSONWebKey, expiresAt
 	if ttl <= 0 {
 		return fmt.Errorf("public key %q KV entry has expired", keyID)
 	}
-	if _, local := r.local[keyID]; local {
-		return nil
-	}
+	// Keep leases for local keys too so removal honors other replicas until
+	// their publications expire. Local keys take precedence in keyset().
 	r.remote.Set(keyID, key, ttl)
 	return nil
 }
 
 func (r *keyRegistry) removeRemote(keyID string) {
-	if _, local := r.local[keyID]; !local {
-		r.remote.Delete(keyID)
-	}
+	r.remote.Delete(keyID)
 }
 
 func (r *keyRegistry) keyset() jose.JSONWebKeySet {
+	r.localMu.RLock()
+	defer r.localMu.RUnlock()
 	keys := slices.Collect(maps.Values(r.local))
 	for _, item := range r.remote.Items() {
-		keys = append(keys, item.Value())
+		if _, local := r.local[item.Key()]; !local {
+			keys = append(keys, item.Value())
+		}
 	}
 	slices.SortFunc(keys, func(a, b jose.JSONWebKey) int {
 		return strings.Compare(a.KeyID, b.KeyID)
@@ -84,4 +87,14 @@ func validateKeyID(keyID string) error {
 		return fmt.Errorf("kid %q is not a valid NATS subject token", keyID)
 	}
 	return nil
+}
+
+func (r *keyRegistry) replaceLocal(keys []jose.JSONWebKey) {
+	local := make(map[string]jose.JSONWebKey, len(keys))
+	for _, key := range keys {
+		local[key.KeyID] = key
+	}
+	r.localMu.Lock()
+	r.local = local
+	r.localMu.Unlock()
 }

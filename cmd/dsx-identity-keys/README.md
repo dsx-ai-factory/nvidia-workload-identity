@@ -111,6 +111,13 @@ for the Transit key ring. Every loaded key must support that algorithm:
 {"active_kid":"<kid>","alg":"ES256"}
 ```
 
+Each instance rereads both mounted sources every second, including Kubernetes
+Secret symlink updates. A valid pair replaces the active signer and local
+public keys without a restart and triggers NATS publication. Missing,
+malformed, or mismatched sources retain the last valid signer and keys until
+both sources validate. Invalid sources at startup prevent the process from
+starting.
+
 Rotation first adds and publishes the new key while the old kid remains active.
 Activation changes only the active-kid Secret. Removing an expired old key
 stops its lease refresh, after which it disappears from aggregate JWKS
