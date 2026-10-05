@@ -52,7 +52,7 @@ func (r *keyRegistry) removeRemote(keyID string) {
 }
 
 func (r *keyRegistry) keyset() jose.JSONWebKeySet {
-	local := r.local.current.Load().public
+	local := r.local.Get().public
 	keys := slices.Collect(maps.Values(local))
 	for _, item := range r.remote.Items() {
 		if _, present := local[item.Key()]; !present {

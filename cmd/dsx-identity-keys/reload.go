@@ -25,16 +25,45 @@ func newSigningKeys(signer *tokenSigner, keys []jose.JSONWebKey) *signingKeys {
 	return &signingKeys{signer: signer, public: public}
 }
 
+// signingKeySource shares immutable snapshots and change notifications.
+// File watchers and background workers belong to the reloader.
 type signingKeySource struct {
-	keysetPath    string
-	activeKIDPath string
-	current       atomic.Pointer[signingKeys]
-	updated       chan struct{}
-	initialKeyset []byte
-	initialActive []byte
+	current atomic.Pointer[signingKeys]
+	updated chan struct{}
 }
 
-func newSigningKeySource(keysetPath, activeKIDPath string) (*signingKeySource, error) {
+func newSigningKeySource(initial *signingKeys) *signingKeySource {
+	source := &signingKeySource{updated: make(chan struct{}, 1)}
+	source.current.Store(initial)
+	return source
+}
+
+// Get returns an immutable snapshot. Consumers must not modify it.
+func (s *signingKeySource) Get() *signingKeys { return s.current.Load() }
+
+// Watch supplies coalesced wake-ups for one observer. Read Get after each wake-up.
+func (s *signingKeySource) Watch() <-chan struct{} { return s.updated }
+
+func (s *signingKeySource) store(keys *signingKeys) {
+	s.current.Store(keys)
+	// A pending wake-up is sufficient because the observer reads Get after receiving it.
+	select {
+	case s.updated <- struct{}{}:
+	default:
+	}
+}
+
+// signingKeyReloader owns file-watching lifetimes and parsing state.
+// Its source shares only snapshot data and notifications with readers.
+type signingKeyReloader struct {
+	keysetPath    string
+	activeKIDPath string
+	initialKeyset []byte
+	initialActive []byte
+	source        *signingKeySource
+}
+
+func newSigningKeyReloader(keysetPath, activeKIDPath string) (*signingKeyReloader, error) {
 	rawKeyset, err := os.ReadFile(keysetPath)
 	if err != nil {
 		return nil, fmt.Errorf("read signing keyset: %w", err)
@@ -43,36 +72,30 @@ func newSigningKeySource(keysetPath, activeKIDPath string) (*signingKeySource, e
 	if err != nil {
 		return nil, fmt.Errorf("read active kid: %w", err)
 	}
-	source := &signingKeySource{
+	signer, public, err := parseSigningKeys(rawKeyset, rawActive)
+	if err != nil {
+		return nil, err
+	}
+	return &signingKeyReloader{
 		keysetPath:    keysetPath,
 		activeKIDPath: activeKIDPath,
 		initialKeyset: rawKeyset,
 		initialActive: rawActive,
-		updated:       make(chan struct{}, 1),
-	}
-	if err := source.load(rawKeyset, rawActive); err != nil {
-		return nil, err
-	}
-	return source, nil
+		source:        newSigningKeySource(newSigningKeys(signer, public)),
+	}, nil
 }
 
-func (s *signingKeySource) load(rawKeyset, rawActive []byte) error {
+func (s *signingKeyReloader) load(rawKeyset, rawActive []byte) error {
 	signer, publicKeys, err := parseSigningKeys(rawKeyset, rawActive)
 	if err != nil {
 		return err
 	}
-	// Consumers share one immutable snapshot of the validated source pair.
-	s.current.Store(newSigningKeys(signer, publicKeys))
-	// Coalesce notifications. The publisher always reads the current snapshot.
-	select {
-	case s.updated <- struct{}{}:
-	default:
-	}
+	s.source.store(newSigningKeys(signer, publicKeys))
 	slog.Info("Loaded signing keys", "active_kid", signer.keyID, "public_key_count", len(publicKeys))
 	return nil
 }
 
-func (s *signingKeySource) run(ctx context.Context, watcher filewatch.Watcher[filewatch.Change]) error {
+func (s *signingKeyReloader) run(ctx context.Context, watcher filewatch.Watcher[filewatch.Change]) error {
 	keyset, active := s.initialKeyset, s.initialActive
 	var lastError string
 	err := watcher(ctx, func(change filewatch.Change) error {

@@ -107,7 +107,7 @@ func (s *identityKeysServer) resignJWT(originalClaims map[string]any, newSubject
 	newClaims["sub"] = newSubject.String()
 	newClaims["iss"] = s.issuer
 
-	signer := s.signingKeys.current.Load().signer
+	signer := s.signingKeys.Get().signer
 	token, err := jwt.Signed(signer.signer).Claims(newClaims).Serialize()
 	if err != nil {
 		return "", fmt.Errorf("sign JWT: %w", err)
@@ -336,12 +336,13 @@ func run() (runErr error) {
 		runErr = errors.Join(runErr, sdk.Shutdown(context.Background()))
 	}()
 
-	signingKeys, err := newSigningKeySource(*signingKeyset, *activeKID)
+	signingReloader, err := newSigningKeyReloader(*signingKeyset, *activeKID)
 	if err != nil {
 		return fmt.Errorf("load signing keyset: %w", err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	signingKeys := signingReloader.source
 	registry := newKeyRegistry(signingKeys)
 	var publicRegistry publicKeyRegistry = registry
 	if *disableNATS {
@@ -393,7 +394,7 @@ func run() (runErr error) {
 		"listen_addr", *listenAddr,
 		"issuer", *issuer,
 		"shard_id", *shardID,
-		"active_kid", signingKeys.current.Load().signer.keyID,
+		"active_kid", signingKeys.Get().signer.keyID,
 		"nats_enabled", !*disableNATS,
 	)
 	group, runContext := errgroup.WithContext(ctx)
@@ -402,7 +403,7 @@ func run() (runErr error) {
 		watchers = append(watchers, filewatch.Contents(path,
 			filewatch.Composite(filewatch.FSNotify(path), filewatch.Polling(*fileWatchPollInterval))))
 	}
-	group.Go(func() error { return signingKeys.run(runContext, filewatch.Composite(watchers...)) })
+	group.Go(func() error { return signingReloader.run(runContext, filewatch.Composite(watchers...)) })
 	group.Go(func() error {
 		return serveHTTP(runContext, httpServer)
 	})

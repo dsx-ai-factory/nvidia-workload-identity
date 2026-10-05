@@ -84,7 +84,7 @@ func newNATSKeySynchronizer(ctx context.Context, serverURL, clientName, shardID 
 	if clientName == "" {
 		return nil, fmt.Errorf("NATS client name is required")
 	}
-	if len(source.current.Load().public) == 0 {
+	if len(source.Get().public) == 0 {
 		return nil, fmt.Errorf("at least one public key is required")
 	}
 	if ttl <= 0 {
@@ -224,6 +224,7 @@ func (s *natsKeySynchronizer) publishLocalKeys(ctx context.Context, bucket jetst
 	// writes before its local keys can expire from the shared bucket.
 	refresh := time.NewTicker(max(s.publisher.ttl/4, time.Nanosecond))
 	defer refresh.Stop()
+	updated := s.publisher.source.Watch()
 	for {
 		if err := s.publisher.publish(ctx, bucket); err != nil {
 			if ctx.Err() != nil {
@@ -235,7 +236,7 @@ func (s *natsKeySynchronizer) publishLocalKeys(ctx context.Context, bucket jetst
 		case <-ctx.Done():
 			return
 		case <-refresh.C:
-		case <-s.publisher.source.updated:
+		case <-updated:
 		}
 	}
 }
@@ -298,7 +299,7 @@ func (s *natsKeySynchronizer) Close() {
 }
 
 func (p *keyPublisher) publish(ctx context.Context, bucket jetstream.KeyValue) error {
-	for _, key := range p.source.current.Load().public {
+	for _, key := range p.source.Get().public {
 		payload, err := json.Marshal(key)
 		if err != nil {
 			return fmt.Errorf("serialize public key %q: %w", key.KeyID, err)
