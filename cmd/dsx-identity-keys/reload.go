@@ -79,6 +79,7 @@ func (s *signingKeySource) run(ctx context.Context, watcher filewatch.Watcher[fi
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		// Keep latest observations so changing either file can repair a rejected pair.
 		switch change.Path {
 		case s.keysetPath:
 			keyset = change.Contents
