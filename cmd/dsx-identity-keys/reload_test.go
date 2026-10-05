@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
+	"golang.org/x/sync/errgroup"
 )
 
 func TestReloadSigningSources(t *testing.T) {
@@ -35,19 +37,19 @@ func TestReloadSigningSources(t *testing.T) {
 				replaceSigningSymlink(t, keysetPath, sourceKeyset)
 				replaceSigningSymlink(t, activePath, sourceActive)
 			}
-			signer, keys, err := loadSigningKeys(keysetPath, activePath)
+			source, err := newSigningKeySource(keysetPath, activePath)
 			if err != nil {
 				t.Fatal(err)
 			}
 			synctest.Test(t, func(t *testing.T) {
-				registry := newKeyRegistry(keys)
+				registry := newKeyRegistry(source)
 				defer registry.Close()
-				server := &identityKeysServer{signer: signer, registry: registry, issuer: testIssuer}
+				server := &identityKeysServer{signingKeys: source, registry: registry, issuer: testIssuer}
 				ctx, cancel := context.WithCancel(t.Context())
 				done := make(chan struct{})
 				go func() {
 					defer close(done)
-					server.reloadSigningKeys(ctx, keysetPath, activePath, registry, nil)
+					source.run(ctx)
 				}()
 				defer func() { cancel(); <-done }()
 				synctest.Wait()
@@ -182,20 +184,20 @@ func TestReloadPublishesNewKeysAndStopsRemovedLeases(t *testing.T) {
 	first, second := testJWK(t, "", false), testJWK(t, "", false)
 	firstID, secondID := signingKID(t, first), signingKID(t, second)
 	keysetPath, activePath := writeSigningFiles(t, []jose.JSONWebKey{first}, firstID)
-	signer, keys, err := loadSigningKeys(keysetPath, activePath)
+	source, err := newSigningKeySource(keysetPath, activePath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	config := testNATSKVConfig("RELOAD")
-	local := startTestKeyRegistry(t, broker.ClientURL(), "local", "local", keys, time.Second, config, natsAuthConfig{mode: natsAuthNone})
+	local := startTestSourceRegistry(t, broker.ClientURL(), "local", "local", source, time.Second, config, natsAuthConfig{mode: natsAuthNone})
 	peerKey := testJWK(t, "peer", true)
 	peer := startTestKeyRegistry(t, broker.ClientURL(), "peer", "peer", []jose.JSONWebKey{peerKey}, time.Second, config, natsAuthConfig{mode: natsAuthNone})
-	server := &identityKeysServer{signer: signer, registry: local, issuer: testIssuer}
+	server := &identityKeysServer{signingKeys: source, registry: local, issuer: testIssuer}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		server.reloadSigningKeys(ctx, keysetPath, activePath, local.keyRegistry, local.natsKeySynchronizer)
+		source.run(ctx)
 	}()
 	defer func() { cancel(); <-done }()
 	requireKeyIDs(t, peer, firstID, "peer")
@@ -209,4 +211,52 @@ func TestReloadPublishesNewKeysAndStopsRemovedLeases(t *testing.T) {
 	requireKeyIDs(t, peer, secondID, "peer")
 	requireKeyIDs(t, local, secondID, "peer")
 	assertReloadedKeys(t, server, secondID, secondID, "peer")
+}
+
+func TestSigningDuringSourceSwaps(t *testing.T) {
+	first, second := testJWK(t, "", false), testJWK(t, "", false)
+	firstID, secondID := signingKID(t, first), signingKID(t, second)
+	keysetPath, activePath := writeSigningFiles(t, []jose.JSONWebKey{first, second}, firstID)
+	source, err := newSigningKeySource(keysetPath, activePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := newKeyRegistry(source)
+	defer registry.Close()
+	server := &identityKeysServer{signingKeys: source, registry: registry, issuer: testIssuer}
+	subject := spiffeid.RequireFromString("spiffe://operator-1.ds9.dsx.nvid.id/bm/host-1")
+	firstActive := writeActiveKeysetFile(t, firstID, jose.ES256)
+	secondActive := writeActiveKeysetFile(t, secondID, jose.ES256)
+	var readers errgroup.Group
+	for range 8 {
+		readers.Go(func() error {
+			for range 100 {
+				token, err := server.resignJWT(map[string]any{"aud": []string{"test"}}, subject)
+				if err != nil {
+					return err
+				}
+				response := httptest.NewRecorder()
+				server.handleJWKS(response, httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil))
+				var keys jose.JSONWebKeySet
+				if err := json.Unmarshal(response.Body.Bytes(), &keys); err != nil {
+					return err
+				}
+				if !verifyTestToken(keys, token) {
+					return fmt.Errorf("token failed verification during source swap")
+				}
+			}
+			return nil
+		})
+	}
+	for range 20 {
+		for _, active := range []string{secondActive, firstActive} {
+			copySigningFile(t, activePath, active)
+			if err := source.reload(); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	if err := readers.Wait(); err != nil {
+		t.Fatal(err)
+	}
 }

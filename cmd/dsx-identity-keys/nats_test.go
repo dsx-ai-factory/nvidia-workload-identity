@@ -349,8 +349,13 @@ func testJetStream(t *testing.T, serverURL string, options ...nats.Option) jetst
 
 func startTestKeyRegistry(t *testing.T, serverURL, clientName, shardID string, keys []jose.JSONWebKey, ttl time.Duration, kvConfig natsKVConfig, auth natsAuthConfig) *synchronizedKeyRegistry {
 	t.Helper()
-	registry := newKeyRegistry(keys)
-	synchronizer, err := newNATSKeySynchronizer(t.Context(), serverURL, clientName, shardID, keys, ttl, kvConfig, registry, auth)
+	return startTestSourceRegistry(t, serverURL, clientName, shardID, testSigningKeySource(nil, keys), ttl, kvConfig, auth)
+}
+
+func startTestSourceRegistry(t *testing.T, serverURL, clientName, shardID string, source *signingKeySource, ttl time.Duration, kvConfig natsKVConfig, auth natsAuthConfig) *synchronizedKeyRegistry {
+	t.Helper()
+	registry := newKeyRegistry(source)
+	synchronizer, err := newNATSKeySynchronizer(t.Context(), serverURL, clientName, shardID, source, ttl, kvConfig, registry, auth)
 	if err != nil {
 		registry.Close()
 		t.Fatal(err)

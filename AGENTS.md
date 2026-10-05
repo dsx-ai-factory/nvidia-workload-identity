@@ -51,6 +51,8 @@ repository is a legacy mirror.
 - Prefer existing code, standard libraries, native Kubernetes and Helm features,
   maintained dependencies, and upstream APIs. Do not add speculative abstractions,
   compatibility paths, wrappers, or configuration.
+- Compose independent components around immutable state. Prefer atomic pointer
+  swaps for shared snapshots.
 - Keep supplied values exact. Do not trim, normalize, case-fold, or coerce input.
 - `charts/dsx-identity` installs each management-cluster shard.
 - `charts/dsx-imds` and `charts/dsx-spiffe-csi` are DPUService payloads. Keep external

@@ -13,11 +13,13 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -48,10 +50,12 @@ func TestStaticSigningKeysetAndClaims(t *testing.T) {
 	previous := testJWKForAlgorithm(t, "", jose.ES384, false)
 	activeKID := signingKID(t, active)
 	keysetPath, kidPath := writeSigningFiles(t, []jose.JSONWebKey{active, previous}, activeKID)
-	signer, publicKeys, err := loadSigningKeys(keysetPath, kidPath)
+	source, err := newSigningKeySource(keysetPath, kidPath)
 	if err != nil {
 		t.Fatal(err)
 	}
+	signer := source.current.Load().signer
+	publicKeys := slices.Collect(maps.Values(source.current.Load().public))
 	if signer.keyID != activeKID || len(publicKeys) != 2 {
 		t.Fatalf("loaded signing keys = kid %q, %d public keys", signer.keyID, len(publicKeys))
 	}
@@ -61,7 +65,7 @@ func TestStaticSigningKeysetAndClaims(t *testing.T) {
 		}
 	}
 
-	server := &identityKeysServer{signer: signer, issuer: testIssuer}
+	server := &identityKeysServer{signingKeys: source, issuer: testIssuer}
 	original := map[string]any{
 		"iss":    "spiffe://k2.internal",
 		"sub":    "spiffe://k2.internal/original",
@@ -124,10 +128,11 @@ func TestStaticSigningKeysetAndClaims(t *testing.T) {
 		t.Fatalf("second tenant claims = %#v", otherClaims)
 	}
 
-	_, reloadedPublicKeys, err := loadSigningKeys(keysetPath, kidPath)
+	reloadedSource, err := newSigningKeySource(keysetPath, kidPath)
 	if err != nil {
 		t.Fatal(err)
 	}
+	reloadedPublicKeys := slices.Collect(maps.Values(reloadedSource.current.Load().public))
 	if len(publicKeys) != len(reloadedPublicKeys) || !verifyJWKPresent(reloadedPublicKeys, publicKeys[0]) {
 		t.Fatal("reloading the mounted keyset changed its public keys")
 	}
@@ -170,20 +175,20 @@ func TestRejectInvalidSigningConfiguration(t *testing.T) {
 
 	t.Run("empty keyset", func(t *testing.T) {
 		keysetPath, kidPath := writeSigningFiles(t, nil, "active")
-		if _, _, err := loadSigningKeys(keysetPath, kidPath); err == nil {
+		if _, err := newSigningKeySource(keysetPath, kidPath); err == nil {
 			t.Fatal("empty keyset was accepted")
 		}
 	})
 	t.Run("duplicate kid", func(t *testing.T) {
 		key := testJWK(t, "", false)
 		keysetPath, kidPath := writeSigningFiles(t, []jose.JSONWebKey{key, key}, signingKID(t, key))
-		if _, _, err := loadSigningKeys(keysetPath, kidPath); err == nil {
+		if _, err := newSigningKeySource(keysetPath, kidPath); err == nil {
 			t.Fatal("duplicate kid was accepted")
 		}
 	})
 	t.Run("unknown active kid", func(t *testing.T) {
 		keysetPath, kidPath := writeSigningFiles(t, []jose.JSONWebKey{testJWK(t, "", false)}, "missing")
-		if _, _, err := loadSigningKeys(keysetPath, kidPath); err == nil {
+		if _, err := newSigningKeySource(keysetPath, kidPath); err == nil {
 			t.Fatal("unknown active kid was accepted")
 		}
 	})
@@ -193,7 +198,7 @@ func TestRejectInvalidSigningConfiguration(t *testing.T) {
 		if err := os.WriteFile(kidPath, []byte(`{"active_kid":"`+signingKID(t, key)+`","alg":"RS256"}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := loadSigningKeys(keysetPath, kidPath); err == nil {
+		if _, err := newSigningKeySource(keysetPath, kidPath); err == nil {
 			t.Fatal("algorithm incompatible with its key was accepted")
 		}
 	})
@@ -204,7 +209,7 @@ func TestRejectInvalidSigningConfiguration(t *testing.T) {
 			t.Fatal(err)
 		}
 		keysetPath := writeRawSigningFile(t, privateKeyset{Keys: []string{string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))}})
-		if _, _, err := loadSigningKeys(keysetPath, writeActiveKeysetFile(t, signingKID(t, key), jose.ES256)); err == nil {
+		if _, err := newSigningKeySource(keysetPath, writeActiveKeysetFile(t, signingKID(t, key), jose.ES256)); err == nil {
 			t.Fatal("public key was accepted")
 		}
 	})
@@ -213,7 +218,7 @@ func TestRejectInvalidSigningConfiguration(t *testing.T) {
 		if err := os.WriteFile(keysetPath, []byte(`{"keys":[`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := loadSigningKeys(keysetPath, kidPath); err == nil {
+		if _, err := newSigningKeySource(keysetPath, kidPath); err == nil {
 			t.Fatal("malformed keyset was accepted")
 		}
 	})
@@ -223,7 +228,7 @@ func TestRejectInvalidSigningConfiguration(t *testing.T) {
 		if err := os.WriteFile(kidPath, []byte(`{"active_kid":`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := loadSigningKeys(keysetPath, kidPath); err == nil {
+		if _, err := newSigningKeySource(keysetPath, kidPath); err == nil {
 			t.Fatal("malformed active kid document was accepted")
 		}
 	})
@@ -234,13 +239,13 @@ func TestRejectInvalidSigningConfiguration(t *testing.T) {
 		if err := os.WriteFile(kidPath, []byte(kid), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := loadSigningKeys(keysetPath, kidPath); err == nil {
+		if _, err := newSigningKeySource(keysetPath, kidPath); err == nil {
 			t.Fatal("plain active kid was accepted")
 		}
 	})
 	t.Run("missing files", func(t *testing.T) {
 		dir := t.TempDir()
-		if _, _, err := loadSigningKeys(filepath.Join(dir, "missing-keyset"), filepath.Join(dir, "missing-kid")); err == nil {
+		if _, err := newSigningKeySource(filepath.Join(dir, "missing-keyset"), filepath.Join(dir, "missing-kid")); err == nil {
 			t.Fatal("missing signing files were accepted")
 		}
 	})
@@ -661,7 +666,7 @@ func registerTestKey(t *testing.T, registry *keyRegistry, key jose.JSONWebKey) {
 
 func newTestKeyRegistry(t *testing.T, local []jose.JSONWebKey) *keyRegistry {
 	t.Helper()
-	registry := newKeyRegistry(local)
+	registry := newKeyRegistry(testSigningKeySource(nil, local))
 	t.Cleanup(registry.Close)
 	return registry
 }
@@ -703,4 +708,10 @@ func verifyTestToken(keys jose.JSONWebKeySet, token string) bool {
 		}
 	}
 	return false
+}
+
+func testSigningKeySource(signer *tokenSigner, keys []jose.JSONWebKey) *signingKeySource {
+	source := &signingKeySource{updated: make(chan struct{}, 1)}
+	source.current.Store(newSigningKeys(signer, keys))
+	return source
 }

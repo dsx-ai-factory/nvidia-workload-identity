@@ -8,7 +8,6 @@ import (
 	"crypto/rsa"
 	"encoding/json"
 	"fmt"
-	"os"
 	"slices"
 
 	"github.com/go-jose/go-jose/v4"
@@ -34,18 +33,6 @@ type privateKeyset struct {
 type activeKeysetDocument struct {
 	ActiveKID string                  `json:"active_kid"`
 	Algorithm jose.SignatureAlgorithm `json:"alg"`
-}
-
-func loadSigningKeys(keysetPath, activeKIDPath string) (*tokenSigner, []jose.JSONWebKey, error) {
-	rawKeyset, err := os.ReadFile(keysetPath)
-	if err != nil {
-		return nil, nil, fmt.Errorf("read signing keyset: %w", err)
-	}
-	rawKID, err := os.ReadFile(activeKIDPath)
-	if err != nil {
-		return nil, nil, fmt.Errorf("read active kid: %w", err)
-	}
-	return parseSigningKeys(rawKeyset, rawKID)
 }
 
 func parseSigningKeys(rawKeyset, rawKID []byte) (*tokenSigner, []jose.JSONWebKey, error) {

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -32,13 +31,11 @@ type natsKeySynchronizer struct {
 	workers    sync.WaitGroup
 	publisher  keyPublisher
 	kv         natsKVConfig
-	updates    chan struct{}
 }
 
 type keyPublisher struct {
-	keysMu  sync.RWMutex
 	shardID string
-	keys    []jose.JSONWebKey
+	source  *signingKeySource
 	ttl     time.Duration
 }
 
@@ -80,14 +77,14 @@ type natsKVConfig struct {
 	replicas int
 }
 
-func newNATSKeySynchronizer(ctx context.Context, serverURL, clientName, shardID string, keys []jose.JSONWebKey, ttl time.Duration, kvConfig natsKVConfig, registry remoteKeyRegistry, auth natsAuthConfig) (*natsKeySynchronizer, error) {
+func newNATSKeySynchronizer(ctx context.Context, serverURL, clientName, shardID string, source *signingKeySource, ttl time.Duration, kvConfig natsKVConfig, registry remoteKeyRegistry, auth natsAuthConfig) (*natsKeySynchronizer, error) {
 	if serverURL == "" {
 		return nil, fmt.Errorf("NATS server URL is required")
 	}
 	if clientName == "" {
 		return nil, fmt.Errorf("NATS client name is required")
 	}
-	if len(keys) == 0 {
+	if len(source.current.Load().public) == 0 {
 		return nil, fmt.Errorf("at least one public key is required")
 	}
 	if ttl <= 0 {
@@ -110,11 +107,10 @@ func newNATSKeySynchronizer(ctx context.Context, serverURL, clientName, shardID 
 		cancel:     cancel,
 		publisher: keyPublisher{
 			shardID: shardID,
-			keys:    slices.Clone(keys),
+			source:  source,
 			ttl:     ttl,
 		},
-		kv:      kvConfig,
-		updates: make(chan struct{}, 1),
+		kv: kvConfig,
 	}
 	js, err := jetstream.New(connection)
 	if err != nil {
@@ -239,7 +235,7 @@ func (s *natsKeySynchronizer) publishLocalKeys(ctx context.Context, bucket jetst
 		case <-ctx.Done():
 			return
 		case <-refresh.C:
-		case <-s.updates:
+		case <-s.publisher.source.updated:
 		}
 	}
 }
@@ -302,10 +298,7 @@ func (s *natsKeySynchronizer) Close() {
 }
 
 func (p *keyPublisher) publish(ctx context.Context, bucket jetstream.KeyValue) error {
-	p.keysMu.RLock()
-	keys := slices.Clone(p.keys)
-	p.keysMu.RUnlock()
-	for _, key := range keys {
+	for _, key := range p.source.current.Load().public {
 		payload, err := json.Marshal(key)
 		if err != nil {
 			return fmt.Errorf("serialize public key %q: %w", key.KeyID, err)
@@ -358,14 +351,4 @@ func parseKeyKVKey(key string) (string, bool) {
 		return "", false
 	}
 	return keyID, true
-}
-
-func (s *natsKeySynchronizer) replaceLocal(keys []jose.JSONWebKey) {
-	s.publisher.keysMu.Lock()
-	s.publisher.keys = slices.Clone(keys)
-	s.publisher.keysMu.Unlock()
-	select {
-	case s.updates <- struct{}{}:
-	default:
-	}
 }

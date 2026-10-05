@@ -5,7 +5,6 @@ import (
 	"maps"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
@@ -13,16 +12,11 @@ import (
 )
 
 type keyRegistry struct {
-	localMu sync.RWMutex
-	local   map[string]jose.JSONWebKey
-	remote  *ttlcache.Cache[string, jose.JSONWebKey]
+	local  *signingKeySource
+	remote *ttlcache.Cache[string, jose.JSONWebKey]
 }
 
-func newKeyRegistry(localKeys []jose.JSONWebKey) *keyRegistry {
-	local := make(map[string]jose.JSONWebKey, len(localKeys))
-	for _, key := range localKeys {
-		local[key.KeyID] = key
-	}
+func newKeyRegistry(local *signingKeySource) *keyRegistry {
 	registry := &keyRegistry{
 		local:  local,
 		remote: ttlcache.New[string, jose.JSONWebKey](),
@@ -58,11 +52,10 @@ func (r *keyRegistry) removeRemote(keyID string) {
 }
 
 func (r *keyRegistry) keyset() jose.JSONWebKeySet {
-	r.localMu.RLock()
-	defer r.localMu.RUnlock()
-	keys := slices.Collect(maps.Values(r.local))
+	local := r.local.current.Load().public
+	keys := slices.Collect(maps.Values(local))
 	for _, item := range r.remote.Items() {
-		if _, local := r.local[item.Key()]; !local {
+		if _, present := local[item.Key()]; !present {
 			keys = append(keys, item.Value())
 		}
 	}
@@ -87,14 +80,4 @@ func validateKeyID(keyID string) error {
 		return fmt.Errorf("kid %q is not a valid NATS subject token", keyID)
 	}
 	return nil
-}
-
-func (r *keyRegistry) replaceLocal(keys []jose.JSONWebKey) {
-	local := make(map[string]jose.JSONWebKey, len(keys))
-	for _, key := range keys {
-		local[key.KeyID] = key
-	}
-	r.localMu.Lock()
-	r.local = local
-	r.localMu.Unlock()
 }

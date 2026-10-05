@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -60,17 +59,16 @@ type publicKeyRegistry interface {
 }
 
 type identityKeysServer struct {
-	signerMu  sync.RWMutex
-	signer    *tokenSigner
-	registry  publicKeyRegistry
-	jwtSource *workloadapi.JWTSource
-	jwksURL   string
-	issuer    string
-	region    string
-	partition string
+	signingKeys *signingKeySource
+	registry    publicKeyRegistry
+	jwtSource   *workloadapi.JWTSource
+	jwksURL     string
+	issuer      string
+	region      string
+	partition   string
 }
 
-func newIdentityKeysServer(ctx context.Context, issuer, region, partition string, signer *tokenSigner, registry publicKeyRegistry, socketPath, jwksURL string) (*identityKeysServer, error) {
+func newIdentityKeysServer(ctx context.Context, issuer, region, partition string, signingKeys *signingKeySource, registry publicKeyRegistry, socketPath, jwksURL string) (*identityKeysServer, error) {
 	if err := dsxidentity.ValidateIssuer(issuer); err != nil {
 		return nil, err
 	}
@@ -88,7 +86,7 @@ func newIdentityKeysServer(ctx context.Context, issuer, region, partition string
 		return nil, fmt.Errorf("create JWT source: %w", err)
 	}
 	return &identityKeysServer{
-		signer: signer, registry: registry, jwtSource: jwts, jwksURL: jwksURL,
+		signingKeys: signingKeys, registry: registry, jwtSource: jwts, jwksURL: jwksURL,
 		issuer: issuer, region: region, partition: partition,
 	}, nil
 }
@@ -108,9 +106,8 @@ func (s *identityKeysServer) resignJWT(originalClaims map[string]any, newSubject
 	newClaims["sub"] = newSubject.String()
 	newClaims["iss"] = s.issuer
 
-	s.signerMu.RLock()
-	defer s.signerMu.RUnlock()
-	token, err := jwt.Signed(s.signer.signer).Claims(newClaims).Serialize()
+	signer := s.signingKeys.current.Load().signer
+	token, err := jwt.Signed(signer.signer).Claims(newClaims).Serialize()
 	if err != nil {
 		return "", fmt.Errorf("sign JWT: %w", err)
 	}
@@ -334,15 +331,14 @@ func run() (runErr error) {
 		runErr = errors.Join(runErr, sdk.Shutdown(context.Background()))
 	}()
 
-	signer, publicKeys, err := loadSigningKeys(*signingKeyset, *activeKID)
+	signingKeys, err := newSigningKeySource(*signingKeyset, *activeKID)
 	if err != nil {
 		return fmt.Errorf("load signing keyset: %w", err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	registry := newKeyRegistry(publicKeys)
+	registry := newKeyRegistry(signingKeys)
 	var publicRegistry publicKeyRegistry = registry
-	var synchronizer *natsKeySynchronizer
 	if *disableNATS {
 		defer registry.Close()
 	} else {
@@ -359,7 +355,7 @@ func run() (runErr error) {
 			oauthIssuerURL:  *natsIssuerURL,
 			oauthScopes:     scopes,
 		}
-		synchronizer, err = newNATSKeySynchronizer(ctx, *natsServer, *natsClientName, *shardID, publicKeys, *publicKeyTTL, natsKVConfig{
+		synchronizer, err := newNATSKeySynchronizer(ctx, *natsServer, *natsClientName, *shardID, signingKeys, *publicKeyTTL, natsKVConfig{
 			bucket: *natsKVBucket, replicas: *natsKVReplicas,
 		}, registry, natsAuth)
 		if err != nil {
@@ -371,7 +367,7 @@ func run() (runErr error) {
 		publicRegistry = registryWithSync
 	}
 
-	server, err := newIdentityKeysServer(ctx, *issuer, *region, *partition, signer, publicRegistry, *socketPath, *jwksURL)
+	server, err := newIdentityKeysServer(ctx, *issuer, *region, *partition, signingKeys, publicRegistry, *socketPath, *jwksURL)
 	if err != nil {
 		return fmt.Errorf("create DSX Identity Keys server: %w", err)
 	}
@@ -380,16 +376,6 @@ func run() (runErr error) {
 			runErr = errors.Join(runErr, fmt.Errorf("close JWT source: %w", err))
 		}
 	}()
-	reloadContext, cancelReload := context.WithCancel(ctx)
-	var reloadWorkers sync.WaitGroup
-	reloadWorkers.Go(func() {
-		server.reloadSigningKeys(reloadContext, *signingKeyset, *activeKID, registry, synchronizer)
-	})
-	defer func() {
-		cancelReload()
-		reloadWorkers.Wait()
-	}()
-
 	httpServer := &http.Server{
 		Addr: *listenAddr,
 		Handler: otelhttp.NewHandler(server.handler(), "dsx-identity-keys",
@@ -402,10 +388,18 @@ func run() (runErr error) {
 		"listen_addr", *listenAddr,
 		"issuer", *issuer,
 		"shard_id", *shardID,
-		"active_kid", signer.keyID,
+		"active_kid", signingKeys.current.Load().signer.keyID,
 		"nats_enabled", !*disableNATS,
 	)
-	if err := serveHTTP(ctx, httpServer); err != nil {
+	group, runContext := errgroup.WithContext(ctx)
+	group.Go(func() error {
+		signingKeys.run(runContext)
+		return nil
+	})
+	group.Go(func() error {
+		return serveHTTP(runContext, httpServer)
+	})
+	if err := group.Wait(); err != nil {
 		return fmt.Errorf("serve HTTP: %w", err)
 	}
 	return nil
