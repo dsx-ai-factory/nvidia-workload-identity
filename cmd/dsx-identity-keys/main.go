@@ -397,15 +397,12 @@ func run() (runErr error) {
 		"nats_enabled", !*disableNATS,
 	)
 	group, runContext := errgroup.WithContext(ctx)
-	changed := make(chan struct{}, 1)
+	watchers := make([]filewatch.Watcher[filewatch.Change], 0, 2)
 	for _, path := range []string{*signingKeyset, *activeKID} {
-		watcher := filewatch.Composite(filewatch.FSNotify(path), filewatch.Polling(path, *fileWatchPollInterval))
-		group.Go(func() error { return watcher(runContext, changed) })
+		watchers = append(watchers, filewatch.Contents(path,
+			filewatch.Composite(filewatch.FSNotify(path), filewatch.Polling(*fileWatchPollInterval))))
 	}
-	group.Go(func() error {
-		signingKeys.run(runContext, changed)
-		return nil
-	})
+	group.Go(func() error { return signingKeys.run(runContext, filewatch.Composite(watchers...)) })
 	group.Go(func() error {
 		return serveHTTP(runContext, httpServer)
 	})

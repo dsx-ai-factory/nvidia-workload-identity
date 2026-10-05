@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 
 	"github.com/go-jose/go-jose/v4"
+
+	"dsx-identity/internal/filewatch"
 )
 
 type signingKeys struct {
@@ -36,21 +38,21 @@ func newSigningKeySource(keysetPath, activeKIDPath string) (*signingKeySource, e
 		activeKIDPath: activeKIDPath,
 		updated:       make(chan struct{}, 1),
 	}
-	if err := source.reload(); err != nil {
+	rawKeyset, err := os.ReadFile(keysetPath)
+	if err != nil {
+		return nil, fmt.Errorf("read signing keyset: %w", err)
+	}
+	rawActive, err := os.ReadFile(activeKIDPath)
+	if err != nil {
+		return nil, fmt.Errorf("read active kid: %w", err)
+	}
+	if err := source.load(rawKeyset, rawActive); err != nil {
 		return nil, err
 	}
 	return source, nil
 }
 
-func (s *signingKeySource) reload() error {
-	rawKeyset, err := os.ReadFile(s.keysetPath)
-	if err != nil {
-		return fmt.Errorf("read signing keyset: %w", err)
-	}
-	rawActive, err := os.ReadFile(s.activeKIDPath)
-	if err != nil {
-		return fmt.Errorf("read active kid: %w", err)
-	}
+func (s *signingKeySource) load(rawKeyset, rawActive []byte) error {
 	signer, publicKeys, err := parseSigningKeys(rawKeyset, rawActive)
 	if err != nil {
 		return err
@@ -66,25 +68,46 @@ func (s *signingKeySource) reload() error {
 	return nil
 }
 
-func (s *signingKeySource) run(ctx context.Context, changed <-chan struct{}) {
+func (s *signingKeySource) run(ctx context.Context, watcher filewatch.Watcher[filewatch.Change]) error {
+	type observedFile struct {
+		data []byte
+		err  error
+	}
+	var keyset, active *observedFile
 	var lastError string
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-changed:
-			if ctx.Err() != nil {
-				return
+	for change, err := range watcher(ctx) {
+		if ctx.Err() != nil {
+			return nil
+		}
+		if change.Path == "" {
+			return err
+		}
+		observed := &observedFile{change.Contents, err}
+		switch change.Path {
+		case s.keysetPath:
+			keyset = observed
+		case s.activeKIDPath:
+			active = observed
+		}
+		if keyset == nil || active == nil {
+			continue
+		}
+		switch {
+		case keyset.err != nil:
+			err = fmt.Errorf("read signing keyset: %w", keyset.err)
+		case active.err != nil:
+			err = fmt.Errorf("read active kid: %w", active.err)
+		default:
+			err = s.load(keyset.data, active.data)
+		}
+		if err != nil {
+			if err.Error() != lastError {
+				slog.WarnContext(ctx, "Signing key reload failed, retaining current keys", "error", err)
 			}
-			err := s.reload()
-			if err != nil {
-				if err.Error() != lastError {
-					slog.WarnContext(ctx, "Signing key reload failed, retaining current keys", "error", err)
-				}
-				lastError = err.Error()
-			} else {
-				lastError = ""
-			}
+			lastError = err.Error()
+		} else {
+			lastError = ""
 		}
 	}
+	return nil
 }

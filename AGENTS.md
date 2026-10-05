@@ -100,6 +100,8 @@ repository is a legacy mirror.
 - Keep Kubernetes test resources in manifest files. Deploy them through Skaffold,
   Helm, or Kustomize. Do not embed YAML or manually apply, create, or patch test
   resources with `kubectl` from test scripts.
+- Keep tests deterministic. Do not commit tests that fail because of valid
+  timing, scheduling, or event loss.
 - Synchronize on observable conditions with bounded deadlines. Do not use sleeps
   or rerun-dependent acceptance.
 - Use focused unit or integration tests for protocol matrices, lifecycle behavior,

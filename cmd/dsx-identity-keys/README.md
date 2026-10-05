@@ -114,7 +114,7 @@ for the Transit key ring. Every loaded key must support that algorithm:
 Each instance watches both mounted sources with filesystem notifications and
 polls for content changes every 30 seconds. `--file-watch-poll-interval` sets
 the polling interval. Both watchers detect Kubernetes Secret symlink updates.
-A change to either file reloads both sources. A valid pair replaces the active
+Each file change validates the keyset and active-key pair. A valid pair replaces the active
 signer and local public keys without a restart and triggers NATS publication. Missing,
 malformed, or mismatched sources retain the last valid signer and keys until
 both sources validate. Invalid sources at startup prevent the process from

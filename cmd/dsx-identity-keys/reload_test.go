@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"iter"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -51,9 +52,9 @@ func TestReloadSigningSources(t *testing.T) {
 				done := make(chan struct{})
 				go func() {
 					defer close(done)
-					if err := runTestSigningSource(ctx, source, filewatch.Composite(
-						filewatch.Polling(keysetPath, 30*time.Second),
-						filewatch.Polling(activePath, 30*time.Second),
+					if err := source.run(ctx, filewatch.Composite(
+						filewatch.Contents(keysetPath, filewatch.Polling(30*time.Second)),
+						filewatch.Contents(activePath, filewatch.Polling(30*time.Second)),
 					)); err != nil {
 						t.Error(err)
 					}
@@ -204,9 +205,9 @@ func TestReloadPublishesNewKeysAndStopsRemovedLeases(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		if err := runTestSigningSource(ctx, source, filewatch.Composite(
-			filewatch.FSNotify(keysetPath), filewatch.Polling(keysetPath, 30*time.Second),
-			filewatch.FSNotify(activePath), filewatch.Polling(activePath, 30*time.Second),
+		if err := source.run(ctx, filewatch.Composite(
+			filewatch.Contents(keysetPath, filewatch.Composite(filewatch.FSNotify(keysetPath), filewatch.Polling(30*time.Millisecond))),
+			filewatch.Contents(activePath, filewatch.Composite(filewatch.FSNotify(activePath), filewatch.Polling(30*time.Millisecond))),
 		)); err != nil {
 			t.Error(err)
 		}
@@ -268,10 +269,18 @@ func TestSigningDuringSourceSwaps(t *testing.T) {
 			return nil
 		})
 	}
+	rawKeyset, err := os.ReadFile(keysetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for range 20 {
 		for _, active := range []string{secondActive, firstActive} {
 			copySigningFile(t, activePath, active)
-			if err := source.reload(); err != nil {
+			rawActive, err := os.ReadFile(activePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := source.load(rawKeyset, rawActive); err != nil {
 				t.Error(err)
 			}
 		}
@@ -281,13 +290,59 @@ func TestSigningDuringSourceSwaps(t *testing.T) {
 	}
 }
 
-func runTestSigningSource(ctx context.Context, source *signingKeySource, watcher filewatch.Watcher) error {
-	group, runContext := errgroup.WithContext(ctx)
-	changed := make(chan struct{}, 1)
-	group.Go(func() error { return watcher(runContext, changed) })
-	group.Go(func() error {
-		source.run(runContext, changed)
-		return nil
+func TestSigningSourceAcceptsObservedContentsBeforeWatcherAdvances(t *testing.T) {
+	first, second := testJWK(t, "", false), testJWK(t, "", false)
+	firstID, secondID := signingKID(t, first), signingKID(t, second)
+	keysetPath, activePath := writeSigningFiles(t, []jose.JSONWebKey{first, second}, firstID)
+	source, err := newSigningKeySource(keysetPath, activePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawKeyset, err := os.ReadFile(keysetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstActive, err := os.ReadFile(activePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondPath := writeActiveKeysetFile(t, secondID, jose.ES256)
+	secondActive, err := os.ReadFile(secondPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Disk differs from the observations that the watcher delivers below.
+	copySigningFile(t, activePath, secondPath)
+	events := filewatch.Watcher[filewatch.Change](func(context.Context) iter.Seq2[filewatch.Change, error] {
+		return func(yield func(filewatch.Change, error) bool) {
+			if !yield(filewatch.Change{Path: keysetPath, Contents: rawKeyset}, nil) {
+				return
+			}
+			for _, step := range []struct {
+				data    []byte
+				readErr error
+				want    string
+			}{
+				{firstActive, nil, firstID},
+				{secondActive, nil, secondID},
+				{[]byte(`{"active_kid":`), nil, secondID},
+				{nil, os.ErrNotExist, secondID},
+				{firstActive, nil, firstID},
+			} {
+				if !yield(filewatch.Change{Path: activePath, Contents: step.data}, step.readErr) {
+					return
+				}
+				if got := source.current.Load().signer.keyID; got != step.want {
+					yield(filewatch.Change{}, fmt.Errorf("watcher resumed with signer %q, want %q", got, step.want))
+					return
+				}
+			}
+		}
 	})
-	return group.Wait()
+	if err := source.run(t.Context(), filewatch.Composite(events)); err != nil {
+		t.Fatal(err)
+	}
+	if got := source.current.Load().signer.keyID; got != firstID {
+		t.Fatalf("final signer = %q, want %q", got, firstID)
+	}
 }
