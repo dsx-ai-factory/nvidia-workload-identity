@@ -1,22 +1,21 @@
 package main
 
 import (
+	"bytes"
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"os"
 	"sync/atomic"
-	"time"
 
 	"github.com/go-jose/go-jose/v4"
 )
 
 type signingKeys struct {
-	signer     *tokenSigner
-	public     map[string]jose.JSONWebKey
-	keysetHash [sha256.Size]byte
-	activeHash [sha256.Size]byte
+	signer    *tokenSigner
+	public    map[string]jose.JSONWebKey
+	rawKeyset []byte
+	rawActive []byte
 }
 
 func newSigningKeys(signer *tokenSigner, keys []jose.JSONWebKey) *signingKeys {
@@ -55,9 +54,8 @@ func (s *signingKeySource) reload() error {
 	if err != nil {
 		return fmt.Errorf("read active kid: %w", err)
 	}
-	keysetHash, activeHash := sha256.Sum256(rawKeyset), sha256.Sum256(rawActive)
 	current := s.current.Load()
-	if current != nil && current.keysetHash == keysetHash && current.activeHash == activeHash {
+	if current != nil && bytes.Equal(current.rawKeyset, rawKeyset) && bytes.Equal(current.rawActive, rawActive) {
 		return nil
 	}
 	signer, publicKeys, err := parseSigningKeys(rawKeyset, rawActive)
@@ -65,7 +63,7 @@ func (s *signingKeySource) reload() error {
 		return err
 	}
 	next := newSigningKeys(signer, publicKeys)
-	next.keysetHash, next.activeHash = keysetHash, activeHash
+	next.rawKeyset, next.rawActive = rawKeyset, rawActive
 	// Consumers share one immutable snapshot of the validated source pair.
 	s.current.Store(next)
 	// Coalesce notifications. The publisher always reads the current snapshot.
@@ -77,15 +75,13 @@ func (s *signingKeySource) reload() error {
 	return nil
 }
 
-func (s *signingKeySource) run(ctx context.Context) {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
+func (s *signingKeySource) run(ctx context.Context, changed <-chan struct{}) {
 	var lastError string
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-changed:
 			if ctx.Err() != nil {
 				return
 			}

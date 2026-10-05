@@ -111,9 +111,11 @@ for the Transit key ring. Every loaded key must support that algorithm:
 {"active_kid":"<kid>","alg":"ES256"}
 ```
 
-Each instance rereads both mounted sources every second, including Kubernetes
-Secret symlink updates. A valid pair replaces the active signer and local
-public keys without a restart and triggers NATS publication. Missing,
+Each instance watches both mounted sources with filesystem notifications and
+polls for content changes every 30 seconds. `--signing-key-poll-interval` sets
+the polling interval. Both watchers detect Kubernetes Secret symlink updates.
+A change to either file reloads both sources. A valid pair replaces the active
+signer and local public keys without a restart and triggers NATS publication. Missing,
 malformed, or mismatched sources retain the last valid signer and keys until
 both sources validate. Invalid sources at startup prevent the process from
 starting.
@@ -154,6 +156,7 @@ do not expose parser or verifier details.
 | `--region` | required | Region encoded in exchanged DSX identities |
 | `--partition` | required | Partition encoded in exchanged DSX identities |
 | `--signing-keyset` | `/run/secrets/dsx-identity-keys/keyset.json` | JSON file containing private PEM keys |
+| `--signing-key-poll-interval` | `30s` | Positive polling interval for signing source changes missed by filesystem notifications |
 | `--active-kid` | `/run/secrets/dsx-identity-keys-active-kid/active-kid.json` | JSON file containing the active signing `kid` and algorithm |
 | `--shard-id` | NATS enabled | Globally unique shard ID in the Event Bus subject space |
 | `--disable-nats` | `false` | Serve local public keys without NATS synchronization |
@@ -170,13 +173,6 @@ do not expose parser or verifier details.
 
 ## Testing
 
-```bash
-go test ./cmd/dsx-identity-keys
-```
-
-The focused tests cover signing configuration, RFC 8693 behavior, flat `kid`
-aggregation, deterministic KV expiry, rotation overlap, replay after restart,
-watched updates, and every supported authentication mode. Live NATS and
-deployed aggregate checks use the
-`DSX_E2E_NATS_*` and
-`DSX_E2E_VERIFY_*` environment variables used by the E2E scripts.
+See the [local test guide](../../scripts/README.md#signing-key-reload-tests) for
+watcher and signing source tests, and the
+[E2E workflow](../../scripts/README.md#workflow) for deployed validation.

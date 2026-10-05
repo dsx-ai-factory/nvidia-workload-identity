@@ -17,6 +17,8 @@ import (
 	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"golang.org/x/sync/errgroup"
+
+	"dsx-identity/internal/filewatch"
 )
 
 func TestReloadSigningSources(t *testing.T) {
@@ -49,7 +51,12 @@ func TestReloadSigningSources(t *testing.T) {
 				done := make(chan struct{})
 				go func() {
 					defer close(done)
-					source.run(ctx)
+					if err := runTestSigningSource(ctx, source, filewatch.Composite(
+						filewatch.Polling(keysetPath, 30*time.Second),
+						filewatch.Polling(activePath, 30*time.Second),
+					)); err != nil {
+						t.Error(err)
+					}
 				}()
 				defer func() { cancel(); <-done }()
 				synctest.Wait()
@@ -66,7 +73,7 @@ func TestReloadSigningSources(t *testing.T) {
 				}
 				tick := func() {
 					// Advance the reload deadline in virtual time, then drain its work.
-					time.Sleep(time.Second)
+					time.Sleep(30 * time.Second)
 					synctest.Wait()
 				}
 				update([]jose.JSONWebKey{first, second}, firstID)
@@ -197,7 +204,12 @@ func TestReloadPublishesNewKeysAndStopsRemovedLeases(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		source.run(ctx)
+		if err := runTestSigningSource(ctx, source, filewatch.Composite(
+			filewatch.FSNotify(keysetPath), filewatch.Polling(keysetPath, 30*time.Second),
+			filewatch.FSNotify(activePath), filewatch.Polling(activePath, 30*time.Second),
+		)); err != nil {
+			t.Error(err)
+		}
 	}()
 	defer func() { cancel(); <-done }()
 	requireKeyIDs(t, peer, firstID, "peer")
@@ -205,6 +217,14 @@ func TestReloadPublishesNewKeysAndStopsRemovedLeases(t *testing.T) {
 	copySigningFile(t, keysetPath, newKeyset)
 	copySigningFile(t, activePath, newActive)
 	requireKeyIDs(t, peer, firstID, secondID, "peer")
+	requireCondition(t, "new active signer", func() bool {
+		token, err := server.resignJWT(map[string]any{"aud": []string{"test"}}, spiffeid.RequireFromString("spiffe://operator-1.ds9.dsx.nvid.id/bm/host-1"))
+		if err != nil {
+			return false
+		}
+		parsed, err := jwt.ParseSigned(token, []jose.SignatureAlgorithm{jose.ES256})
+		return err == nil && parsed.Headers[0].KeyID == secondID && verifyTestToken(peer.keyset(), token)
+	})
 	assertReloadedKeys(t, server, secondID, firstID, secondID, "peer")
 	newKeyset, _ = writeSigningFiles(t, []jose.JSONWebKey{second}, secondID)
 	copySigningFile(t, keysetPath, newKeyset)
@@ -259,4 +279,15 @@ func TestSigningDuringSourceSwaps(t *testing.T) {
 	if err := readers.Wait(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func runTestSigningSource(ctx context.Context, source *signingKeySource, watcher filewatch.Watcher) error {
+	group, runContext := errgroup.WithContext(ctx)
+	changed := make(chan struct{}, 1)
+	group.Go(func() error { return watcher(runContext, changed) })
+	group.Go(func() error {
+		source.run(runContext, changed)
+		return nil
+	})
+	return group.Wait()
 }

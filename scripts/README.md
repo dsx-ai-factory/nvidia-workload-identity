@@ -193,3 +193,17 @@ duplicate removal, and preservation of unrelated nftables rules.
 
 The E2E suite boots one VM per binding. Each guest requests its IMDS identity
 and authenticates the returned token through OpenBao.
+
+## Signing key reload tests
+
+```bash
+mise exec -- go test -race ./internal/filewatch ./cmd/dsx-identity-keys
+```
+
+File watcher tests cover filesystem notifications, content polling, atomic
+replacement, Kubernetes Secret symlinks, and cancellation. Signing source tests
+cover activation, invalid source retention, concurrent signing during swaps,
+and public key propagation and expiry through a real NATS server.
+
+Deployed NATS and aggregate checks use the `DSX_E2E_NATS_*` and
+`DSX_E2E_VERIFY_*` environment variables supplied by the E2E scripts.

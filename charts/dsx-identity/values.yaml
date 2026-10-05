@@ -144,6 +144,8 @@ identityKeys:
   jwksURL: ""
   # Covers DSX JWT validity. Instances refresh each KV entry four times per TTL.
   publicKeyTTL: 10m
+  # Polling covers signing source changes missed by filesystem notifications.
+  signingKeyPollInterval: 30s
   # Globally unique across every DSX Identity Keys instance sharing this NATS KV bucket.
   shardID: ""
   # Existing Opaque Secret. keyset.json must contain
