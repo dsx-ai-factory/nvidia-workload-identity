@@ -349,9 +349,3 @@ helm dependency build charts/dsx-identity
 ```
 
 Use `./charts/dsx-identity` as `<oci-chart-reference>`.
-
-## Validation
-
-```bash
-make test-chart
-```

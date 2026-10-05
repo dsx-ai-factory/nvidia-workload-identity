@@ -47,12 +47,3 @@ All three fields are required. SPIRE supplies the trust domain through its core
 configuration. `issuer` sets the expected `iss` claim because `jwks_url` does
 not. The standard OIDC remote key set caches and refreshes keys.
 `Dockerfile.spire` embeds the plugin in the DSX SPIRE server image.
-
-## Testing
-
-```bash
-go test ./cmd/dsx-imds-node-attestor-server ./internal/dsximds
-```
-
-The focused tests cover configuration, signature and claim verification,
-remote JWKS behavior, and the complete agent-to-server attestation exchange.

@@ -90,12 +90,3 @@ signing-key source.
 The tool has no runtime dependencies beyond a secure operating-system random
 source. `generate` and `add` output private key material. `thumbprints` outputs
 only derived identifiers.
-
-## Testing
-
-```bash
-mise exec -- go test ./cmd/generate-signing-keyset
-```
-
-The focused tests verify generation, addition, input validation, PEM handling,
-and thumbprint-derived identifiers.

@@ -170,7 +170,3 @@ do not expose parser or verifier details.
 | `--nats-oauth-issuer-url` | OAuth2 mode | OAuth2 issuer whose discovery document advertises the token endpoint |
 | `--nats-oauth-scopes` | `nats` | Comma-separated scopes; empty requests none |
 | `--log-level` | `info` | JSON log level: `debug`, `info`, `warn`, or `error` |
-
-## Testing
-
-See the [local test guide](../../scripts/README.md#workflow).

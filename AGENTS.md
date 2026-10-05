@@ -33,9 +33,11 @@ repository is a legacy mirror.
 - Explain supported VM network modes beside the sidecar code and E2E fixtures
   that depend on them, and in the relevant READMEs.
 - Root and component READMEs describe the chart and applications users run.
-  Document testing capabilities local to this repository in `scripts/README.md`,
-  including setup, fixtures, harness details, and test commands. Link to that
-  guide instead of duplicating its content.
+  Keep special test setup, fixtures, and E2E workflow instructions in
+  `scripts/README.md`. Link there when those instructions are needed.
+- Ordinary tests run through standard validation. Do not add README test
+  sections, per-package test commands, or test coverage lists for them.
+  Adding or changing an ordinary test does not require a README update.
 - Keep current documentation in these READMEs. Do not add a `docs` directory or
   standalone implementation plans unless the user explicitly requests one.
 - Show user-facing API contracts with concrete request and response examples.

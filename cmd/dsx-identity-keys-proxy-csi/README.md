@@ -30,13 +30,3 @@ the mounted socket to reach its local DSX Identity Keys.
 The driver supports only read-only ephemeral volumes. It requires Linux bind
 mount access to kubelet's Pod volume tree and runs privileged in the supplied
 DaemonSet.
-
-## Testing
-
-```bash
-go test ./cmd/dsx-identity-keys-proxy-csi
-```
-
-The focused tests cover idempotent publish and unpublish calls plus serialized
-mount transitions. The KubeVirt E2E path validates CSI registration, socket
-mounting, and metadata-service access to DSX Identity Keys.

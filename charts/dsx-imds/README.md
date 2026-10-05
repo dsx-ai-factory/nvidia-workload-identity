@@ -36,9 +36,3 @@ In the parent [DSX Identity chart](../dsx-identity/README.md),
 `dpuService.imds.enabled` defaults to `true`. The parent chart renders the
 [`DPUService`](../dsx-identity/templates/dpu-service.yaml), and DPF installs this
 chart into selected DPU clusters.
-
-## Validation
-
-```bash
-make test-chart
-```
