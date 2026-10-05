@@ -173,6 +173,4 @@ do not expose parser or verifier details.
 
 ## Testing
 
-See the [local test guide](../../scripts/README.md#signing-key-reload-tests) for
-watcher and signing source tests, and the
-[E2E workflow](../../scripts/README.md#workflow) for deployed validation.
+See the [local test guide](../../scripts/README.md#workflow).
