@@ -303,7 +303,7 @@ func run() (runErr error) {
 		region          = flag.String("region", "", "region encoded in exchanged DSX identities")
 		partition       = flag.String("partition", "", "partition encoded in exchanged DSX identities")
 		signingKeyset   = flag.String("signing-keyset", "/run/secrets/dsx-identity-keys/keyset.json", "private signing keyset file")
-		pollInterval    = flag.Duration("signing-key-poll-interval", 30*time.Second, "polling interval for signing key sources")
+		pollInterval    = flag.Duration("poll-interval", 30*time.Second, "file polling interval")
 		activeKID       = flag.String("active-kid", "/run/secrets/dsx-identity-keys-active-kid/active-kid.json", "JSON file containing the active signing kid and algorithm")
 		shardID         = flag.String("shard-id", "", "stable DSX Identity Keys shard identifier")
 		disableNATS     = flag.Bool("disable-nats", false, "disable NATS public key synchronization")
@@ -319,7 +319,7 @@ func run() (runErr error) {
 	)
 	flag.Parse()
 	if *pollInterval <= 0 {
-		return fmt.Errorf("signing key polling interval must be positive")
+		return fmt.Errorf("polling interval must be positive")
 	}
 	if *issuer == "" {
 		return fmt.Errorf("issuer is required")

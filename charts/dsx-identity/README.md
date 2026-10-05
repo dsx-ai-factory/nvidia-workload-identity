@@ -221,7 +221,7 @@ and `PS512`.
 
 Identity Keys reloads `keyset.json` and `active-kid.json` when either mounted
 file changes. Filesystem notifications trigger reloads, and
-`identityKeys.signingKeyPollInterval` sets the polling interval (default `30s`).
+`identityKeys.pollInterval` sets the polling interval (default `30s`).
 Invalid or mismatched sources retain the last valid signer and public keys.
 It rereads OAuth2 credentials when its cached access token expires.
 
