@@ -33,7 +33,7 @@ Component commands and runtime configuration:
 
 ### SPIRE upgrades
 
-The bundled SPIRE server and agent use 1.15.1. For an existing 1.13.x shard,
+The DSX SPIRE server and agent images use 1.15.1. For an existing 1.13.x shard,
 follow [SPIRE's upgrade order](https://github.com/spiffe/spire/blob/v1.15.1/doc/upgrading.md):
 upgrade all servers to 1.14.x, then all agents to 1.14.x, then all servers to
 1.15.1, then all agents to 1.15.1. Upgrade each shard independently. A direct

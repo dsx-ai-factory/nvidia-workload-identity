@@ -53,6 +53,9 @@ spire:
       prometheus:
         enabled: true
     controllerManager:
+      # Pin runtime versions independently of SPIRE Helm chart updates.
+      image:
+        tag: "0.6.2"
       expandEnv: true
       # The official SPIRE chart owns this Pod field. Set it to the same value
       # as global.operatorTenant. DSX templates reject a mismatch.
@@ -77,6 +80,9 @@ spire:
             enabled: false
           oidc-discovery-provider:
             enabled: false
+            # Argo waits for SPIRE's admission webhook before creating identities.
+            annotations:
+              argocd.argoproj.io/sync-wave: "1"
           test-keys:
             enabled: false
           spike-keeper:
@@ -88,6 +94,8 @@ spire:
   # Every worker uses its externally provisioned dsx_imds host agent.
   spire-agent:
     enabled: false
+    image:
+      tag: "1.13.2"
     # Local fixtures that enable the bundled agent retain SPIRE's native
     # Prometheus producer. Production host and DPU agents are external.
     telemetry:
@@ -95,6 +103,11 @@ spire:
         enabled: true
   spiffe-oidc-discovery-provider:
     enabled: false
+    image:
+      tag: "1.13.2"
+    # Its certificate helper needs the identity created in the preceding wave.
+    annotations:
+      argocd.argoproj.io/sync-wave: "2"
   spiffe-csi-driver:
     resources:
       requests:

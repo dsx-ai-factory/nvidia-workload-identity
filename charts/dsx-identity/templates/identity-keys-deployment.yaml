@@ -24,6 +24,9 @@ kind: Deployment
 metadata:
   name: dsx-identity-keys
   namespace: {{ .Release.Namespace }}
+  # The Workload API client needs the operator Pod identity before startup.
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
   labels:
     {{- include "dsx-identity.labels" (dict "root" . "name" "dsx-identity-keys") | nindent 4 }}
 spec:

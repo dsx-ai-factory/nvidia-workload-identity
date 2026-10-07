@@ -7,6 +7,6 @@ appVersion: "0.1.0"
 
 dependencies:
   - name: spire
-    version: "0.27.1"
+    version: "0.30.1"
     repository: "https://spiffe.github.io/helm-charts-hardened/"
     condition: spire.enabled
