@@ -62,7 +62,7 @@ configure the runner, protected release environment, NGC key, and release permis
 ## CI
 
 PRs run CI on `copy-pr-bot`'s `pull-request/<number>` branches. Pushes to `master`
-and `release/**` also run `make validate`, the full [local E2E lifecycle](scripts/README.md#workflow),
+and `release/**` also run `make validate`, the full [local E2E lifecycle](local-e2e-tests/README.md#workflow),
 secret detection, and container scans. The bot must be installed for this repo,
 and its [configuration](.github/copy-pr-bot.yaml) must be on `master` to take effect.
 The shared build action scans both image platforms with Syft and Grype, uploads
@@ -72,7 +72,7 @@ These scans do not submit results to Pulse.
 All product jobs use the event's commit and read-only repository permissions,
 without release secrets. The RC workflow calls product CI once and waits on
 `needs: dsx-component-ci`, without listing individual jobs. The [image inventory](.github/images.json) is shared by scanning
-and publishing. See the [local E2E guide](scripts/README.md#workflow) for runner
+and publishing. See the [local E2E guide](local-e2e-tests/README.md#workflow) for runner
 requirements.
 
 ## Architecture
@@ -405,6 +405,69 @@ that reference the [DSX IMDS](charts/dsx-imds/README.md), [DSX SPIFFE
 CSI](charts/dsx-spiffe-csi/README.md), and [DPU token-fetcher
 admission](charts/dsx-token-fetcher/README.md) child charts.
 
+The open-source distribution contains source code. Build the DSX images and
+configure their repositories and tags in Helm values before installing. Chart
+defaults reference NVIDIA's internal release registry.
+
+### Build from source
+
+Use Linux, Docker with Buildx, Git, and [mise](https://mise.jdx.dev/). The
+repository pins Go, Rust, and deployment tools in `mise.toml` and `mise.lock`.
+
+```bash
+git submodule update --init --recursive
+mise install --locked
+docker build --target dsx-identity-keys \
+  --build-arg BINARY=dsx-identity-keys \
+  --tag dsx-identity-keys:local .
+```
+
+The same Dockerfile builds `dsx-token-fetcher`, `metadata-service`,
+`dsx-imds-network-setup`, `dsx-identity-keys-proxy-csi`, and
+`dsx-identity-controller`. Set both the target and `BINARY` to the component
+name. SPIRE images include the repository's attestor plugins:
+
+```bash
+docker build --file Dockerfile.spire --target dsx-spire-server \
+  --tag dsx-spire-server:local .
+docker build --file Dockerfile.spire --target dsx-spire-agent \
+  --tag dsx-spire-agent:local .
+docker build --file kata-uds-proxy/Dockerfile \
+  --tag dsx-kata-uds-proxy:local .
+```
+
+Push these images to a registry reachable by your clusters and configure the
+component image values in the [identity chart](charts/dsx-identity/README.md).
+Install the chart from the local source directory. The [local E2E guide](local-e2e-tests/README.md)
+provides a complete environment that builds and loads images from source.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development and DCO sign-off,
+[GOVERNANCE.md](GOVERNANCE.md) for maintainers and review, and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community standards. Report
+security issues through [SECURITY.md](SECURITY.md).
+
+## Licensing
+
+DSX Identity uses the [Apache License 2.0](LICENSE). Third-party code retains
+its upstream licenses and notices. [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES)
+contains dependency attribution and license texts for Go, Rust, and the
+pinned submodules.
+
+`make update-licenses` runs SkyWalking Eyes to add source headers and uses
+`go-licenses` and `cargo-about` to regenerate dependency notices. SkyWalking
+Eyes checks Helm template headers but cannot add their comment syntax.
+Add those headers when creating templates. `make validate` checks headers
+and rejects stale notices through the required CI Validate job.
+
+The repository pins these public submodules:
+
+| Path | Source | License |
+| --- | --- | --- |
+| `third-party/doca-platform-foundation` | [NVIDIA/doca-platform](https://github.com/NVIDIA/doca-platform) | [Apache-2.0](third-party/doca-platform-foundation/LICENSE) |
+| `third-party/ovn-kubernetes` | [ovn-org/ovn-kubernetes](https://github.com/ovn-org/ovn-kubernetes) | [Apache-2.0](third-party/ovn-kubernetes/LICENSE) |
+
 ## Identity contract
 
 DSX JWT subjects use complete key/value pairs with unique keys:
@@ -594,10 +657,7 @@ spec:
         sidecar.opentelemetry.io/inject: "dsx-obs/default-sidecar"
 ```
 
-See the
-[DSX service observability guide](https://gitlab-master.nvidia.com/ncp/dsx/dsx-docs/-/blob/9aa5ed1e74f2cd33261bd05e118372ef220c0aba/docs/dev-environments/observability-guide.md).
-
 ## Local E2E
 
-The [local E2E guide](scripts/README.md) describes the Linux Kind setup, VM
+The [local E2E guide](local-e2e-tests/README.md) describes the Linux Kind setup, VM
 bindings, identity checks, and install/test/clean workflow.

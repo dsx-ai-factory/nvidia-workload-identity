@@ -34,7 +34,7 @@ repository is a legacy mirror.
   that depend on them, and in the relevant READMEs.
 - Root and component READMEs describe the chart and applications users run.
   Keep special test setup, fixtures, and E2E workflow instructions in
-  `scripts/README.md`. Link there when those instructions are needed.
+  `local-e2e-tests/README.md`. Link there when those instructions are needed.
 - Ordinary tests run through standard validation. Do not add README test
   sections, per-package test commands, or test coverage lists for them.
   Adding or changing an ordinary test does not require a README update.
@@ -77,8 +77,8 @@ repository is a legacy mirror.
   and Secrets for configuration, and resource requests, limits, and security
   contexts.
 - Use `#!/bin/bash` and `set -euo pipefail` for Bash scripts. Reuse
-  `scripts/common.sh`. Clean up child processes and temporary resources on every
-  exit and avoid arbitrary sleeps.
+  `local-e2e-tests/common.sh`. Clean up child processes and temporary resources
+  on every exit and avoid arbitrary sleeps.
 - Query live clusters manually for diagnosis and validation only. Encode required
   state changes in repeatable deployment code.
 
@@ -108,7 +108,7 @@ repository is a legacy mirror.
   or rerun-dependent acceptance.
 - Use focused unit or integration tests for protocol matrices, lifecycle behavior,
   rotation, expiry, and reconciliation. Keep E2E focused on deployed integration
-  contracts in the [local test guide](scripts/README.md#local-e2e).
+  contracts in the [local test guide](local-e2e-tests/README.md#local-e2e).
 - Do not validate third-party behavior beyond the DSX Identity contract that
   consumes it.
 - Use real positive-path components. Do not substitute fake metadata responders,

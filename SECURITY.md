@@ -11,12 +11,12 @@ Use one of the following private reporting channels:
 - **NVIDIA Vulnerability Disclosure Program (preferred):** https://www.nvidia.com/en-us/security/
 - **Email:** [psirt@nvidia.com](mailto:psirt@nvidia.com)
   - We encourage use of the [NVIDIA public PGP key](https://www.nvidia.com/en-us/security/pgp-key) for secure email communication.
-- **GitLab/GitHub Private Vulnerability Reporting:** Use this repository's **Security** tab and **Report a vulnerability** flow when available.
+- **GitHub Private Vulnerability Reporting:** Use this repository's **Security** tab and **Report a vulnerability** flow when available.
 
 Please include the following information:
 
 - Product/project name and affected branch, commit, chart version, or container image tag.
-- Component affected, such as `dsx-identity-keys`, `metadata-service`, `dsx-token-fetcher`, `dsx_imds`, `dpu_hw`, `dsx-identity-controller`, the Helm chart, or a script under `scripts/`.
+- Component affected, such as `dsx-identity-keys`, `metadata-service`, `dsx-token-fetcher`, `dsx_imds`, `dpu_hw`, `dsx-identity-controller`, the Helm chart, or a script under `local-e2e-tests/`.
 - Vulnerability type, such as authentication bypass, token disclosure, key distribution issue, privilege escalation, denial of service, misregistration, injection, or insecure deployment default.
 - Step-by-step reproduction instructions.
 - Proof-of-concept code or request examples, if available.
@@ -50,9 +50,6 @@ Primary security responsibilities:
 - Ensure SPIRE registrations derived by the identity controller are deterministic, non-conflicting, and scoped to the correct parent agent.
 - Expose host and VM identity only through the intended metadata and CSI paths.
 - Keep Workload API sockets, token files, and proxy sockets available only to intended local workloads.
-
-**Repository Exposure Classification:** Internal.
-Basis: origin remote is hosted on `gitlab-master.nvidia.com`, an internal/self-managed GitLab host.
 
 **Service Exposure Classification:** Internal-Sensitive.
 Basis: this repository implements identity issuance, SPIRE node attestation,

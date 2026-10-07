@@ -81,4 +81,4 @@ plugin_data {
 HTTP client connects directly, ignores ambient proxy settings, and rejects
 redirects. `Dockerfile.spire` embeds the plugin in the DSX SPIRE agent image.
 The local E2E fixture selects that image through
-`scripts/dsx-imds-host-agent-values.yaml` plus its shard override.
+`local-e2e-tests/dsx-imds-host-agent-values.yaml` plus its shard override.

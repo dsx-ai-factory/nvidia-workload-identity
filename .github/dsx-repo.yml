@@ -1,0 +1,37 @@
+apiVersion: dsx-repo-guide/v1
+target_gate: open_source_ready
+org: dsx-ai-factory
+repo: project-dsx-identity
+
+codeowners:
+  - paths: ["*"]
+    owners: ["@dsx-ai-factory/dsx-identity-maintainers"]
+
+# GitHub rulesets enforce protection. The guide reads classic protection only.
+branch_protection:
+  branch: master
+  required_approvals: 1
+  require_code_owner_review: true
+  restrict_direct_push: true
+  required_status_checks:
+    - Validate
+    - E2E
+    - Image inventory
+    - Secret detection
+    - RC contract checks / test
+    - Container scan (dsx-identity-controller)
+    - Container scan (dsx-identity-keys)
+    - Container scan (dsx-identity-keys-proxy-csi)
+    - Container scan (dsx-imds-network-setup)
+    - Container scan (dsx-kata-uds-proxy)
+    - Container scan (dsx-spire-agent)
+    - Container scan (dsx-spire-server)
+    - Container scan (dsx-token-fetcher)
+    - Container scan (metadata-service)
+
+properties:
+  nspect-id: NSPECT-EMHI-OH1L
+
+contacts:
+  security: psirt@nvidia.com
+  conduct: GitHub_Conduct@nvidia.com
