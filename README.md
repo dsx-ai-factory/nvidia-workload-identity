@@ -405,38 +405,6 @@ that reference the [DSX IMDS](charts/dsx-imds/README.md), [DSX SPIFFE
 CSI](charts/dsx-spiffe-csi/README.md), and [DPU token-fetcher
 admission](charts/dsx-token-fetcher/README.md) child charts.
 
-### Build from source
-
-Use Linux, Docker with Buildx, Git, and [mise](https://mise.jdx.dev/). The
-repository pins Go, Rust, and deployment tools in `mise.toml` and `mise.lock`.
-
-```bash
-git submodule update --init --recursive
-mise install --locked
-docker build --target dsx-identity-keys \
-  --build-arg BINARY=dsx-identity-keys \
-  --tag dsx-identity-keys:local .
-```
-
-The same Dockerfile builds `dsx-token-fetcher`, `metadata-service`,
-`dsx-imds-network-setup`, `dsx-identity-keys-proxy-csi`, and
-`dsx-identity-controller`. Set both the target and `BINARY` to the component
-name. SPIRE images include the repository's attestor plugins:
-
-```bash
-docker build --file Dockerfile.spire --target dsx-spire-server \
-  --tag dsx-spire-server:local .
-docker build --file Dockerfile.spire --target dsx-spire-agent \
-  --tag dsx-spire-agent:local .
-docker build --file kata-uds-proxy/Dockerfile \
-  --tag dsx-kata-uds-proxy:local .
-```
-
-Push these images to a registry reachable by your clusters and configure the
-component image values in the [identity chart](charts/dsx-identity/README.md).
-Install the chart from the local source directory. The [local E2E guide](local-e2e-tests/README.md)
-provides a complete environment that builds and loads images from source.
-
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development and DCO sign-off,
