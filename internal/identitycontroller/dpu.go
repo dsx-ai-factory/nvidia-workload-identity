@@ -8,6 +8,7 @@ import (
 
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	spirev1alpha1 "github.com/spiffe/spire-controller-manager/api/v1alpha1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/record"
@@ -46,14 +47,20 @@ type DPUReconciler struct {
 func (r *DPUReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	dpu := &unstructured.Unstructured{}
 	dpu.SetGroupVersionKind(DPUGVK)
-	bm := &unstructured.Unstructured{}
-	bm.SetGroupVersionKind(BareMetalInstanceGVK)
-	return ctrl.NewControllerManagedBy(mgr).
+	controller := ctrl.NewControllerManagedBy(mgr).
 		Named("dsx-dpu-identity").
 		For(dpu).
-		Watches(bm, handler.EnqueueRequestsFromMapFunc(r.requestsForDPU)).
-		Watches(&spirev1alpha1.ClusterStaticEntry{}, handler.EnqueueRequestsFromMapFunc(requestForSource(DPUGVK.Group, DPUGVK.Kind))).
-		Complete(r)
+		Watches(&spirev1alpha1.ClusterStaticEntry{}, handler.EnqueueRequestsFromMapFunc(requestForSource(DPUGVK.Group, DPUGVK.Kind)))
+	available, err := sourceAPIAvailable(mgr.GetRESTMapper(), BareMetalInstanceGVK)
+	if err != nil {
+		return fmt.Errorf("discover BareMetalInstance API: %w", err)
+	}
+	if available {
+		bm := &unstructured.Unstructured{}
+		bm.SetGroupVersionKind(BareMetalInstanceGVK)
+		controller = controller.Watches(bm, handler.EnqueueRequestsFromMapFunc(r.requestsForDPU))
+	}
+	return controller.Complete(r)
 }
 
 func (r *DPUReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
@@ -130,6 +137,15 @@ func (r *DPUReconciler) hasTenantBareMetalInstance(ctx context.Context, dpuMachi
 	instances := &unstructured.UnstructuredList{}
 	instances.SetGroupVersionKind(BareMetalInstanceGVK.GroupVersion().WithKind(BareMetalInstanceGVK.Kind + "List"))
 	if err := r.List(ctx, instances); err != nil {
+		if meta.IsNoMatchError(err) {
+			available, discoveryErr := sourceAPIAvailable(r.RESTMapper(), BareMetalInstanceGVK)
+			if discoveryErr != nil {
+				return false, fmt.Errorf("discover BareMetalInstance API: %w", discoveryErr)
+			}
+			if !available {
+				return false, nil
+			}
+		}
 		return false, fmt.Errorf("list BareMetalInstances: %w", err)
 	}
 	for i := range instances.Items {

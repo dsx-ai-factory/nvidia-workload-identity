@@ -9,6 +9,7 @@ import (
 
 	spirev1alpha1 "github.com/spiffe/spire-controller-manager/api/v1alpha1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -17,6 +18,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 var testDPUMetadataSelectors = []string{
@@ -31,6 +33,138 @@ var testConfig = Config{
 	OperatorTenant:       "operator-1",
 	ClassName:            "dsx-identity-dsx-identity",
 	DPUMetadataSelectors: testDPUMetadataSelectors,
+}
+
+func TestSourceAPIAvailable(t *testing.T) {
+	t.Parallel()
+	forbidden := apierrors.NewForbidden(schema.GroupResource{Group: BareMetalInstanceGVK.Group, Resource: "baremetalinstances"}, "", errors.New("denied"))
+	discoveryFailure := errors.New("discovery unavailable")
+	for _, test := range []struct {
+		name        string
+		version     string
+		discoverErr error
+		afterMiss   bool
+		available   bool
+	}{
+		{name: "absent"},
+		{name: "supported", version: "v1alpha1", available: true},
+		{name: "unsupported installed version", version: "v1beta1"},
+		{name: "discovery failure", discoverErr: discoveryFailure},
+		{name: "authorization failure", discoverErr: forbidden},
+		{name: "discovery failure after version miss", discoverErr: discoveryFailure, afterMiss: true},
+		{name: "authorization failure after version miss", discoverErr: forbidden, afterMiss: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			mapper := launchLayerTestMapper(test.version)
+			if test.discoverErr != nil {
+				mapper = mappingErrorMapper{RESTMapper: mapper, err: test.discoverErr, afterMiss: test.afterMiss}
+			}
+			available, err := sourceAPIAvailable(mapper, BareMetalInstanceGVK)
+			if available != test.available {
+				t.Fatalf("available = %v, want %v", available, test.available)
+			}
+			switch {
+			case test.discoverErr != nil:
+				if !errors.Is(err, test.discoverErr) {
+					t.Fatalf("error = %v, want %v", err, test.discoverErr)
+				}
+			case test.version == "v1beta1":
+				if !meta.IsNoMatchError(err) {
+					t.Fatalf("unsupported version error = %v", err)
+				}
+			default:
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func TestDPUDesiredEntryFailsClosedOnAssignmentLookupErrors(t *testing.T) {
+	t.Parallel()
+	noMatch := &meta.NoKindMatchError{GroupKind: BareMetalInstanceGVK.GroupKind(), SearchedVersions: []string{BareMetalInstanceGVK.Version}}
+	resource := schema.GroupResource{Group: BareMetalInstanceGVK.Group, Resource: "baremetalinstances"}
+	forbidden := apierrors.NewForbidden(resource, "", errors.New("denied"))
+	for _, test := range []struct {
+		name        string
+		version     string
+		listErr     error
+		discoverErr error
+		assigned    bool
+		wantEntry   bool
+		wantErr     bool
+	}{
+		{name: "absent API", listErr: noMatch, wantEntry: true},
+		{name: "unsupported installed version", version: "v1beta1", listErr: noMatch, wantErr: true},
+		{name: "supported API with mapping failure", version: "v1alpha1", listErr: noMatch, wantErr: true},
+		{name: "forbidden lookup", version: "v1alpha1", listErr: forbidden, wantErr: true},
+		{name: "forbidden discovery after missing mapping", listErr: noMatch, discoverErr: forbidden, wantErr: true},
+		{name: "unavailable discovery after missing mapping", listErr: noMatch, discoverErr: errors.New("discovery unavailable"), wantErr: true},
+		{name: "HTTP not found is not API absence", listErr: apierrors.NewNotFound(resource, ""), wantErr: true},
+		{name: "supported API without assignment", version: "v1alpha1", wantEntry: true},
+		{name: "tenant assignment suppresses operator entry", version: "v1alpha1", assigned: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dpu := &unstructured.Unstructured{}
+			dpu.SetGroupVersionKind(DPUGVK)
+			dpu.SetName("dpu-1")
+			dpu.SetLabels(map[string]string{dpuMachineIDLabel: "machine-1"})
+			setSourceSpecField(t, dpu, "serialNumber", "52TF43G001G")
+			mapper := launchLayerTestMapper(test.version)
+			if test.discoverErr != nil {
+				mapper = mappingErrorMapper{RESTMapper: mapper, err: test.discoverErr}
+			}
+			builder := fake.NewClientBuilder().WithScheme(testScheme(t)).WithRESTMapper(mapper)
+			if test.assigned {
+				builder = builder.WithObjects(newBareMetalInstance("assigned-host", "tenant-system", "940863e9-1e6f-40ea-9104-c46a7b041ce5", "tenant-2", "instance-1", "machine-1", "52TF43G001G"))
+			}
+			c := builder.WithInterceptorFuncs(interceptor.Funcs{
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					if test.listErr != nil {
+						return test.listErr
+					}
+					return c.List(ctx, list, opts...)
+				},
+			}).Build()
+			entry, err := (&DPUReconciler{Client: c, Config: testConfig}).desiredEntry(context.Background(), dpu)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("desiredEntry error = %v, want error %v", err, test.wantErr)
+			}
+			if (entry != nil) != test.wantEntry {
+				t.Fatalf("entry = %#v, want entry %v", entry, test.wantEntry)
+			}
+			if test.discoverErr != nil && !errors.Is(err, test.discoverErr) {
+				t.Fatalf("discovery error = %v, want %v", err, test.discoverErr)
+			}
+			if entry != nil {
+				assertEntry(t, entry, "spiffe://k2.sjc-1.nvidia.com/tenant/operator-1/service/dsx/bm/machine-1", "spiffe://k2.sjc-1.nvidia.com/spire/agent/dpu_hw/52tf43g001g", "dsx-imds", testDPUMetadataSelectors)
+			}
+		})
+	}
+}
+
+func launchLayerTestMapper(version string) meta.RESTMapper {
+	gvk := BareMetalInstanceGVK
+	gvk.Version = version
+	mapper := meta.NewDefaultRESTMapper([]schema.GroupVersion{gvk.GroupVersion()})
+	if version != "" {
+		mapper.Add(gvk, meta.RESTScopeNamespace)
+	}
+	return mapper
+}
+
+type mappingErrorMapper struct {
+	meta.RESTMapper
+	err       error
+	afterMiss bool
+}
+
+func (m mappingErrorMapper) RESTMapping(kind schema.GroupKind, versions ...string) (*meta.RESTMapping, error) {
+	if m.afterMiss && len(versions) != 0 {
+		return m.RESTMapper.RESTMapping(kind, versions...)
+	}
+	return nil, m.err
 }
 
 func TestConfigRejectsInvalidDPUMetadataSelectors(t *testing.T) {

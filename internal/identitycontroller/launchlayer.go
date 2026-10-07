@@ -46,6 +46,14 @@ func (r *LaunchLayerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if err != nil {
 		return err
 	}
+	available, err := sourceAPIAvailable(mgr.GetRESTMapper(), r.SourceGVK)
+	if err != nil {
+		return fmt.Errorf("discover %s API: %w", r.SourceGVK.Kind, err)
+	}
+	if !available {
+		ctrl.Log.Info("Skipping absent Launch Layer API", "kind", r.SourceGVK.Kind)
+		return nil
+	}
 	source := &unstructured.Unstructured{}
 	source.SetGroupVersionKind(r.SourceGVK)
 	return ctrl.NewControllerManagedBy(mgr).
