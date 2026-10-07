@@ -44,6 +44,7 @@ update-licenses: ## Add missing source headers and update third-party notices
 	@cp .cache/licenses/THIRD-PARTY-NOTICES .
 
 license-notices:
+	@git submodule update --init --recursive
 	@mkdir -p .cache/licenses
 	@# Use the repository-pinned Go version for dependency scanning, including DPF.
 	@$(MISE_EXEC) env GOTOOLCHAIN=local go-licenses report --include_tests --ignore dsx-identity \

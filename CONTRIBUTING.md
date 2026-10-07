@@ -2,9 +2,7 @@
 
 ## Before you start
 
-Open an issue describing the change before writing it. Reviewers on this
-repository are assigned through CODEOWNERS, so an issue is how the right person
-sees the work before the diff exists.
+Open an issue to discuss the proposed change before writing it.
 
 ## Developer Certificate of Origin
 
