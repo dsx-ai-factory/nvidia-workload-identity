@@ -14,6 +14,7 @@ import (
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	spirev1alpha1 "github.com/spiffe/spire-controller-manager/api/v1alpha1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -32,6 +33,20 @@ const (
 	sourceNamespaceAnnotation = "identity.dsx.nvidia.com/source-namespace"
 	sourceNameAnnotation      = "identity.dsx.nvidia.com/source-name"
 )
+
+// An absent API must not create an informer that blocks manager startup.
+// An installed API with an unsupported version remains an error.
+func sourceAPIAvailable(mapper meta.RESTMapper, gvk schema.GroupVersionKind) (bool, error) {
+	_, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+	if meta.IsNoMatchError(err) {
+		_, discoveryErr := mapper.RESTMapping(gvk.GroupKind())
+		if meta.IsNoMatchError(discoveryErr) {
+			return false, nil
+		}
+		return false, errors.Join(err, discoveryErr)
+	}
+	return err == nil, err
+}
 
 // Config holds shard-wide controller values. TrustDomain encodes local SPIRE
 // IDs. OperatorTenant supplies the tenant segment for DPU subjects and the
