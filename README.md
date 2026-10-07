@@ -420,8 +420,8 @@ contains dependency attribution and license texts for Go, Rust, and the
 pinned submodules.
 
 `make update-licenses` runs SkyWalking Eyes to add source headers and uses
-`go-licenses` and `cargo-about` to regenerate dependency notices. SkyWalking
-Eyes checks Helm template headers but cannot add their comment syntax.
+`go-licenses` and `cargo licenses` to regenerate dependency notices.
+SkyWalking Eyes checks Helm template headers but cannot add their comment syntax.
 Add those headers when creating templates. `make validate` checks headers
 and rejects stale notices through the required CI Validate job.
 

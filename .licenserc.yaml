@@ -16,7 +16,6 @@ header:
     - '**/*.tpl'
     - '**/*.tmpl'
     - '**/*.jq'
-    - '**/*.hbs'
     - '**/*.dockerignore'
     - '**/Dockerfile*'
     - Makefile
