@@ -88,7 +88,8 @@ jobs:
         run: |
           # The AWS image omits VRF and holds its matching extra module package.
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends --allow-change-held-packages \
+          # This disposable runner loads modules without rebooting.
+          sudo env INITRD=No apt-get install -y --no-install-recommends --allow-change-held-packages \
             "linux-modules-extra-$(uname -r)"
           # Primary UDN gateways require VRF support in the host kernel.
           for module in openvswitch vport-geneve nft_socket vrf tun vhost_net; do
