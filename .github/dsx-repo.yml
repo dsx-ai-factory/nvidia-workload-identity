@@ -7,7 +7,7 @@ codeowners:
   - paths: ["*"]
     owners: ["@dsx-ai-factory/dsx-identity-maintainers"]
 
-# GitHub rulesets enforce protection. The guide reads classic protection only.
+# GitHub rulesets enforce protection. The guide reads them but cannot change them.
 branch_protection:
   branch: master
   required_approvals: 1
