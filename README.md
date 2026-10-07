@@ -405,10 +405,6 @@ that reference the [DSX IMDS](charts/dsx-imds/README.md), [DSX SPIFFE
 CSI](charts/dsx-spiffe-csi/README.md), and [DPU token-fetcher
 admission](charts/dsx-token-fetcher/README.md) child charts.
 
-The open-source distribution contains source code. Build the DSX images and
-configure their repositories and tags in Helm values before installing. Chart
-defaults reference NVIDIA's internal release registry.
-
 ### Build from source
 
 Use Linux, Docker with Buildx, Git, and [mise](https://mise.jdx.dev/). The
