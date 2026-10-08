@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # Git
 .git/
 **/.git
@@ -49,7 +52,7 @@ coverage.html
 Makefile
 
 # Deployment scripts (not needed in container)
-scripts/
+local-e2e-tests/
 
 # DPF supplies the dpu_hw server plugin source. Other submodules are not part
 # of this build context.
