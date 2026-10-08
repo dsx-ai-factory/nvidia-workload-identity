@@ -83,7 +83,7 @@ jobs:
         with:
           # The full Zot storage exceeds GitHub's 10 GB per-entry limit.
           path: ${{ env.ZOT_DATA_DIR }}/library
-          key: zot-dockerhub-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/local-registry/zot-config.json') }}
+          key: zot-dockerhub-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('local-e2e-tests/local-registry/zot-config.json') }}
       - name: Prepare host networking and virtualization
         run: |
           # The AWS image omits VRF and holds its matching extra module package.
@@ -105,7 +105,7 @@ jobs:
           # shellcheck disable=SC2016
           mise exec -- jq --arg mirror 'https://dc.local.gha-runners.nvidia.com' \
             '.extensions.sync.registries[0].urls[1] = $mirror' \
-            scripts/local-registry/zot-config.json > "$RUNNER_TEMP/zot-config.json"
+            local-e2e-tests/local-registry/zot-config.json > "$RUNNER_TEMP/zot-config.json"
           echo "ZOT_CONFIG_FILE=$RUNNER_TEMP/zot-config.json" >> "$GITHUB_ENV"
       - name: Docker Hub mirror diagnostics
         run: |

@@ -1,7 +1,6 @@
 #!/bin/sh
 #
-# Copyright (c) 2026 NVIDIA Corporation
-#
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Guest-side proxy. Run this inside a Kata pod to provide

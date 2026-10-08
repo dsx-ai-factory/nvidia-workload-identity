@@ -126,9 +126,9 @@ coverage.html
 local/
 dev/
 debug
-/scripts/secret-generators/identity-k1/generated/
-/scripts/secret-generators/identity-k2/generated/
-/scripts/k2/vm/generated/
+/local-e2e-tests/secret-generators/identity-k1/generated/
+/local-e2e-tests/secret-generators/identity-k2/generated/
+/local-e2e-tests/k2/vm/generated/
 
 # Terraform
 *.tfstate
