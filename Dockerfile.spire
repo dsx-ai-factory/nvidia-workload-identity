@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 ARG BUILDER_IMG=golang:1.26.4
 ARG SPIRE_SERVER_IMG=ghcr.io/spiffe/spire-server:1.15.1
 ARG SPIRE_AGENT_IMG=ghcr.io/spiffe/spire-agent:1.15.1

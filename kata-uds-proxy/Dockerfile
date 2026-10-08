@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 ARG BUILDER_IMG=rust:1.97.1-alpine
 ARG RUNTIME_IMG=alpine:3.24.2
 

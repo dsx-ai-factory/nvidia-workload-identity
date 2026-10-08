@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 // Package identitycontroller derives one SPIRE ClusterStaticEntry from each
 // read-only DPU or LaunchLayer source. Source and child watches drive creation,
 // drift repair, and cleanup.

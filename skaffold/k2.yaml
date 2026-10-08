@@ -5,7 +5,7 @@ metadata:
 manifests:
   kustomize:
     paths:
-      - ../scripts/k2/network
+      - ../local-e2e-tests/k2/network
 deploy:
   kubeContext: kind-k2
   statusCheckDeadlineSeconds: 120
@@ -74,7 +74,7 @@ requires:
 manifests:
   kustomize:
     paths:
-      - ../scripts/k2/kubevirt/operator
+      - ../local-e2e-tests/k2/kubevirt/operator
 deploy:
   kubeContext: kind-k2
   statusCheckDeadlineSeconds: 180
@@ -101,7 +101,7 @@ requires:
 manifests:
   kustomize:
     paths:
-      - ../scripts/k2/kubevirt/release
+      - ../local-e2e-tests/k2/kubevirt/release
 deploy:
   kubeContext: kind-k2
   # KubeVirt pulls several large upstream images in sequence before reporting Available.
@@ -129,8 +129,8 @@ requires:
       - spire-crds-k2
 manifests:
   rawYaml:
-    - ../scripts/k2/source-fixtures/dpu-crd.yaml
-    - ../scripts/k2/source-fixtures/launch-layer-crd.yaml
+    - ../local-e2e-tests/k2/source-fixtures/dpu-crd.yaml
+    - ../local-e2e-tests/k2/source-fixtures/launch-layer-crd.yaml
 deploy:
   kubeContext: kind-k2
   statusCheckDeadlineSeconds: 60
@@ -220,8 +220,8 @@ deploy:
         createNamespace: true
         skipBuildDependencies: true
         valuesFiles:
-          - ../scripts/identity-e2e-values.yaml
-          - ../scripts/k2-values.yaml
+          - ../local-e2e-tests/identity-e2e-values.yaml
+          - ../local-e2e-tests/k2-values.yaml
         setValueTemplates:
           identityKeys.image.repository: "{{.IMAGE_REPO_dsx_identity_dsx_identity_keys}}"
           identityKeys.image.tag: "{{.IMAGE_TAG_dsx_identity_dsx_identity_keys}}"
@@ -251,9 +251,9 @@ requires:
       - identity-k2
 manifests:
   rawYaml:
-    - ../scripts/k2/source-fixtures/operator-host-bootstrap.yaml
-    - ../scripts/k2/source-fixtures/dpu-imds-bootstrap.yaml
-    - ../scripts/k2/dpu/e2e-nico-mds.yaml
+    - ../local-e2e-tests/k2/source-fixtures/operator-host-bootstrap.yaml
+    - ../local-e2e-tests/k2/source-fixtures/dpu-imds-bootstrap.yaml
+    - ../local-e2e-tests/k2/dpu/e2e-nico-mds.yaml
 deploy:
   kubeContext: kind-k2
   statusCheckDeadlineSeconds: 180
@@ -282,8 +282,8 @@ deploy:
         version: 0.27.1
         namespace: dsx-identity
         valuesFiles:
-          - ../scripts/dsx-imds-host-agent-values.yaml
-          - ../scripts/k2/dsx-imds-host-agent-values.yaml
+          - ../local-e2e-tests/dsx-imds-host-agent-values.yaml
+          - ../local-e2e-tests/k2/dsx-imds-host-agent-values.yaml
         setValueTemplates:
           spire-agent.image.registry: ""
           spire-agent.image.repository: "{{.IMAGE_REPO_dsx_identity_dsx_spire_agent}}"
@@ -309,7 +309,7 @@ deploy:
         chartPath: ../charts/dsx-spiffe-csi
         namespace: dsx-identity
         valuesFiles:
-          - ../scripts/k2/dsx-spiffe-csi-values.yaml
+          - ../local-e2e-tests/k2/dsx-spiffe-csi-values.yaml
 ---
 apiVersion: skaffold/v4beta14
 kind: Config
@@ -323,7 +323,7 @@ requires:
       - dpu-spiffe-csi-k2
 manifests:
   rawYaml:
-    - ../scripts/k2/dpu/e2e-dpu-imds.yaml
+    - ../local-e2e-tests/k2/dpu/e2e-dpu-imds.yaml
 deploy:
   kubeContext: kind-k2
   statusCheckDeadlineSeconds: 180
@@ -335,7 +335,7 @@ deploy:
         chartPath: ../charts/dsx-imds
         namespace: dsx-identity
         valuesFiles:
-          - ../scripts/k2/dsx-imds-values.yaml
+          - ../local-e2e-tests/k2/dsx-imds-values.yaml
         setValueTemplates:
           metadataService.image.repository: "{{.IMAGE_REPO_dsx_identity_metadata_service}}"
           metadataService.image.tag: "{{.IMAGE_TAG_dsx_identity_metadata_service}}"
@@ -352,9 +352,9 @@ requires:
       - dpu-imds-k2
 manifests:
   rawYaml:
-    - ../scripts/k2/source-fixtures/dpu-controller.yaml
-    - ../scripts/k2/nginx/e2e-nginx.yaml
-    - ../scripts/k2/nginx/e2e-spire-client.yaml
+    - ../local-e2e-tests/k2/source-fixtures/dpu-controller.yaml
+    - ../local-e2e-tests/k2/nginx/e2e-nginx.yaml
+    - ../local-e2e-tests/k2/nginx/e2e-spire-client.yaml
 deploy:
   kubeContext: kind-k2
   statusCheckDeadlineSeconds: 180
@@ -377,10 +377,10 @@ manifests:
     before:
       - host:
           command:
-            - scripts/k2/vm/prepare-secret-source.sh
+            - local-e2e-tests/k2/vm/prepare-secret-source.sh
   kustomize:
     paths:
-      - ../scripts/k2/vm
+      - ../local-e2e-tests/k2/vm
 deploy:
   kubeContext: kind-k2
   statusCheckDeadlineSeconds: 300

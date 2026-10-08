@@ -5,7 +5,7 @@ metadata:
 manifests:
   kustomize:
     paths:
-      - ../scripts/k1/metallb
+      - ../local-e2e-tests/k1/metallb
 deploy:
   kubeContext: kind-k1
   statusCheckDeadlineSeconds: 300
@@ -24,7 +24,7 @@ deploy:
               - endpoints/metallb-webhook-service
         - host:
             command:
-              - scripts/k1/metallb/configure-address-pool.sh
+              - local-e2e-tests/k1/metallb/configure-address-pool.sh
 ---
 apiVersion: skaffold/v4beta14
 kind: Config
@@ -98,8 +98,8 @@ requires:
       - metallb-k1
 manifests:
   rawYaml:
-    - ../scripts/k1/gateway/gateway-class.yaml
-    - ../scripts/k1/gateway/gateway.yaml
+    - ../local-e2e-tests/k1/gateway/gateway-class.yaml
+    - ../local-e2e-tests/k1/gateway/gateway.yaml
 deploy:
   kubeContext: kind-k1
   statusCheckDeadlineSeconds: 120
@@ -109,7 +109,7 @@ deploy:
       after:
         - host:
             command:
-              - scripts/configure-dns.sh
+              - local-e2e-tests/configure-dns.sh
 ---
 apiVersion: skaffold/v4beta14
 kind: Config
@@ -160,7 +160,7 @@ deploy:
         # Rendering must not rebuild the prepared archive from remote repositories.
         skipBuildDependencies: true
         valuesFiles:
-          - ../scripts/k1/nats/values.yaml
+          - ../local-e2e-tests/k1/nats/values.yaml
 ---
 apiVersion: skaffold/v4beta14
 kind: Config
@@ -172,7 +172,7 @@ requires:
       - nats-k1
 manifests:
   rawYaml:
-    - ../scripts/k1/nats/route.yaml
+    - ../local-e2e-tests/k1/nats/route.yaml
 deploy:
   kubeContext: kind-k1
   statusCheckDeadlineSeconds: 120
@@ -219,8 +219,8 @@ deploy:
         createNamespace: true
         skipBuildDependencies: true
         valuesFiles:
-          - ../scripts/identity-e2e-values.yaml
-          - ../scripts/k1-values.yaml
+          - ../local-e2e-tests/identity-e2e-values.yaml
+          - ../local-e2e-tests/k1-values.yaml
         setValueTemplates:
           identityKeys.image.repository: "{{.IMAGE_REPO_dsx_identity_dsx_identity_keys}}"
           identityKeys.image.tag: "{{.IMAGE_TAG_dsx_identity_dsx_identity_keys}}"
@@ -242,8 +242,8 @@ requires:
       - identity-k1
 manifests:
   rawYaml:
-    - ../scripts/k1/source-fixtures/operator-host-bootstrap.yaml
-    - ../scripts/k1/dpu/e2e-nico-mds.yaml
+    - ../local-e2e-tests/k1/source-fixtures/operator-host-bootstrap.yaml
+    - ../local-e2e-tests/k1/dpu/e2e-nico-mds.yaml
 deploy:
   kubeContext: kind-k1
   statusCheckDeadlineSeconds: 180
@@ -272,8 +272,8 @@ deploy:
         version: 0.27.1
         namespace: dsx-identity
         valuesFiles:
-          - ../scripts/dsx-imds-host-agent-values.yaml
-          - ../scripts/k1/dsx-imds-host-agent-values.yaml
+          - ../local-e2e-tests/dsx-imds-host-agent-values.yaml
+          - ../local-e2e-tests/k1/dsx-imds-host-agent-values.yaml
         setValueTemplates:
           spire-agent.image.registry: ""
           spire-agent.image.repository: "{{.IMAGE_REPO_dsx_identity_dsx_spire_agent}}"
@@ -291,7 +291,7 @@ requires:
       - worker-host-k1
 manifests:
   rawYaml:
-    - ../scripts/k1/nginx/e2e-nginx.yaml
+    - ../local-e2e-tests/k1/nginx/e2e-nginx.yaml
 deploy:
   kubeContext: kind-k1
   statusCheckDeadlineSeconds: 180
@@ -321,14 +321,14 @@ deploy:
         # Skaffold otherwise waits on the chart test hook, which Helm install does not run.
         skipTests: true
         valuesFiles:
-          - ../scripts/k1/openbao/openbao-values.yaml
+          - ../local-e2e-tests/k1/openbao/openbao-values.yaml
         setFiles:
-          server.standalone.config: ../scripts/k1/openbao/openbao.hcl
-          'extraObjects[1].data.region-ds9-policy\.hcl': ../scripts/k1/openbao/policies/region-ds9-policy.hcl
-          'extraObjects[1].data.resource-type-dpu-policy\.hcl': ../scripts/k1/openbao/policies/resource-type-dpu-policy.hcl
-          'extraObjects[1].data.resource-type-bm-policy\.hcl': ../scripts/k1/openbao/policies/resource-type-bm-policy.hcl
-          'extraObjects[1].data.resource-type-vm-policy\.hcl': ../scripts/k1/openbao/policies/resource-type-vm-policy.hcl
-          'extraObjects[1].data.service-dsx-policy\.hcl': ../scripts/k1/openbao/policies/service-dsx-policy.hcl
-          'extraObjects[1].data.spiffe-authenticated-policy\.hcl': ../scripts/k1/openbao/policies/spiffe-authenticated-policy.hcl
-          'extraObjects[1].data.tenant-operator-1-policy\.hcl': ../scripts/k1/openbao/policies/tenant-operator-1-policy.hcl
-          'extraObjects[1].data.tenant-tenant-2-policy\.hcl': ../scripts/k1/openbao/policies/tenant-tenant-2-policy.hcl
+          server.standalone.config: ../local-e2e-tests/k1/openbao/openbao.hcl
+          'extraObjects[1].data.region-ds9-policy\.hcl': ../local-e2e-tests/k1/openbao/policies/region-ds9-policy.hcl
+          'extraObjects[1].data.resource-type-dpu-policy\.hcl': ../local-e2e-tests/k1/openbao/policies/resource-type-dpu-policy.hcl
+          'extraObjects[1].data.resource-type-bm-policy\.hcl': ../local-e2e-tests/k1/openbao/policies/resource-type-bm-policy.hcl
+          'extraObjects[1].data.resource-type-vm-policy\.hcl': ../local-e2e-tests/k1/openbao/policies/resource-type-vm-policy.hcl
+          'extraObjects[1].data.service-dsx-policy\.hcl': ../local-e2e-tests/k1/openbao/policies/service-dsx-policy.hcl
+          'extraObjects[1].data.spiffe-authenticated-policy\.hcl': ../local-e2e-tests/k1/openbao/policies/spiffe-authenticated-policy.hcl
+          'extraObjects[1].data.tenant-operator-1-policy\.hcl': ../local-e2e-tests/k1/openbao/policies/tenant-operator-1-policy.hcl
+          'extraObjects[1].data.tenant-tenant-2-policy\.hcl': ../local-e2e-tests/k1/openbao/policies/tenant-tenant-2-policy.hcl
