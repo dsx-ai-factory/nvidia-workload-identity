@@ -46,14 +46,16 @@ shard's source CRs through
 | `--operator-tenant` | required | Configured tenant for operator identities |
 | `--class-name` | required | SPIRE controller-manager class name |
 | `--dpu-metadata-selector` | required, repeatable | Kubernetes WorkloadAttestor selector for DPU IMDS |
+| `--source-api-poll-interval` | `1h` | Positive duration between discovery retries for absent source APIs |
 | `--metrics-bind-address` | `:8080` | Controller metrics address |
 | `--health-probe-bind-address` | `:8081` | `/healthz` and `/readyz` address |
 | `--leader-elect` | `true` | Enable Kubernetes leader election |
 
 The command uses the active Kubernetes client configuration and requires the
 SPIRE CRDs. DPU and Launch Layer source watches start when their APIs exist.
-The controller checks absent APIs every 10 seconds and registers their watches
-when the CRDs are installed. Existing source objects reconcile when the watch
+The controller checks APIs at startup and retries absent APIs every hour by
+default. Set `--source-api-poll-interval` to change the retry period. It
+registers watches when the CRDs are installed. Existing source objects reconcile when the watch
 starts. Without the `BareMetalInstance` API, DPU sources retain their
 operator-owned BM identities. Its assignment watch replaces those identities
 when complete tenant assignments appear. Discovery and access errors remain

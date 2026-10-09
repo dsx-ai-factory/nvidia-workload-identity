@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	spirev1alpha1 "github.com/spiffe/spire-controller-manager/api/v1alpha1"
@@ -56,11 +57,12 @@ func sourceAPIAvailable(mapper meta.RESTMapper, gvk schema.GroupVersionKind) (bo
 // host-agent parent of a VM. Launch Layer supplies tenant subjects. ClassName
 // is placed on every entry.
 type Config struct {
-	TrustDomain          string
-	Service              string
-	OperatorTenant       string
-	ClassName            string
-	DPUMetadataSelectors []string
+	TrustDomain           string
+	Service               string
+	OperatorTenant        string
+	ClassName             string
+	DPUMetadataSelectors  []string
+	SourceAPIPollInterval time.Duration
 }
 
 // Validate verifies shard configuration before either controller starts.
@@ -87,6 +89,9 @@ func (c Config) Validate() error {
 		if !strings.HasPrefix(selector, "k8s:") {
 			return fmt.Errorf("DPU metadata selector %q must use the Kubernetes WorkloadAttestor", selector)
 		}
+	}
+	if c.SourceAPIPollInterval <= 0 {
+		return errors.New("source API poll interval must be positive")
 	}
 	return nil
 }

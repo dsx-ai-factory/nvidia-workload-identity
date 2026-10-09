@@ -55,10 +55,10 @@ func (r *DPUReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if err != nil {
 		return err
 	}
-	if err := watchSourceWhenAvailable(mgr, c, DPUGVK, &handler.EnqueueRequestForObject{}); err != nil {
+	if err := watchSourceWhenAvailable(mgr, c, DPUGVK, &handler.EnqueueRequestForObject{}, r.Config.SourceAPIPollInterval); err != nil {
 		return err
 	}
-	return watchSourceWhenAvailable(mgr, c, BareMetalInstanceGVK, handler.EnqueueRequestsFromMapFunc(r.requestsForDPU))
+	return watchSourceWhenAvailable(mgr, c, BareMetalInstanceGVK, handler.EnqueueRequestsFromMapFunc(r.requestsForDPU), r.Config.SourceAPIPollInterval)
 }
 
 func (r *DPUReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {

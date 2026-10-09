@@ -19,7 +19,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
-func watchSourceWhenAvailable(mgr ctrl.Manager, c controller.Controller, gvk schema.GroupVersionKind, h handler.EventHandler) error {
+// watchSourceWhenAvailable attaches installed APIs during setup and retries
+// discovery for absent APIs after the manager starts.
+func watchSourceWhenAvailable(mgr ctrl.Manager, c controller.Controller, gvk schema.GroupVersionKind, h handler.EventHandler, pollInterval time.Duration) error {
 	object := &unstructured.Unstructured{}
 	object.SetGroupVersionKind(gvk)
 	available, err := sourceAPIAvailable(mgr.GetRESTMapper(), gvk)
@@ -27,12 +29,15 @@ func watchSourceWhenAvailable(mgr ctrl.Manager, c controller.Controller, gvk sch
 		return fmt.Errorf("discover %s API: %w", gvk.Kind, err)
 	}
 	if available {
+		// Installed APIs retain the controller's startup cache synchronization checks.
 		return c.Watch(source.Kind[client.Object](mgr.GetCache(), object, h))
 	}
 	ctrl.Log.Info("Waiting for source API", "kind", gvk.Kind)
-	// Register absent APIs after startup so their informers cannot block other controllers.
+	// An absent API must not block startup. The manager owns the retry loop
+	// and cancels it on shutdown or loss of leadership.
 	return mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
-		err := wait.PollUntilContextCancel(ctx, 10*time.Second, true, func(ctx context.Context) (bool, error) {
+		// Stop discovery retries after attaching the watch. Informer events drive reconciliation.
+		err := wait.PollUntilContextCancel(ctx, pollInterval, true, func(ctx context.Context) (bool, error) {
 			available, err := sourceAPIAvailable(mgr.GetRESTMapper(), gvk)
 			if err != nil {
 				return false, fmt.Errorf("discover %s API: %w", gvk.Kind, err)
@@ -45,14 +50,19 @@ func watchSourceWhenAvailable(mgr ctrl.Manager, c controller.Controller, gvk sch
 				// Match controller-runtime's default cache synchronization timeout.
 				timeout = 2 * time.Minute
 			}
+			// GetInformer waits for the initial list. Bound that wait so list failures
+			// reach the manager instead of leaving the source unwatched.
 			syncCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 			informer, err := mgr.GetCache().GetInformer(syncCtx, object)
 			if err != nil {
 				return false, fmt.Errorf("sync %s informer: %w", gvk.Kind, err)
 			}
+			// The informer replays cached objects to the new handler, including
+			// sources created before this watch was attached.
 			return true, c.Watch(&source.Informer{Informer: informer, Handler: h})
 		})
+		// Shutdown cancellation must not fail the manager.
 		if ctx.Err() != nil {
 			return nil
 		}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-logr/logr"
 	spirev1alpha1 "github.com/spiffe/spire-controller-manager/api/v1alpha1"
+	"golang.org/x/sync/errgroup"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,6 +36,7 @@ func TestControllersRecoverLateSourceAPIs(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	scheme := testScheme(t)
+	// Register all fake client types before concurrent lists can mutate the scheme.
 	for _, gvk := range []schema.GroupVersionKind{DPUGVK, VirtualInstanceGVK, BareMetalInstanceGVK} {
 		scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
 		scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind(gvk.Kind+"List"), &unstructured.UnstructuredList{})
@@ -52,37 +54,33 @@ func TestControllersRecoverLateSourceAPIs(t *testing.T) {
 				return c.List(ctx, list, opts...)
 			},
 		}).Build()}
+	// The fake apply client records patches. Serialize those writes across controllers.
 	serialized := &lockedApplyClient{applyClient: c}
 	informerCache := &sourceTestCache{ctx: ctx, client: serialized, informers: make(map[schema.GroupVersionKind]toolscache.SharedIndexInformer)}
 	mgr := &sourceTestManager{scheme: scheme, mapper: mapper, cache: informerCache}
-	if err := (&DPUReconciler{Client: serialized, Config: testConfig}).SetupWithManager(mgr); err != nil {
+	config := testConfig
+	config.SourceAPIPollInterval = time.Millisecond
+	if err := (&DPUReconciler{Client: serialized, Config: config}).SetupWithManager(mgr); err != nil {
 		t.Fatal(err)
 	}
 	for _, gvk := range []schema.GroupVersionKind{VirtualInstanceGVK, BareMetalInstanceGVK} {
-		if err := (&LaunchLayerReconciler{Client: serialized, Config: testConfig, SourceGVK: gvk}).SetupWithManager(mgr); err != nil {
+		if err := (&LaunchLayerReconciler{Client: serialized, Config: config, SourceGVK: gvk}).SetupWithManager(mgr); err != nil {
 			t.Fatal(err)
 		}
 	}
-	var wg sync.WaitGroup
-	errs := make(chan error, len(mgr.runnables))
+	// Start the same managed tasks as production and collect their errors on cleanup.
+	var group errgroup.Group
 	for _, runnable := range mgr.runnables {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			errs <- runnable.Start(ctx)
-		}()
+		group.Go(func() error { return runnable.Start(ctx) })
 	}
 	t.Cleanup(func() {
 		cancel()
-		wg.Wait()
-		close(errs)
-		for err := range errs {
-			if err != nil {
-				t.Error(err)
-			}
+		if err := group.Wait(); err != nil {
+			t.Error(err)
 		}
 	})
 
+	// Install DPU first while both Launch Layer APIs remain absent.
 	dpu := &unstructured.Unstructured{}
 	dpu.SetGroupVersionKind(DPUGVK)
 	dpu.SetName("late-dpu")
@@ -96,6 +94,7 @@ func TestControllersRecoverLateSourceAPIs(t *testing.T) {
 	mapper.install(DPUGVK)
 	waitForSourceEntry(t, ctx, serialized, dpu, "spiffe://k2.sjc-1.nvidia.com/tenant/operator-1/service/dsx/bm/machine-1")
 
+	// Initial informer lists must recover pre-existing VM and tenant BM sources.
 	vm := newVirtualInstance("late-vm", "default", "vm-uid", "tenant-1", "vm-1", "host-1", "940863e9-1e6f-40ea-9104-c46a7b041ce5")
 	bm := newBareMetalInstance("late-bm", "default", "bm-uid", "tenant-2", "machine-1", "machine-1", "serial-1")
 	for _, object := range []*unstructured.Unstructured{vm, bm} {
@@ -108,6 +107,7 @@ func TestControllersRecoverLateSourceAPIs(t *testing.T) {
 	waitForSourceEntry(t, ctx, serialized, bm, "spiffe://k2.sjc-1.nvidia.com/tenant/tenant-2/service/dsx/bm/machine-1")
 	waitForEntryDeletion(t, ctx, serialized, dpu)
 
+	// A later deletion event must restore the operator fallback without rediscovery.
 	if err := serialized.Delete(ctx, bm); err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +262,7 @@ func TestDeferredSourceWatchErrors(t *testing.T) {
 	} {
 		t.Run(failure.Error(), func(t *testing.T) {
 			mgr := &sourceTestManager{mapper: meta.NewDefaultRESTMapper(nil)}
-			if err := watchSourceWhenAvailable(mgr, nil, DPUGVK, nil); err != nil {
+			if err := watchSourceWhenAvailable(mgr, nil, DPUGVK, nil, time.Hour); err != nil {
 				t.Fatal(err)
 			}
 			mgr.mapper = mappingErrorMapper{RESTMapper: mgr.mapper, err: failure}
@@ -285,7 +285,7 @@ func TestDeferredSourceWatchErrors(t *testing.T) {
 
 func TestDeferredSourceWatchStopsOnCancellation(t *testing.T) {
 	mgr := &sourceTestManager{mapper: meta.NewDefaultRESTMapper(nil)}
-	if err := watchSourceWhenAvailable(mgr, nil, DPUGVK, nil); err != nil {
+	if err := watchSourceWhenAvailable(mgr, nil, DPUGVK, nil, time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -308,7 +308,7 @@ func TestDeferredSourceInformerErrors(t *testing.T) {
 				cacheFailure = nil
 			}
 			mgr := &sourceTestManager{mapper: mapper, cache: &failingSourceCache{err: cacheFailure}, timeout: 10 * time.Millisecond}
-			if err := watchSourceWhenAvailable(mgr, nil, DPUGVK, nil); err != nil {
+			if err := watchSourceWhenAvailable(mgr, nil, DPUGVK, nil, time.Hour); err != nil {
 				t.Fatal(err)
 			}
 			mapper.install(DPUGVK)

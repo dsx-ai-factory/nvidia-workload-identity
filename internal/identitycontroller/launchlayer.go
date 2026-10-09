@@ -56,7 +56,7 @@ func (r *LaunchLayerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if err != nil {
 		return err
 	}
-	return watchSourceWhenAvailable(mgr, c, r.SourceGVK, &handler.EnqueueRequestForObject{})
+	return watchSourceWhenAvailable(mgr, c, r.SourceGVK, &handler.EnqueueRequestForObject{}, r.Config.SourceAPIPollInterval)
 }
 
 func (r *LaunchLayerReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
