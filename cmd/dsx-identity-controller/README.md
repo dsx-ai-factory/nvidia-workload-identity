@@ -51,8 +51,10 @@ shard's source CRs through
 | `--leader-elect` | `true` | Enable Kubernetes leader election |
 
 The command uses the active Kubernetes client configuration and requires the
-SPIRE and DPU CRDs. Launch Layer controllers and the DPU assignment watch start
-only when their source APIs exist. Without the `BareMetalInstance` API, DPU
-sources retain their operator-owned BM identities. Discovery and access errors
-remain errors. Restart the controller after installing Launch Layer CRDs to
-register their watches.
+SPIRE CRDs. DPU and Launch Layer source watches start when their APIs exist.
+The controller checks absent APIs every 10 seconds and registers their watches
+when the CRDs are installed. Existing source objects reconcile when the watch
+starts. Without the `BareMetalInstance` API, DPU sources retain their
+operator-owned BM identities. Its assignment watch replaces those identities
+when complete tenant assignments appear. Discovery and access errors remain
+errors.
