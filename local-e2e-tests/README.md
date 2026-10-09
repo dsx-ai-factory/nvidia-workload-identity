@@ -45,7 +45,7 @@ The local fixture exposes the real DSX IMDS implementation directly at the
 external intercept and passthrough boundary. E2E sends the IMDS request,
 exchanges the selected SPIRE JWT-SVID, and uses the returned DSX JWT for
 `dsx_imds` node attestation. It does not test physical link-local routing or
-NICo or Carbide integration.
+NICo integration.
 
 The ordinary-agent entry is the permitted fixture at the external `dsx_dpu`
 boundary. E2E requests the operator-host identity from IMDS and attests the
