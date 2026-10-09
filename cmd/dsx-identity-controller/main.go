@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/go-logr/logr"
 	spirev1alpha1 "github.com/spiffe/spire-controller-manager/api/v1alpha1"
@@ -40,6 +41,7 @@ func run() (runErr error) {
 		config.DPUMetadataSelectors = append(config.DPUMetadataSelectors, value)
 		return nil
 	})
+	flag.DurationVar(&config.SourceAPIPollInterval, "source-api-poll-interval", time.Hour, "retry interval for absent source APIs")
 	flag.StringVar(&metricsAddress, "metrics-bind-address", ":8080", "metrics listen address")
 	flag.StringVar(&probeAddress, "health-probe-bind-address", ":8081", "health probe listen address")
 	flag.BoolVar(&leaderElection, "leader-elect", true, "enable leader election")

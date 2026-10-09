@@ -117,6 +117,7 @@ spec:
             {{- range $selector := required "identityController.dpuMetadataSelectors is required" $dpuMetadataSelectors }}
             - {{ printf "--dpu-metadata-selector=%s" $selector | quote }}
             {{- end }}
+            - --source-api-poll-interval={{ $values.sourceAPIPollInterval }}
             - --log-level={{ .Values.observability.logLevel }}
             {{- if .Values.observability.metrics.enabled }}
             - --metrics-bind-address=:{{ .Values.observability.metrics.port }}

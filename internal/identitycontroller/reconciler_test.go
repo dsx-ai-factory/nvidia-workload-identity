@@ -31,11 +31,12 @@ var testDPUMetadataSelectors = []string{
 }
 
 var testConfig = Config{
-	TrustDomain:          "k2.sjc-1.nvidia.com",
-	Service:              "dsx",
-	OperatorTenant:       "operator-1",
-	ClassName:            "dsx-identity-dsx-identity",
-	DPUMetadataSelectors: testDPUMetadataSelectors,
+	TrustDomain:           "k2.sjc-1.nvidia.com",
+	Service:               "dsx",
+	OperatorTenant:        "operator-1",
+	ClassName:             "dsx-identity-dsx-identity",
+	DPUMetadataSelectors:  testDPUMetadataSelectors,
+	SourceAPIPollInterval: time.Hour,
 }
 
 func TestSourceAPIAvailable(t *testing.T) {
@@ -722,4 +723,16 @@ func (c *applyClient) Delete(ctx context.Context, obj client.Object, opts ...cli
 		return errInjectedChildDelete
 	}
 	return c.Client.Delete(ctx, obj, opts...)
+}
+
+func TestConfigSourceAPIPollInterval(t *testing.T) {
+	for _, interval := range []time.Duration{time.Hour, time.Minute, time.Nanosecond, 0, -time.Hour} {
+		t.Run(interval.String(), func(t *testing.T) {
+			config := testConfig
+			config.SourceAPIPollInterval = interval
+			if err := config.Validate(); (err != nil) != (interval <= 0) {
+				t.Fatalf("Validate with interval %v = %v", interval, err)
+			}
+		})
+	}
 }

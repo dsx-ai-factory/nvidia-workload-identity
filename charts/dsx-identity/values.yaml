@@ -341,6 +341,7 @@ kataSupport:
       limits: {cpu: 50m, memory: 128Mi}
 identityController:
   enabled: false
+  sourceAPIPollInterval: 1h
   image:
     repository: nvcr.io/0837451325059433/components-dev/dsx-identity-controller
     tag: ""
