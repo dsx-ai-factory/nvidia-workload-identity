@@ -49,21 +49,14 @@ func (r *LaunchLayerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if err != nil {
 		return err
 	}
-	available, err := sourceAPIAvailable(mgr.GetRESTMapper(), r.SourceGVK)
-	if err != nil {
-		return fmt.Errorf("discover %s API: %w", r.SourceGVK.Kind, err)
-	}
-	if !available {
-		ctrl.Log.Info("Skipping absent Launch Layer API", "kind", r.SourceGVK.Kind)
-		return nil
-	}
-	source := &unstructured.Unstructured{}
-	source.SetGroupVersionKind(r.SourceGVK)
-	return ctrl.NewControllerManagedBy(mgr).
+	c, err := ctrl.NewControllerManagedBy(mgr).
 		Named(name).
-		For(source).
 		Watches(&spirev1alpha1.ClusterStaticEntry{}, handler.EnqueueRequestsFromMapFunc(requestForSource(r.SourceGVK.Group, r.SourceGVK.Kind))).
-		Complete(r)
+		Build(r)
+	if err != nil {
+		return err
+	}
+	return watchSourceWhenAvailable(mgr, c, r.SourceGVK, &handler.EnqueueRequestForObject{}, r.Config.SourceAPIPollInterval)
 }
 
 func (r *LaunchLayerReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
