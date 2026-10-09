@@ -20,22 +20,19 @@ import (
 )
 
 func watchSourceWhenAvailable(mgr ctrl.Manager, c controller.Controller, gvk schema.GroupVersionKind, h handler.EventHandler) error {
-	watch := func() error {
-		object := &unstructured.Unstructured{}
-		object.SetGroupVersionKind(gvk)
-		return c.Watch(source.Kind[client.Object](mgr.GetCache(), object, h))
-	}
+	object := &unstructured.Unstructured{}
+	object.SetGroupVersionKind(gvk)
 	available, err := sourceAPIAvailable(mgr.GetRESTMapper(), gvk)
 	if err != nil {
 		return fmt.Errorf("discover %s API: %w", gvk.Kind, err)
 	}
 	if available {
-		return watch()
+		return c.Watch(source.Kind[client.Object](mgr.GetCache(), object, h))
 	}
 	ctrl.Log.Info("Waiting for source API", "kind", gvk.Kind)
 	// Register absent APIs after startup so their informers cannot block other controllers.
 	return mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
-		err := wait.PollUntilContextCancel(ctx, 10*time.Second, true, func(context.Context) (bool, error) {
+		err := wait.PollUntilContextCancel(ctx, 10*time.Second, true, func(ctx context.Context) (bool, error) {
 			available, err := sourceAPIAvailable(mgr.GetRESTMapper(), gvk)
 			if err != nil {
 				return false, fmt.Errorf("discover %s API: %w", gvk.Kind, err)
@@ -43,7 +40,18 @@ func watchSourceWhenAvailable(mgr ctrl.Manager, c controller.Controller, gvk sch
 			if !available {
 				return false, nil
 			}
-			return true, watch()
+			timeout := mgr.GetControllerOptions().CacheSyncTimeout
+			if timeout == 0 {
+				// Match controller-runtime's default cache synchronization timeout.
+				timeout = 2 * time.Minute
+			}
+			syncCtx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+			informer, err := mgr.GetCache().GetInformer(syncCtx, object)
+			if err != nil {
+				return false, fmt.Errorf("sync %s informer: %w", gvk.Kind, err)
+			}
+			return true, c.Watch(&source.Informer{Informer: informer, Handler: h})
 		})
 		if ctx.Err() != nil {
 			return nil

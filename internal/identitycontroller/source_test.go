@@ -35,6 +35,10 @@ func TestControllersRecoverLateSourceAPIs(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	scheme := testScheme(t)
+	for _, gvk := range []schema.GroupVersionKind{DPUGVK, VirtualInstanceGVK, BareMetalInstanceGVK} {
+		scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+		scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind(gvk.Kind+"List"), &unstructured.UnstructuredList{})
+	}
 	mapper := &lateSourceMapper{RESTMapper: meta.NewDefaultRESTMapper(nil)}
 	c := &applyClient{Client: fake.NewClientBuilder().WithScheme(scheme).WithRESTMapper(mapper).
 		WithInterceptorFuncs(interceptor.Funcs{
@@ -49,7 +53,7 @@ func TestControllersRecoverLateSourceAPIs(t *testing.T) {
 			},
 		}).Build()}
 	serialized := &lockedApplyClient{applyClient: c}
-	informerCache := &sourceTestCache{client: serialized, informers: make(map[schema.GroupVersionKind]toolscache.SharedIndexInformer)}
+	informerCache := &sourceTestCache{ctx: ctx, client: serialized, informers: make(map[schema.GroupVersionKind]toolscache.SharedIndexInformer)}
 	mgr := &sourceTestManager{scheme: scheme, mapper: mapper, cache: informerCache}
 	if err := (&DPUReconciler{Client: serialized, Config: testConfig}).SetupWithManager(mgr); err != nil {
 		t.Fatal(err)
@@ -165,6 +169,7 @@ type sourceTestManager struct {
 	mapper    meta.RESTMapper
 	cache     cache.Cache
 	runnables []manager.Runnable
+	timeout   time.Duration
 }
 
 func (m *sourceTestManager) GetScheme() *runtime.Scheme     { return m.scheme }
@@ -172,7 +177,7 @@ func (m *sourceTestManager) GetRESTMapper() meta.RESTMapper { return m.mapper }
 func (m *sourceTestManager) GetCache() cache.Cache          { return m.cache }
 func (m *sourceTestManager) GetLogger() logr.Logger         { return logr.Discard() }
 func (m *sourceTestManager) GetControllerOptions() controllerconfig.Controller {
-	return controllerconfig.Controller{SkipNameValidation: new(true)}
+	return controllerconfig.Controller{SkipNameValidation: new(true), CacheSyncTimeout: m.timeout}
 }
 func (m *sourceTestManager) Add(r manager.Runnable) error {
 	m.runnables = append(m.runnables, r)
@@ -181,6 +186,7 @@ func (m *sourceTestManager) Add(r manager.Runnable) error {
 
 type sourceTestCache struct {
 	cache.Cache
+	ctx       context.Context
 	client    client.Client
 	mu        sync.Mutex
 	informers map[schema.GroupVersionKind]toolscache.SharedIndexInformer
@@ -198,8 +204,8 @@ func (c *sourceTestCache) GetInformer(ctx context.Context, object client.Object,
 		}
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if informer, ok := c.informers[gvk]; ok {
+		c.mu.Unlock()
 		return informer, nil
 	}
 	events := watch.NewRaceFreeFake()
@@ -210,16 +216,20 @@ func (c *sourceTestCache) GetInformer(ctx context.Context, object client.Object,
 		ListFunc: func(metav1.ListOptions) (runtime.Object, error) {
 			if gvk.Kind == "ClusterStaticEntry" {
 				list := &spirev1alpha1.ClusterStaticEntryList{}
-				return list, c.client.List(ctx, list)
+				return list, c.client.List(c.ctx, list)
 			}
 			list := &unstructured.UnstructuredList{}
 			list.SetGroupVersionKind(gvk.GroupVersion().WithKind(gvk.Kind + "List"))
-			return list, c.client.List(ctx, list)
+			return list, c.client.List(c.ctx, list)
 		},
 		WatchFunc: func(metav1.ListOptions) (watch.Interface, error) { return events, nil },
 	}, object, 0, nil)
 	c.informers[gvk] = informer
-	go informer.Run(ctx.Done())
+	c.mu.Unlock()
+	go informer.Run(c.ctx.Done())
+	if !toolscache.WaitForCacheSync(ctx.Done(), informer.HasSynced) {
+		return nil, ctx.Err()
+	}
 	return informer, nil
 }
 
@@ -283,4 +293,43 @@ func TestDeferredSourceWatchStopsOnCancellation(t *testing.T) {
 	if err := mgr.runnables[0].Start(ctx); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestDeferredSourceInformerErrors(t *testing.T) {
+	for _, failure := range []error{
+		errors.New("list unavailable"),
+		apierrors.NewForbidden(schema.GroupResource{Group: DPUGVK.Group, Resource: "dpus"}, "", errors.New("denied")),
+		context.DeadlineExceeded,
+	} {
+		t.Run(failure.Error(), func(t *testing.T) {
+			mapper := &lateSourceMapper{RESTMapper: meta.NewDefaultRESTMapper(nil)}
+			cacheFailure := failure
+			if errors.Is(failure, context.DeadlineExceeded) {
+				cacheFailure = nil
+			}
+			mgr := &sourceTestManager{mapper: mapper, cache: &failingSourceCache{err: cacheFailure}, timeout: 10 * time.Millisecond}
+			if err := watchSourceWhenAvailable(mgr, nil, DPUGVK, nil); err != nil {
+				t.Fatal(err)
+			}
+			mapper.install(DPUGVK)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if err := mgr.runnables[0].Start(ctx); !errors.Is(err, failure) {
+				t.Fatalf("deferred informer error = %v, want %v", err, failure)
+			}
+		})
+	}
+}
+
+type failingSourceCache struct {
+	cache.Cache
+	err error
+}
+
+func (c *failingSourceCache) GetInformer(ctx context.Context, _ client.Object, _ ...cache.InformerGetOption) (cache.Informer, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	<-ctx.Done()
+	return nil, ctx.Err()
 }
