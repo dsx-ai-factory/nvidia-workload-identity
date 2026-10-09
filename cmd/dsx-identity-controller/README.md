@@ -32,6 +32,7 @@ flowchart LR
     BMI["BareMetalInstance"] --> Controller
     Controller --> Entry["SPIRE ClusterStaticEntry custom resource"]
     Entry --> Manager["active SPIRE controller-manager replica"]
+    Manager -->|"SPIRE registration API"| Server["Shard-local SPIRE server"]
 ```
 
 The controller runs in the regular management cluster that owns the identity
