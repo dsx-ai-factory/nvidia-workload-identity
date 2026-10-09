@@ -30,7 +30,6 @@ repository is a legacy mirror.
   constraints, or workarounds. Do not restate the code.
 - In Helm templates and YAML, explain non-obvious templating, merge semantics,
   ordering, compatibility, and cross-resource behavior inline.
-- NICo provides the paired DPU IMDS passthrough.
 - Explain supported VM network modes beside the sidecar code and E2E fixtures
   that depend on them, and in the relevant READMEs.
 - Root and component READMEs describe the chart and applications users run.
