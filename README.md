@@ -81,12 +81,17 @@ Local SPIRE identities are hierarchical. The DPU identity comes first, the
 bare-metal host identity is attested through the DPU, and VM identity is served
 from the attested host path.
 
+The bundled `dpu_hw` server plugin accepts the DPU serial as plaintext
+attestation data.
+
 ```mermaid
 flowchart TB
   subgraph Shard["Data Hall identity shard"]
     direction TB
     Sources["DPU and LaunchLayer source CRs"]
     Controller["Identity Controller Deployment"]
+    Entries["ClusterStaticEntry CRs"]
+    Manager["SPIRE controller-manager"]
     SPIRE["Shard-local SPIRE server"]
     DPU["External DPU SPIRE agent"]
     MDS["Paired DPU link-local intercept<br/>NICo or Carbide IMDS passthrough<br/>DSX IMDS (metadata-service)"]
@@ -96,7 +101,9 @@ flowchart TB
     VM["KubeVirt VM"]
 
     Sources --> Controller
-    Controller -->|"derived SPIRE entries"| SPIRE
+    Controller --> Entries
+    Entries --> Manager
+    Manager -->|"SPIRE registration API"| SPIRE
     DPU -->|"dpu_hw node attestation"| SPIRE
     DPU -->|"Kubernetes workload attestation"| MDS
     MDS -->|"host DSX identity over IMDS"| Host
@@ -112,6 +119,10 @@ control-plane resources. Each Data Hall owns the shard for its capacity
 resources. Both shards derive entries from their local DPU and LaunchLayer
 source CRs, and their Pods register beneath local `dsx_imds` agents.
 
+In the shard topologies below, solid arrows show registration, attestation, and token
+requests. Dotted arrows show DSX JWT delivery. Replica counts follow deployment
+values.
+
 ```mermaid
 %%{init: {"flowchart": {"defaultRenderer": "elk"}, "elk": {"mergeEdges": true, "nodePlacementStrategy": "SIMPLE"}}}%%
 flowchart TB
@@ -122,7 +133,6 @@ flowchart TB
     CSHostSVIDs["Kubernetes Pod cluster-local SPIRE JWT-SVID"]
     CSHostAgent["host SPIRE agent process<br/>Unix and Kubernetes WorkloadAttestors<br/>dsx_imds NodeAttestor client plugin"]
     CSHostIMDS["host IMDS endpoint"]
-    CSHostDeferred["host-process token delivery deferred"]
   end
 
   subgraph CSDPU["External Common Services DPU"]
@@ -130,7 +140,7 @@ flowchart TB
     CSDPUDSX["exchanged DSX JWTs<br/>host node attestation: operator tenant"]
     CSDPUIMDS["paired DPU link-local intercept<br/>NICo or Carbide IMDS passthrough<br/>DSX IMDS (metadata-service)"]
     CSDPUAgent["external DPU SPIRE agent process<br/>Kubernetes WorkloadAttestor<br/>dpu_hw NodeAttestor client plugin"]
-    CSHardware["DPU serial number and SPDM"]
+    CSHardware["DPU serial number"]
   end
 
   subgraph CPHost["Operator-owned Data Hall control-plane bare-metal Kubernetes worker"]
@@ -140,7 +150,6 @@ flowchart TB
     CPHostSVIDs["Kubernetes Pod cluster-local SPIRE JWT-SVID"]
     CPHostAgent["host SPIRE agent process<br/>Unix and Kubernetes WorkloadAttestors<br/>dsx_imds NodeAttestor client plugin"]
     CPHostIMDS["host IMDS endpoint"]
-    CPHostDeferred["host-process token delivery deferred"]
   end
 
   subgraph CPDPU["External Data Hall control-plane DPU"]
@@ -148,49 +157,66 @@ flowchart TB
     CPDPUDSX["exchanged DSX JWTs<br/>host node attestation: operator tenant"]
     CPDPUIMDS["paired DPU link-local intercept<br/>NICo or Carbide IMDS passthrough<br/>DSX IMDS (metadata-service)"]
     CPDPUAgent["external DPU SPIRE agent process<br/>Kubernetes WorkloadAttestor<br/>dpu_hw NodeAttestor client plugin"]
-    CPHardware["DPU serial number and SPDM"]
+    CPHardware["DPU serial number"]
   end
 
   subgraph CSCluster["Common Services cluster"]
     direction TB
     CSSources["DPU and LaunchLayer source CRs<br/>Common Services and Data Hall control plane"]
-    CSController["DSX Identity Controller<br/>two replicas, leader elected"]
+    CSController["DSX Identity Controller<br/>leader elected"]
     CSEntries["ClusterStaticEntry CRs"]
-    CSPodManager["one logical SPIRE controller-manager<br/>co-located in two SPIRE server Pods<br/>leader elected<br/>operator Pod registrations"]
-    CSSPIRE["two Common Services SPIRE server replicas<br/>dsx_dpu and dsx_imds NodeAttestor server plugins"]
+    CSPodTemplate["Chart-owned ClusterSPIFFEID<br/>operator Pod template"]
+    CSPodManager["SPIRE controller-manager<br/>co-located with SPIRE server<br/>static entries and Pod registrations"]
+    CSSPIRE["Common Services SPIRE server<br/>dpu_hw and dsx_imds NodeAttestor server plugins"]
     CSIdentityKeys["Common Services DSX Identity Keys"]
   end
 
   CSSources --> CSController
   CSController --> CSEntries
-  CSEntries --> CSSPIRE
-  CSPodManager --> CSSPIRE
+  CSEntries --> CSPodManager
+  CSPodTemplate --> CSPodManager
+  CSPodManager -->|"SPIRE registration API"| CSSPIRE
 
-  CSHostAgent --> CSSPIRE
-  CPHostAgent --> CSSPIRE
-  CSDPUAgent --> CSSPIRE
-  CPDPUAgent --> CSSPIRE
+  CSHostAgent -->|"dsx_imds node attestation"| CSSPIRE
+  CPHostAgent -->|"dsx_imds node attestation"| CSSPIRE
+  CSHardware -->|"serial attestation payload"| CSDPUAgent
+  CSDPUAgent -->|"dpu_hw node attestation"| CSSPIRE
+  CPHardware -->|"serial attestation payload"| CPDPUAgent
+  CPDPUAgent -->|"dpu_hw node attestation"| CSSPIRE
 
   CSHostAgent -->|"Kubernetes WorkloadAttestor<br/>dsx-pod"| CSHostSVIDs
   CSHostSVIDs --> CSHostPod
   CSHostPod --> CSIdentityKeys
-  CSIdentityKeys --> CSHostDSX
+  CSIdentityKeys -.->|"DSX JWT"| CSHostPod
+  CSHostPod -.->|"token file"| CSHostDSX
   CPHostAgent -->|"Kubernetes WorkloadAttestor<br/>dsx-pod"| CPHostSVIDs
   CPHostSVIDs --> CPHostPod
   CPHostPod --> CSIdentityKeys
-  CSIdentityKeys --> CPHostDSX
+  CSIdentityKeys -.->|"DSX JWT"| CPHostPod
+  CPHostPod -.->|"token file"| CPHostDSX
   CSDPUAgent -->|"Kubernetes WorkloadAttestor<br/>DPU IMDS selectors, dsx-imds"| CSDPUIMDS
   CSDPUIMDS --> CSIdentityKeys
-  CSIdentityKeys --> CSDPUDSX
+  CSIdentityKeys -.->|"DSX JWT"| CSDPUIMDS
+  CSDPUIMDS -.-> CSDPUDSX
+  CSDPUDSX -.-> CSHostIMDS
+  CSHostIMDS -.-> CSHostAgent
   CPDPUAgent -->|"Kubernetes WorkloadAttestor<br/>DPU IMDS selectors, dsx-imds"| CPDPUIMDS
   CPDPUIMDS --> CSIdentityKeys
-  CSIdentityKeys --> CPDPUDSX
+  CSIdentityKeys -.->|"DSX JWT"| CPDPUIMDS
+  CPDPUIMDS -.-> CPDPUDSX
+  CPDPUDSX -.-> CPHostIMDS
+  CPHostIMDS -.-> CPHostAgent
 
   CSHostAgent --> CSHostIMDS
   CSHostIMDS --> CSDPUIMDS
   CPHostAgent --> CPHostIMDS
   CPHostIMDS --> CPDPUIMDS
 
+```
+
+```mermaid
+%%{init: {"flowchart": {"defaultRenderer": "elk"}, "elk": {"nodePlacementStrategy": "SIMPLE"}}}%%
+flowchart TB
   subgraph TenantVM["tenant-owned KubeVirt VM"]
     direction TB
     VMWorkload["VM process"]
@@ -204,7 +230,6 @@ flowchart TB
     VMHostSVIDs["one host Workload API<br/>virt-launcher Pod: dsx-pod, operator tenant<br/>VM: dsx-imds-vm, LaunchLayer CR tenant"]
     VMHostAgent["operator host SPIRE agent process<br/>Unix and Kubernetes WorkloadAttestors<br/>dsx_imds NodeAttestor client plugin"]
     VMHostIMDS["host IMDS endpoint"]
-    VMHostDeferred["host-process token delivery deferred"]
   end
 
   subgraph VMDPU["External Data Hall capacity DPU<br/>paired with an operator KubeVirt worker"]
@@ -212,7 +237,7 @@ flowchart TB
     VMDPUDSX["exchanged DSX JWTs<br/>host node attestation: operator tenant"]
     VMDPUIMDS["paired DPU link-local intercept<br/>NICo or Carbide IMDS passthrough<br/>DSX IMDS (metadata-service)"]
     VMDPUAgent["external DPU SPIRE agent process<br/>Kubernetes WorkloadAttestor<br/>dpu_hw NodeAttestor client plugin"]
-    VMHardware["DPU serial number and SPDM"]
+    VMHardware["DPU serial number"]
   end
 
   subgraph BMHost["Standalone tenant-facing Data Hall capacity bare-metal host"]
@@ -220,7 +245,6 @@ flowchart TB
     BMHostIdentity["host agent identity<br/>LaunchLayer CR tenant"]
     BMHostAgent["host SPIRE agent process<br/>Unix WorkloadAttestor<br/>dsx_imds NodeAttestor client plugin"]
     BMHostIMDS["host IMDS endpoint"]
-    BMHostDeferred["host-process token delivery deferred"]
   end
 
   subgraph BMDPU["External Data Hall capacity DPU<br/>paired with a standalone tenant host"]
@@ -228,41 +252,55 @@ flowchart TB
     BMDPUDSX["exchanged DSX JWTs<br/>host node attestation: LaunchLayer CR tenant"]
     BMDPUIMDS["paired DPU link-local intercept<br/>NICo or Carbide IMDS passthrough<br/>DSX IMDS (metadata-service)"]
     BMDPUAgent["external DPU SPIRE agent process<br/>Kubernetes WorkloadAttestor<br/>dpu_hw NodeAttestor client plugin"]
-    BMHardware["DPU serial number and SPDM"]
+    BMHardware["DPU serial number"]
   end
 
   subgraph DHCluster["Data Hall control-plane cluster"]
     direction TB
     DHSources["DPU and LaunchLayer source CRs<br/>Data Hall capacity"]
-    DHController["DSX Identity Controller<br/>two replicas, leader elected"]
+    DHController["DSX Identity Controller<br/>leader elected"]
     DHEntries["ClusterStaticEntry CRs"]
-    DHPodManager["one logical SPIRE controller-manager<br/>co-located in two SPIRE server Pods<br/>leader elected<br/>operator Pod registrations"]
-    DHSPIRE["two Data Hall SPIRE server replicas<br/>dsx_dpu and dsx_imds NodeAttestor server plugins"]
+    DHPodTemplate["Chart-owned ClusterSPIFFEID<br/>operator Pod template"]
+    DHPodManager["SPIRE controller-manager<br/>co-located with SPIRE server<br/>static entries and Pod registrations"]
+    DHSPIRE["Data Hall SPIRE server<br/>dpu_hw and dsx_imds NodeAttestor server plugins"]
     DHIdentityKeys["Data Hall DSX Identity Keys"]
     DHProxy["DSX Identity Keys Proxy CSI<br/>node plugin Pod"]
   end
 
   DHSources --> DHController
   DHController --> DHEntries
-  DHEntries --> DHSPIRE
-  DHPodManager --> DHSPIRE
+  DHEntries --> DHPodManager
+  DHPodTemplate --> DHPodManager
+  DHPodManager -->|"SPIRE registration API"| DHSPIRE
 
-  VMHostAgent --> DHSPIRE
-  BMHostAgent --> DHSPIRE
-  VMDPUAgent --> DHSPIRE
-  BMDPUAgent --> DHSPIRE
+  VMHostAgent -->|"dsx_imds node attestation"| DHSPIRE
+  BMHostAgent -->|"dsx_imds node attestation"| DHSPIRE
+  VMHardware -->|"serial attestation payload"| VMDPUAgent
+  VMDPUAgent -->|"dpu_hw node attestation"| DHSPIRE
+  BMHardware -->|"serial attestation payload"| BMDPUAgent
+  BMDPUAgent -->|"dpu_hw node attestation"| DHSPIRE
 
   VMHostAgent -->|"Kubernetes WorkloadAttestor<br/>distinct dsx-pod and dsx-imds-vm hints"| VMHostSVIDs
   VMHostSVIDs --> VMDSXIMDS
   VMDSXIMDS --> DHProxy
   DHProxy --> DHIdentityKeys
-  DHIdentityKeys --> VMHostDSX
+  DHIdentityKeys -.->|"DSX JWT"| DHProxy
+  DHProxy -.-> VMDSXIMDS
+  VMDSXIMDS -.-> VMHostDSX
+  VMHostDSX -.-> VMIMDS
+  VMIMDS -.-> VMWorkload
   VMDPUAgent -->|"Kubernetes WorkloadAttestor<br/>DPU IMDS selectors, dsx-imds"| VMDPUIMDS
   VMDPUIMDS --> DHIdentityKeys
-  DHIdentityKeys --> VMDPUDSX
+  DHIdentityKeys -.->|"DSX JWT"| VMDPUIMDS
+  VMDPUIMDS -.-> VMDPUDSX
+  VMDPUDSX -.-> VMHostIMDS
+  VMHostIMDS -.-> VMHostAgent
   BMDPUAgent -->|"Kubernetes WorkloadAttestor<br/>DPU IMDS selectors, dsx-imds"| BMDPUIMDS
   BMDPUIMDS --> DHIdentityKeys
-  DHIdentityKeys --> BMDPUDSX
+  DHIdentityKeys -.->|"DSX JWT"| BMDPUIMDS
+  BMDPUIMDS -.-> BMDPUDSX
+  BMDPUDSX -.-> BMHostIMDS
+  BMHostIMDS -.-> BMHostAgent
 
   VMHostAgent --> VMHostIMDS
   VMHostIMDS --> VMDPUIMDS
@@ -284,17 +322,20 @@ Kubernetes node. A KubeVirt VM runs in an operator-owned virt-launcher Pod, so
 the Pod keeps its operator identity while its metadata sidecar selects the
 dynamically tenant-supplied VM SVID from the same operator host Workload API.
 
-### Static entry parentage
+### Registration parentage
 
-The repository produces four static entry forms. The DSX Identity Controller
-owns the DPU, standalone host, and VM `ClusterStaticEntry` objects. The official
-SPIRE controller-manager derives each Pod `ClusterStaticEntry` from the
-chart-owned `ClusterSPIFFEID` template and the matched Kubernetes Pod.
+The DSX Identity Controller owns the DPU-derived, standalone host, and VM
+`ClusterStaticEntry` objects. The SPIRE controller-manager reconciles those
+objects into SPIRE registration entries. It also registers Pods directly with
+SPIRE from the chart-owned `ClusterSPIFFEID` template and matched Kubernetes
+Pods.
 
 This diagram shows registration data only. Hexagons are input objects,
-stadiums are parent agent IDs, and rectangles are actual
-`ClusterStaticEntry` objects. Parent agent IDs are established separately
-through node attestation. They are not registration entries.
+stadiums are parent agent IDs, and rectangles show the three `ClusterStaticEntry`
+forms and the Pod SPIRE registration entry. Parent agent IDs are established separately
+through node attestation. They are not registration entries. `{service}` is
+`global.dsx.defaultServiceName` for controller-owned entries and the
+`spiffe.nvidia.com/service` label value for Pod entries.
 
 ```mermaid
 %%{init: {"flowchart": {"defaultRenderer": "elk"}, "elk": {"nodePlacementStrategy": "SIMPLE"}}}%%
@@ -307,18 +348,20 @@ flowchart TB
       direction TB
       DPUCR{{"INPUT CR<br/>kind: DPU<br/>BM id: carbide.nvidia.com/dpu-machine-id label<br/>agent serial: spec.serialNumber"}}
       DPUParent(["PARENT AGENT ID<br/>type: dpu_hw<br/>spiffe://{td}/spire/agent/dpu_hw/{normalized spec.serialNumber}"])
-      DPUEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: DSX Identity Controller<br/>subject: /tenant/{operator}/service/dsx/bm/{dpu-machine-id}<br/>hint: dsx-imds<br/>selectors: DPU IMDS Kubernetes selectors"]
+      DPUEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: DSX Identity Controller<br/>subject: /tenant/{operator}/service/{service}/bm/{dpu-machine-id}<br/>hint: dsx-imds<br/>selectors: DPU IMDS Kubernetes selectors"]
       DPUCR -->|"derives subject"| DPUEntry
-      DPUParent -->|"spec.serialNumber"| DPUEntry
+      DPUCR -->|"DPU serial"| DPUParent
+      DPUParent -->|"parentID"| DPUEntry
     end
 
     subgraph HostLane["Standalone tenant-facing bare-metal host"]
       direction TB
       HostSource{{"INPUT CR<br/>kind: BareMetalInstance<br/>tenant: org-id annotation<br/>BM id: spec.instance_id<br/>DPU id and serial: status.primary_dpu"}}
       HostParent(["PARENT AGENT ID<br/>type: dpu_hw<br/>spiffe://{td}/spire/agent/dpu_hw/{normalized DPU serial}"])
-      HostEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: DSX Identity Controller<br/>subject: /tenant/{org-id}/service/dsx/bm/{spec.instance_id}<br/>hint: dsx-imds<br/>selectors: DPU IMDS Kubernetes selectors"]
+      HostEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: DSX Identity Controller<br/>subject: /tenant/{org-id}/service/{service}/bm/{spec.instance_id}<br/>hint: dsx-imds<br/>selectors: DPU IMDS Kubernetes selectors"]
       HostSource -->|"derives subject"| HostEntry
-      HostParent -->|"status.primary_dpu.serial_number"| HostEntry
+      HostSource -->|"DPU serial"| HostParent
+      HostParent -->|"parentID"| HostEntry
     end
   end
 
@@ -328,11 +371,12 @@ flowchart TB
     subgraph PodLane["Operator Kubernetes Pod"]
       direction TB
       PodTemplate{{"INPUT TEMPLATE CR<br/>kind: ClusterSPIFFEID<br/>owner: identity chart"}}
-      PodObject{{"MATCHED OBJECT<br/>kind: Pod<br/>label: service=dsx"}}
+      PodObject{{"MATCHED OBJECT<br/>kind: Pod<br/>label: spiffe.nvidia.com/service exists"}}
       PodParent(["PARENT AGENT ID<br/>type: dsx_imds<br/>spiffe://{td}/spire/agent/dsx_imds/tenant/{operator}/bm/{Pod spec.nodeName}"])
-      PodEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: SPIRE controller-manager<br/>subject: /tenant/{operator}/service/dsx/bm/{Pod spec.nodeName}/pod/{Pod metadata.uid}[/role/{role}]<br/>hint: dsx-pod<br/>selectors: matched Kubernetes Pod"]
+      PodEntry["SPIRE REGISTRATION ENTRY<br/>registered by: SPIRE controller-manager<br/>subject: /tenant/{operator}/service/{service}/bm/{Pod spec.nodeName}/pod/{Pod metadata.uid}[/role/{role}]<br/>hint: dsx-pod<br/>selectors: matched Kubernetes Pod"]
       PodTemplate -->|"supplies templates"| PodEntry
       PodObject -->|"supplies metadata"| PodEntry
+      PodObject -->|"worker node name"| PodParent
       PodParent -->|"parentIDTemplate"| PodEntry
     end
 
@@ -340,9 +384,10 @@ flowchart TB
       direction TB
       VMSource{{"INPUT CR<br/>kind: VirtualInstance<br/>tenant: org-id annotation<br/>VM id: spec.instance_id<br/>host: spec.node_name<br/>holder: status.pod_uid"}}
       VMParent(["PARENT AGENT ID<br/>type: dsx_imds<br/>spiffe://{td}/spire/agent/dsx_imds/tenant/{operator}/bm/{spec.node_name}"])
-      VMEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: DSX Identity Controller<br/>subject: /tenant/{org-id}/service/dsx/vm/{spec.instance_id}<br/>hint: dsx-imds-vm<br/>selector: Pod UID"]
-      VMSource -->|"derives subject"| VMEntry
-      VMParent -->|"spec.node_name"| VMEntry
+      VMEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: DSX Identity Controller<br/>subject: /tenant/{org-id}/service/{service}/vm/{spec.instance_id}<br/>hint: dsx-imds-vm<br/>selector: Pod UID"]
+      VMSource -->|"derives subject and Pod UID selector"| VMEntry
+      VMSource -->|"worker node name"| VMParent
+      VMParent -->|"parentID"| VMEntry
     end
   end
 ```
@@ -366,10 +411,12 @@ flowchart LR
   Consumers["DPU, host, Pod, and VM consumers"]
 
   Local -->|"local SPIRE JWT-SVID"| IdentityKeys
-  IdentityKeys -->|"DSX JWT"| Consumers
-  IdentityKeys <-->|"Optional NATS KV updates and watch replay"| Bus["External DSX Event Bus"]
-  Bus <-->|"NATS KV updates and watch replay"| Peers["Peer shard DSX Identity Keys instances"]
-  RelyingParty["External relying party"] -->|"public JWKS"| IdentityKeys
+  IdentityKeys -->|"DSX JWT response"| Local
+  Local -->|"token file or IMDS response"| Consumers
+  IdentityKeys <-->|"Optional public key publication and watch"| Bus["External DSX Event Bus"]
+  Bus <-->|"Public key publication and watch"| Peers["Peer shard DSX Identity Keys instances"]
+  RelyingParty["External relying party"] -->|"GET aggregate JWKS"| IdentityKeys
+  IdentityKeys -->|"public JWKS response"| RelyingParty
 ```
 
 A SPIRE JWT-SVID is a cluster-local credential obtained from the local SPIRE
@@ -393,7 +440,7 @@ identity chart.
 | [Kubernetes Pod](cmd/dsx-token-fetcher/README.md) | Kubernetes WorkloadAttestor under the worker's `dsx_imds`-attested host agent. The registration uses the operator tenant and worker host subject | The `dsx-token-fetcher` sidecar selects `dsx-pod`, exchanges the local SPIRE JWT-SVID, and writes the DSX JWT to a Pod-private volume mounted read-only in application containers |
 | DPU service Pod | DPF exposes the DPU SPIRE agent through `csi.spiffe.io` | Native admission injects the standard token-fetcher sidecar and token volume |
 | DPU IMDS | The external DPU agent attests through the `dpu_hw` NodeAttestor agent and server. Its Kubernetes WorkloadAttestor binds the paired BM identity to the IMDS Pod | SPIFFE CSI exposes the DPU agent Workload API socket. DSX IMDS selects `dsx-imds`, exchanges the local SPIRE JWT-SVID, and serves the BM DSX JWT through IMDS |
-| [Bare-metal host process](cmd/dsx-imds-node-attestor-agent/README.md) | The DPU agent is attested through `dsx_dpu`. The host agent is attested through the repository `dsx_imds` NodeAttestor agent and server, then can serve local processes through the Unix WorkloadAttestor | The paired DPU intercept carries link-local IMDS to NICo or Carbide IMDS, which passes identity requests to DSX IMDS. DPU-hosted DSX IMDS exchanges directly with its reachable shard-local DSX Identity Keys. The host agent uses the returned DSX JWT for node attestation. A host-process-specific token delivery contract is not currently defined |
+| [Bare-metal host process](cmd/dsx-imds-node-attestor-agent/README.md) | The DPU agent is attested through `dpu_hw`. The host agent is attested through the repository `dsx_imds` NodeAttestor agent and server, then can serve local processes through the Unix WorkloadAttestor | The paired DPU intercept carries link-local IMDS to NICo or Carbide IMDS, which passes identity requests to DSX IMDS. DPU-hosted DSX IMDS exchanges directly with its reachable shard-local DSX Identity Keys. The host agent uses the returned DSX JWT for node attestation. A host-process-specific token delivery contract is not currently defined |
 | [Kata Containers Pod](kata-uds-proxy/README.md) | The guest is a VM, so `kata-uds-proxy` forwards the host Workload API over vsock | A guest sidecar independently serves the standard Workload API socket path |
 | [KubeVirt VM](cmd/metadata-service/README.md) | The controller derives the VM subject from the dynamically supplied tenant ID and parents it to the operator-owned worker host's `dsx_imds` agent. The Kubernetes WorkloadAttestor serves the operator-owned virt-launcher Pod, and SPIFFE CSI exposes that same agent's Workload API socket | The DSX IMDS sidecar selects the VM SPIRE JWT-SVID by its exact `dsx-imds-vm` hint, exchanges it through DSX Identity Keys Proxy CSI, and serves the DSX JWT through IMDS |
 
