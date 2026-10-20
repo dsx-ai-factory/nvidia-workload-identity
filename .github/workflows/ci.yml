@@ -235,7 +235,7 @@ jobs:
             echo EOF
           } >> "$GITHUB_OUTPUT"
       - name: Build and scan both platforms
-        uses: dsx-ai-factory/dsx-github-actions/.github/actions/docker-build@a252aa5208a0176d9c0789150d197e8a99a36b21
+        uses: dsx-ai-factory/dsx-github-actions/.github/actions/docker-build@c7feba104dc74b5a0a95ba6daa2692e5e9218971
         with:
           image: local/${{ matrix.name }}
           tags: ${{ github.sha }}
@@ -248,6 +248,7 @@ jobs:
           buildkit-config: ""
           security-scan-enabled: "true"
           security-scan-fail-on-critical: "true"
+          security-scan-config: ${{ matrix.name == 'dsx-spire-server' && '.github/grype.yaml' || '' }}
 
   release-checks:
     name: RC contract checks

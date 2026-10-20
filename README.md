@@ -66,8 +66,13 @@ and `release/**` also run `make validate`, the full [local E2E lifecycle](local-
 secret detection, and container scans. The bot must be installed for this repo,
 and its [configuration](.github/copy-pr-bot.yaml) must be on `master` to take effect.
 The shared build action scans both image platforms with Syft and Grype, uploads
-SBOMs and reports, and fails on Critical vulnerabilities or scanner errors.
+SBOMs and reports, and fails on unsuppressed Critical vulnerabilities or scanner
+errors.
 These scans do not submit results to Pulse.
+
+The DPF v26.8.0 `dpu_hw` plugin has one [scoped scan exception](.github/grype.yaml)
+for `GO-2026-6612` in `golang.org/x/net v0.58.0`. Suppressed findings remain
+in the JSON scan reports.
 
 All product jobs use the event's commit and read-only repository permissions,
 without release secrets. The RC workflow calls product CI once and waits on
