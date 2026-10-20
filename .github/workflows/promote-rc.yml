@@ -1,0 +1,26 @@
+name: Promote RC
+
+on:
+  workflow_dispatch:
+    inputs:
+      rc_version:
+        description: QA-approved RC version (X.Y.Z-rc.N)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  promote:
+    if: >-
+      github.repository == 'dsx-ai-factory/project-dsx-identity' &&
+      github.ref == 'refs/heads/master' &&
+      vars.DSX_RELEASE_MODE == 'rc-promotion'
+    permissions:
+      contents: write
+      actions: read
+      deployments: read
+    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/promote-rc.yml@9feb0e61883e8d01e9d285ab8beadae86aea1f66
+    with:
+      rc_version: ${{ inputs.rc_version }}

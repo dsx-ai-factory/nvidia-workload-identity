@@ -59,6 +59,21 @@ PRs only run validation. This workflow does not publish from `master` or promote
 [One-time setup](https://github.com/dsx-ai-factory/dsx-github-actions/blob/main/docs/release-candidate-publishing.md#prerequisites-and-scope):
 configure the runner, protected release environment, NGC key, and release permissions.
 
+### Promote an RC
+
+Promotion is disabled by default. Complete the
+[release setup](https://github.com/dsx-ai-factory/dsx-github-actions/blob/main/docs/promote-rc.md)
+before enabling `.github/rc-promotion.json` and setting `DSX_RELEASE_MODE=rc-promotion`.
+Only RCs with a captured promotion manifest can be selected.
+
+1. Have QA validate a published RC with a successful manifest capture.
+2. Open **Actions > Promote RC > Run workflow**. Select `master` and enter `X.Y.Z-rc.N`.
+3. Confirm the RC version and source commit with the configured release reviewers.
+4. After approval, the workflow publishes `X.Y.Z` using the tested image digests.
+
+The [promotion workflow](.github/workflows/promote-rc.yml) calls the shared publisher.
+RC publishing now records the artifact digests needed for promotion.
+
 ## CI
 
 PRs run CI on `copy-pr-bot`'s `pull-request/<number>` branches. Pushes to `master`
