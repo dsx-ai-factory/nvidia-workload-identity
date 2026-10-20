@@ -22,6 +22,8 @@ repository is a legacy mirror.
 - State supported behavior directly. Avoid AI-speak, marketing language, vague
   qualifiers, invented compound labels, and unsolicited comparisons with
   unsupported behavior. Do not explain a feature by saying what it is not.
+- Avoid duplicating dependency versions in documentation. Link to the pinned
+  build configuration and keep version numbers only where behavior depends on them.
 - Document current behavior. Omit internal history, revision narrative,
   meta-documentation, and speculative future designs.
 - Use plain punctuation. Do not use em dashes, en dashes, curly quotes, or

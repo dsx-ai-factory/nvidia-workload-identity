@@ -33,10 +33,11 @@ Component commands and runtime configuration:
 
 ### SPIRE upgrades
 
-The bundled SPIRE server and agent use 1.15.5. For an existing 1.13.x shard,
-follow [SPIRE's upgrade order](https://github.com/spiffe/spire/blob/v1.15.5/doc/upgrading.md):
+The bundled SPIRE versions are pinned in [Dockerfile.spire](Dockerfile.spire).
+For an existing 1.13.x shard, follow
+[SPIRE's upgrade order](https://github.com/spiffe/spire/blob/main/doc/upgrading.md):
 upgrade all servers to 1.14.x, then all agents to 1.14.x, then all servers to
-1.15.5, then all agents to 1.15.5. Upgrade each shard independently. A direct
+1.15.x, then all agents to 1.15.x. Upgrade each shard independently. A direct
 1.13.x to 1.15.x rolling upgrade exceeds the supported version skew.
 
 SPIRE 1.14 removes the deprecated `retry_rebootstrap` agent setting and requires
@@ -69,10 +70,6 @@ The shared build action scans both image platforms with Syft and Grype, uploads
 SBOMs and reports, and fails on unsuppressed Critical vulnerabilities or scanner
 errors. All image scans use the repository [Grype configuration](.github/grype.yaml).
 These scans do not submit results to Pulse.
-
-The DPF v26.8.0 `dpu_hw` plugin has one [scoped scan exception](.github/grype.yaml)
-for `GO-2026-6612` in `golang.org/x/net v0.58.0`. Suppressed findings remain
-in the JSON scan reports.
 
 All product jobs use the event's commit and read-only repository permissions,
 without release secrets. The RC workflow calls product CI once and waits on
@@ -523,7 +520,7 @@ stack. Structured allow, deny, and dependency events never include
 credentials.
 
 SPIRE server, controller-manager, and the optional local SPIRE agent expose
-their native Prometheus metrics through chart-owned monitors. SPIRE 1.15.5
+their native Prometheus metrics through chart-owned monitors. SPIRE
 does not produce traces. SPIFFE CSI Driver, CSI node-driver-registrar, and
 the `socat` proxy expose no native application telemetry. Their health checks,
 container logs, and platform container metrics remain available.
