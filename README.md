@@ -33,19 +33,9 @@ Component commands and runtime configuration:
 
 ### SPIRE upgrades
 
-The bundled SPIRE versions are pinned in [Dockerfile.spire](Dockerfile.spire).
-For an existing 1.13.x shard, follow
-[SPIRE's upgrade order](https://github.com/spiffe/spire/blob/main/doc/upgrading.md):
-upgrade all servers to 1.14.x, then all agents to 1.14.x, then all servers to
-1.15.x, then all agents to 1.15.x. Upgrade each shard independently. A direct
-1.13.x to 1.15.x rolling upgrade exceeds the supported version skew.
-
-SPIRE 1.14 removes the deprecated `retry_rebootstrap` agent setting and requires
-the agent KeyManager directory to exist and be writable. SPIRE 1.15 changes
-some CLI JSON results from a one-element array to an object and renames the
-`bootstraped` metric label to `bootstrapped`. The repository does not use the
-removed setting or renamed label. Its `entry show -output json` consumer
-continues to receive an object with an `entries` array.
+Before upgrading SPIRE, check its
+[upgrade requirements](https://github.com/spiffe/spire/blob/main/doc/upgrading.md)
+for supported version skew, upgrade order, and configuration changes.
 
 ## Release candidates
 
