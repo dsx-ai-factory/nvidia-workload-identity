@@ -58,6 +58,8 @@ repository is a legacy mirror.
 - Keep runtime ownership separate from shared data. Use consumer-owned interfaces
   for dependency boundaries and test control. Cover acceptance and rejection.
 - Keep supplied values exact. Do not trim, normalize, case-fold, or coerce input.
+- Consume DPF source and dependency changes through upstream releases. Do not
+  patch DPF source or override its dependencies in this repository.
 - `charts/dsx-identity` installs each management-cluster shard.
 - `charts/dsx-imds` and `charts/dsx-spiffe-csi` are DPUService payloads. Keep external
   systems and secret-source resources outside these charts.

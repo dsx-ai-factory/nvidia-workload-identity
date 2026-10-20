@@ -18,7 +18,7 @@ build:
         target: dsx-identity-keys
         buildArgs:
           <<: &coreBuildArgs
-            BUILDER_IMG: 127.0.0.1:5002/library/golang:1.26.4
+            BUILDER_IMG: 127.0.0.1:5002/library/golang:1.26.10
           BINARY: dsx-identity-keys
     - image: dsx-identity/dsx-token-fetcher
       context: ..
@@ -43,9 +43,9 @@ build:
         target: dsx-spire-server
         buildArgs:
           <<: &spireBuildArgs
-            BUILDER_IMG: 127.0.0.1:5002/library/golang:1.26.4
-            SPIRE_SERVER_IMG: 127.0.0.1:5002/spiffe/spire-server:1.15.1
-            SPIRE_AGENT_IMG: 127.0.0.1:5002/spiffe/spire-agent:1.15.1
+            BUILDER_IMG: 127.0.0.1:5002/library/golang:1.26.10
+            SPIRE_SERVER_IMG: 127.0.0.1:5002/spiffe/spire-server:1.15.5
+            SPIRE_AGENT_IMG: 127.0.0.1:5002/spiffe/spire-agent:1.15.5
     - image: dsx-identity/dsx-spire-agent
       context: ..
       docker:
@@ -82,5 +82,5 @@ build:
       docker:
         dockerfile: Dockerfile.e2e
         buildArgs:
-          BUILDER_IMG: 127.0.0.1:5002/library/golang:1.26.4
+          BUILDER_IMG: 127.0.0.1:5002/library/golang:1.26.10
           RUNTIME_IMG: 127.0.0.1:5002/curlimages/curl:8.10.1
