@@ -67,7 +67,7 @@ secret detection, and container scans. The bot must be installed for this repo,
 and its [configuration](.github/copy-pr-bot.yaml) must be on `master` to take effect.
 The shared build action scans both image platforms with Syft and Grype, uploads
 SBOMs and reports, and fails on unsuppressed Critical vulnerabilities or scanner
-errors.
+errors. All image scans use the repository [Grype configuration](.github/grype.yaml).
 These scans do not submit results to Pulse.
 
 The DPF v26.8.0 `dpu_hw` plugin has one [scoped scan exception](.github/grype.yaml)

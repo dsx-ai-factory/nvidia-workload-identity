@@ -248,7 +248,7 @@ jobs:
           buildkit-config: ""
           security-scan-enabled: "true"
           security-scan-fail-on-critical: "true"
-          security-scan-config: ${{ matrix.name == 'dsx-spire-server' && '.github/grype.yaml' || '' }}
+          security-scan-config: .github/grype.yaml
 
   release-checks:
     name: RC contract checks
