@@ -41,18 +41,16 @@ build:
       docker:
         dockerfile: Dockerfile.spire
         target: dsx-spire-server
+        # Use pinned GHCR bases from Dockerfile.spire to avoid cache lookup failures.
         buildArgs:
-          <<: &spireBuildArgs
-            BUILDER_IMG: 127.0.0.1:5002/library/golang:1.26.10
-            SPIRE_SERVER_IMG: 127.0.0.1:5002/spiffe/spire-server:1.15.5
-            SPIRE_AGENT_IMG: 127.0.0.1:5002/spiffe/spire-agent:1.15.5
+          <<: *coreBuildArgs
     - image: dsx-identity/dsx-spire-agent
       context: ..
       docker:
         dockerfile: Dockerfile.spire
         target: dsx-spire-agent
         buildArgs:
-          <<: *spireBuildArgs
+          <<: *coreBuildArgs
     - image: dsx-identity/dsx-imds-network-setup
       context: ..
       docker:

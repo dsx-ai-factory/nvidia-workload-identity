@@ -13,7 +13,8 @@ components use one replica and SPIRE uses its SQLite default.
 
 Local fixtures configure DSX Identity Keys HTTP endpoints directly. The local
 Zot registry caches image pulls for both Kind clusters and local builds through
-`mirror.gcr.io`. CI uses the NVIDIA Docker Hub mirror instead.
+`mirror.gcr.io`. CI uses the NVIDIA Docker Hub mirror instead. SPIRE build stages
+pull their pinned base images directly from GHCR.
 
 The identity chart is installed independently in both clusters. The remaining
 components are separate Skaffold modules. Shared fixture settings and the
