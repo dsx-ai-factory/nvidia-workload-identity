@@ -14,6 +14,10 @@ components use one replica and SPIRE uses its SQLite default.
 Local fixtures configure DSX Identity Keys HTTP endpoints directly. The local
 Zot registry caches image pulls for both Kind clusters and local builds through
 `mirror.gcr.io`. CI uses the NVIDIA Docker Hub mirror instead.
+Before Skaffold starts, `make install` pulls the nginx and netshoot fixture images
+through Zot and loads them into the Kind nodes. This step requires GNU coreutils
+`timeout` and stops the install if a pull or load fails. CI caches the `library`
+and `nicolaka` repositories separately, keyed by their fixture and Zot configuration.
 
 The identity chart is installed independently in both clusters. The remaining
 components are separate Skaffold modules. Shared fixture settings and the

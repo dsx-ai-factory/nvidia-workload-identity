@@ -83,7 +83,17 @@ jobs:
         with:
           # The full Zot storage exceeds GitHub's 10 GB per-entry limit.
           path: ${{ env.ZOT_DATA_DIR }}/library
-          key: zot-dockerhub-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('local-e2e-tests/local-registry/zot-config.json') }}
+          key: zot-library-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('local-e2e-tests/local-registry/zot-config.json', 'local-e2e-tests/k*/nginx/e2e-nginx.yaml') }}
+          restore-keys: |
+            zot-library-v2-${{ runner.os }}-${{ runner.arch }}-
+            zot-dockerhub-v1-${{ runner.os }}-${{ runner.arch }}-
+      - uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        id: zot-netshoot-cache
+        with:
+          path: ${{ env.ZOT_DATA_DIR }}/nicolaka
+          key: zot-netshoot-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('local-e2e-tests/local-registry/zot-config.json', 'local-e2e-tests/k2/vm/external-client.yaml') }}
+          restore-keys: |
+            zot-netshoot-v1-${{ runner.os }}-${{ runner.arch }}-
       - name: Prepare host networking and virtualization
         run: |
           # The AWS image omits VRF and holds its matching extra module package.
@@ -179,17 +189,22 @@ jobs:
         if: always() && steps.tools.outcome == 'success'
         run: make clean
       - name: Stop Zot before caching
-        if: always() && steps.install.outcome == 'success' && steps.zot-cache.outputs.cache-hit != 'true'
+        if: always() && steps.install.outcome == 'success' && (steps.zot-cache.outputs.cache-hit != 'true' || steps.zot-netshoot-cache.outputs.cache-hit != 'true')
         id: stop-zot
         run: |
           docker stop dsx-identity-registry
-          sudo chown -R "$(id -u):$(id -g)" "$ZOT_DATA_DIR/library"
-          du -sh "$ZOT_DATA_DIR/library"
+          sudo chown -R "$(id -u):$(id -g)" "$ZOT_DATA_DIR/library" "$ZOT_DATA_DIR/nicolaka"
+          du -sh "$ZOT_DATA_DIR/library" "$ZOT_DATA_DIR/nicolaka"
       - uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
-        if: always() && steps.stop-zot.outcome == 'success'
+        if: always() && steps.stop-zot.outcome == 'success' && steps.zot-cache.outputs.cache-hit != 'true'
         with:
           path: ${{ env.ZOT_DATA_DIR }}/library
           key: ${{ steps.zot-cache.outputs.cache-primary-key }}
+      - uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        if: always() && steps.stop-zot.outcome == 'success' && steps.zot-netshoot-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ env.ZOT_DATA_DIR }}/nicolaka
+          key: ${{ steps.zot-netshoot-cache.outputs.cache-primary-key }}
 
   secret-detection:
     name: Secret detection

@@ -4,7 +4,7 @@
 # DSX identity Makefile
 
 .PHONY: preflight local-registry
-.PHONY: help install install-skaffold preload-vm-disk clean
+.PHONY: help install install-skaffold preload-test-images preload-vm-disk clean
 .PHONY: test test-k2-identity test-cross-shard status
 .PHONY: k1-cluster k2-cluster
 .PHONY: validate test-go test-rust test-shell test-chart test-skaffold chart-dependencies
@@ -137,9 +137,12 @@ chart-dependencies:
 # root Skaffold workflow.
 install: install-skaffold preload-vm-disk ## Install the complete local environment
 
-install-skaffold: k1-cluster k2-cluster
+install-skaffold: preload-test-images
 	@trap '$(MISE_EXEC) ./local-e2e-tests/cleanup-secret-sources.sh' EXIT INT TERM; \
 		$(SKAFFOLD_RUN)
+
+preload-test-images: k1-cluster k2-cluster
+	@$(MISE_EXEC) ./local-e2e-tests/preload-test-images.sh
 
 preload-vm-disk: k2-cluster
 	@image="$$( $(MISE_EXEC) yq -er \
