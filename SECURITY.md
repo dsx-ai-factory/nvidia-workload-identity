@@ -11,12 +11,12 @@ Use one of the following private reporting channels:
 - **NVIDIA Vulnerability Disclosure Program (preferred):** https://www.nvidia.com/en-us/security/
 - **Email:** [psirt@nvidia.com](mailto:psirt@nvidia.com)
   - We encourage use of the [NVIDIA public PGP key](https://www.nvidia.com/en-us/security/pgp-key) for secure email communication.
-- **GitLab/GitHub Private Vulnerability Reporting:** Use this repository's **Security** tab and **Report a vulnerability** flow when available.
+- **GitHub Private Vulnerability Reporting:** Use this repository's **Security** tab and **Report a vulnerability** flow when available.
 
 Please include the following information:
 
 - Product/project name and affected branch, commit, chart version, or container image tag.
-- Component affected, such as `dsx-identity-keys`, `metadata-service`, `dsx-token-fetcher`, `dsx_imds`, `dpu_hw`, `dsx-identity-controller`, the Helm chart, or a script under `scripts/`.
+- Component affected, such as `dsx-identity-keys`, `metadata-service`, `dsx-token-fetcher`, `dsx_imds`, `dpu_hw`, `dsx-identity-controller`, the Helm chart, or a script under `local-e2e-tests/`.
 - Vulnerability type, such as authentication bypass, token disclosure, key distribution issue, privilege escalation, denial of service, misregistration, injection, or insecure deployment default.
 - Step-by-step reproduction instructions.
 - Proof-of-concept code or request examples, if available.
@@ -51,9 +51,6 @@ Primary security responsibilities:
 - Expose host and VM identity only through the intended metadata and CSI paths.
 - Keep Workload API sockets, token files, and proxy sockets available only to intended local workloads.
 
-**Repository Exposure Classification:** Internal.
-Basis: origin remote is hosted on `gitlab-master.nvidia.com`, an internal/self-managed GitLab host.
-
 **Service Exposure Classification:** Internal-Sensitive.
 Basis: this repository implements identity issuance, SPIRE node attestation,
 signing-key handling, Kubernetes admission and injection, NATS public-key
@@ -83,7 +80,7 @@ The following scenarios represent the primary security concerns for this project
 
 2. **Event Bus Public Key Poisoning or Staleness:** `internal/keydistribution/nats.go` publishes local public signing keys and watches every `shard.*.kid.*` key in the configured NATS KV bucket. Although received keys are validated as public JWKs, the shared Event Bus, bucket access policy, shard IDs, key IDs, TTLs, and OAuth2 configuration remain security-critical. Misconfigured NATS authorization, unauthorized writers, replayed stale keys, or shard ID collisions could affect the aggregate JWKS served to relying parties.
 
-3. **Metadata Service Identity Disclosure Through IMDS Reachability:** `cmd/metadata-service/main.go` serves DSX JWTs from `/latest/meta-data/identity` and `/2009-04-04/meta-data/identity` when requests include `Metadata: true` and are not forwarded. If link-local routing, sidecar placement, network namespace isolation, or the external NICo/Carbide IMDS path allows unintended callers to reach the service directly, the metadata endpoint can return DSX JWTs for the selected host or VM SVID.
+3. **Metadata Service Identity Disclosure Through IMDS Reachability:** `cmd/metadata-service/main.go` serves DSX JWTs from `/latest/meta-data/identity` and `/2009-04-04/meta-data/identity` when requests include `Metadata: true` and are not forwarded. If link-local routing, sidecar placement, network namespace isolation, or the external NICo IMDS path allows unintended callers to reach the service directly, the metadata endpoint can return DSX JWTs for the selected host or VM SVID.
 
 4. **DPU Node Identity Assertion:** The `dpu_hw` NodeAttestor accepts a DPU serial, validates its format, and derives the agent ID from its canonical form. A serial is an identifier, not cryptographic proof of hardware possession. The trust boundary is the externally provisioned serial-to-DPU association and access to the SPIRE node-attestation service. An unauthorized agent that can reach that service and assert a provisioned serial could obtain the corresponding DPU agent identity.
 
@@ -101,7 +98,7 @@ The following scenarios represent the primary security concerns for this project
 - External secret automation provisions signing keysets, active KIDs, and NATS OAuth2 credentials. Kubernetes RBAC and the deployment pipeline restrict access to their Secrets. The Helm chart mounts named Secrets read-only but does not create or rotate the underlying secrets.
 - The configured active signing algorithm and key material are generated and rotated by a trusted upstream key-management process. `internal/signingkey/keyset.go` validates algorithm compatibility and duplicate KIDs but does not verify the provenance of mounted private key material.
 - Native Kubernetes admission, RBAC, and chart deployment subjects enforce identity injection and registration boundaries. README identifies Kubernetes admission as the admission boundary and the controller as the sole writer for derived static entries.
-- External DPU, NICo, Carbide IMDS, and LaunchLayer integrations provide correct source data and routing. The DPU source supplies the worker-to-DPU mapping used for the paired BM identity.
+- External DPU, NICo IMDS, and LaunchLayer integrations provide correct source data and routing. The DPU source supplies the worker-to-DPU mapping used for the paired BM identity.
 - DPU provisioning maintains the serial-to-DPU association used by `dpu_hw`, and access to the SPIRE node-attestation service is limited to the paired external DPU agent. The serial is an identity input, not a secret or proof of hardware possession.
 - Relying parties validate DSX JWT signatures against the aggregate JWKS, validate issuer and audience, enforce token expiry, and apply their own authorization policy. DSX Identity Keys issues bearer JWTs but does not enforce relying-party authorization decisions.
 - Consumer workloads protect DSX JWT files as bearer credentials. The token fetcher removes stale tokens and refreshes on expiry, but it does not encrypt tokens at rest in the shared Pod volume.

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 package identitycontroller
 
 import (
@@ -45,22 +48,17 @@ type DPUReconciler struct {
 }
 
 func (r *DPUReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	dpu := &unstructured.Unstructured{}
-	dpu.SetGroupVersionKind(DPUGVK)
-	controller := ctrl.NewControllerManagedBy(mgr).
+	c, err := ctrl.NewControllerManagedBy(mgr).
 		Named("dsx-dpu-identity").
-		For(dpu).
-		Watches(&spirev1alpha1.ClusterStaticEntry{}, handler.EnqueueRequestsFromMapFunc(requestForSource(DPUGVK.Group, DPUGVK.Kind)))
-	available, err := sourceAPIAvailable(mgr.GetRESTMapper(), BareMetalInstanceGVK)
+		Watches(&spirev1alpha1.ClusterStaticEntry{}, handler.EnqueueRequestsFromMapFunc(requestForSource(DPUGVK.Group, DPUGVK.Kind))).
+		Build(r)
 	if err != nil {
-		return fmt.Errorf("discover BareMetalInstance API: %w", err)
+		return err
 	}
-	if available {
-		bm := &unstructured.Unstructured{}
-		bm.SetGroupVersionKind(BareMetalInstanceGVK)
-		controller = controller.Watches(bm, handler.EnqueueRequestsFromMapFunc(r.requestsForDPU))
+	if err := watchSourceWhenAvailable(mgr, c, DPUGVK, &handler.EnqueueRequestForObject{}, r.Config.SourceAPIPollInterval); err != nil {
+		return err
 	}
-	return controller.Complete(r)
+	return watchSourceWhenAvailable(mgr, c, BareMetalInstanceGVK, handler.EnqueueRequestsFromMapFunc(r.requestsForDPU), r.Config.SourceAPIPollInterval)
 }
 
 func (r *DPUReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {

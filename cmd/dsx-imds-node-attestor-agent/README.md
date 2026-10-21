@@ -2,7 +2,7 @@
 
 `dsx-imds-node-attestor-agent` is the agent half of SPIRE's custom `dsx_imds`
 NodeAttestor. It requests a host DSX JWT through the paired DPU intercept and
-NICo or Carbide IMDS passthrough, then sends that token as the SPIRE
+NICo IMDS passthrough, then sends that token as the SPIRE
 node-attestation payload.
 
 The external DPU establishes the first local SPIRE identities through
@@ -25,7 +25,7 @@ flowchart TB
   HostIdentities["Host local SPIRE identities<br/>from shard-local SPIRE"]
   IdentityKeys["Shard-local DSX Identity Keys"]
   DPUAgent["DPU SPIRE agent process<br/>dsx_dpu agent plugin"]
-  NICoIMDS["Paired DPU link-local intercept<br/>NICo or Carbide IMDS passthrough"]
+  NICoIMDS["Paired DPU link-local intercept<br/>NICo IMDS passthrough"]
   DSXIMDS["DSX IMDS<br/>(metadata-service)"]
   HostAgent["Bare-metal host SPIRE agent process<br/>dsx_imds agent plugin"]
   HostProcess["Bare-metal host process"]
@@ -46,7 +46,7 @@ flowchart TB
 sequenceDiagram
     participant DI as DSX IMDS process
     participant DA as External DPU SPIRE agent<br/>runtime WorkloadAttestor
-    participant NI as Paired DPU intercept and NICo or Carbide IMDS
+    participant NI as Paired DPU intercept and NICo IMDS
     participant EX as Shard-local DSX Identity Keys Pod
     participant AP as dsx_imds NodeAttestor agent plugin
     participant HA as Bare-metal host SPIRE agent
@@ -81,4 +81,4 @@ plugin_data {
 HTTP client connects directly, ignores ambient proxy settings, and rejects
 redirects. `Dockerfile.spire` embeds the plugin in the DSX SPIRE agent image.
 The local E2E fixture selects that image through
-`scripts/dsx-imds-host-agent-values.yaml` plus its shard override.
+`local-e2e-tests/dsx-imds-host-agent-values.yaml` plus its shard override.

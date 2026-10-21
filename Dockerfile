@@ -1,4 +1,7 @@
-ARG BUILDER_IMG=golang:1.26.4
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+ARG BUILDER_IMG=golang:1.26.10
 
 FROM --platform=$BUILDPLATFORM ${BUILDER_IMG} AS builder
 
@@ -14,7 +17,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/${BINARY} ./cmd/${BINARY}
 
-FROM nvcr.io/nvidia/distroless/go:v4.1.4 AS runtime
+FROM nvcr.io/nvidia/distroless/go:v4.1.6 AS runtime
 ARG BINARY
 COPY --from=builder /out/${BINARY} /usr/local/bin/${BINARY}
 USER 1000:1000

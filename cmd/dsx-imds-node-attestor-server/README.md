@@ -8,7 +8,7 @@ plugin and returns the DSX subject as a reattestable SPIRE agent ID.
 sequenceDiagram
     participant DI as DSX IMDS process
     participant DA as External DPU SPIRE agent<br/>runtime WorkloadAttestor
-    participant NI as Paired DPU intercept and NICo or Carbide IMDS
+    participant NI as Paired DPU intercept and NICo IMDS
     participant EX as Shard-local DSX Identity Keys Pod
     participant AP as dsx_imds NodeAttestor agent plugin
     participant HA as Bare-metal host SPIRE agent
