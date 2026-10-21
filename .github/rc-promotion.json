@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "enabled": false,
+  "source_workflow": ".github/workflows/release-rc.yml",
+  "source_publisher_sha": "c5609021216442ef4f398111512834632c30d41d",
+  "source_ngc_path": "0837451325059433/components-dev",
+  "destination_ngc_path": "0837451325059433/components-dev",
+  "images": [
+    "dsx-token-fetcher",
+    "dsx-identity-keys",
+    "metadata-service",
+    "dsx-imds-network-setup",
+    "dsx-identity-keys-proxy-csi",
+    "dsx-identity-controller",
+    "dsx-spire-server",
+    "dsx-spire-agent",
+    "dsx-kata-uds-proxy"
+  ],
+  "charts": [
+    {
+      "name": "dsx-identity",
+      "version_value_paths": [["spire", "spire-server", "image", "tag"]]
+    },
+    {"name": "dsx-imds", "version_value_paths": []},
+    {"name": "dsx-token-fetcher", "version_value_paths": []},
+    {"name": "dsx-token-fetcher-example", "version_value_paths": []},
+    {"name": "dsx-spiffe-csi", "version_value_paths": []}
+  ],
+  "competing_workflows": []
+}
