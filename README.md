@@ -55,7 +55,9 @@ configure the runner, protected release environment, NGC key, and release permis
 Promotion is disabled by default. Complete the
 [release setup](https://github.com/dsx-ai-factory/dsx-github-actions/blob/main/docs/promote-rc.md)
 before enabling `.github/rc-promotion.json` and setting `DSX_RELEASE_MODE=rc-promotion`.
-Only RCs with a captured promotion manifest can be selected.
+Keep the promotion workflow and policy on `master`. The release branch must also
+use the same shared publisher revision with `promotion-manifest: true` before
+publishing the RC for QA. Older RCs without that manifest cannot be promoted.
 
 1. Have QA validate a published RC with a successful manifest capture.
 2. Open **Actions > Promote RC > Run workflow**. Select `master` and enter `X.Y.Z-rc.N`.
@@ -63,7 +65,8 @@ Only RCs with a captured promotion manifest can be selected.
 4. After approval, the workflow publishes `X.Y.Z` using the tested image digests.
 
 The [promotion workflow](.github/workflows/promote-rc.yml) calls the shared publisher.
-RC publishing now records the artifact digests needed for promotion.
+Images keep their tested bytes. Charts update release metadata and declared image
+tags while preserving templates and vendored dependencies.
 
 ## CI
 
