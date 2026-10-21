@@ -285,11 +285,11 @@ func TestSlogHandlerUsesStdoutLogLevelForExport(t *testing.T) {
 	exporter := new(recordingLogExporter)
 	provider := sdklog.NewLoggerProvider(sdklog.WithProcessor(sdklog.NewSimpleProcessor(exporter)))
 	sdk := &SDK{loggerProvider: provider}
-	t.Cleanup(func() {
+	defer func() {
 		if err := sdk.Shutdown(t.Context()); err != nil {
 			t.Errorf("Shutdown() error = %v", err)
 		}
-	})
+	}()
 
 	var output bytes.Buffer
 	stdout := slog.NewJSONHandler(&output, &slog.HandlerOptions{Level: slog.LevelInfo})
