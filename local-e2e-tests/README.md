@@ -13,11 +13,12 @@ components use one replica and SPIRE uses its SQLite default.
 
 Local fixtures configure DSX Identity Keys HTTP endpoints directly. The local
 Zot registry caches image pulls for both Kind clusters and local builds through
-`mirror.gcr.io`. CI uses the NVIDIA Docker Hub mirror instead.
-Before Skaffold starts, `make install` pulls the nginx and netshoot fixture images
-through Zot and loads them into the Kind nodes. This step requires GNU coreutils
-`timeout` and stops the install if a pull or load fails. CI caches the `library`
-and `nicolaka` repositories separately, keyed by their fixture and Zot configuration.
+`mirror.gcr.io`. Set `KIND_DOCKERHUB_MIRROR` to an HTTPS registry origin to route
+all Docker Hub pulls from Kind directly through that mirror. An unavailable mirror
+fails the pull without falling back to Docker Hub. Leave it unset to keep the local
+Zot route. Other registries keep using Zot. CI uses the NVIDIA Docker Hub mirror
+for Kind and Zot. It does not save Zot storage in GitHub Actions caches, leaving
+that quota for build and tool caches.
 
 The identity chart is installed independently in both clusters. The remaining
 components are separate Skaffold modules. Shared fixture settings and the
