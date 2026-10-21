@@ -28,7 +28,8 @@ FROM ${RUNTIME_IMG}
 
 # The host role execs nsenter, which Alpine ships in util-linux-misc. The guest
 # role execs socat.
-RUN apk add --no-cache socat util-linux-misc
+# Apply security fixes published after the pinned base image was built.
+RUN apk upgrade --no-cache && apk add --no-cache socat util-linux-misc
 
 COPY --from=builder /out/kata-uds-proxy /usr/local/bin/kata-uds-proxy
 COPY kata-uds-proxy/host-entrypoint.sh /usr/local/bin/host-entrypoint.sh
