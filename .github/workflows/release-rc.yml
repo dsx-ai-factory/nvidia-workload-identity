@@ -18,9 +18,10 @@ jobs:
       github.ref == 'refs/heads/release/1.15.0'
     permissions:
       contents: write
-    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-publish.yml@79ee22291ed2c112fdc492d086ea40ed162bb7e1
+    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-publish.yml@a13dba1610532abfcfffc547f88f132004ffc6a4
     secrets: inherit
     with:
+      promotion-manifest: true
       runner: ubuntu-latest
       buildkit-config: ""
       environment: components-dev
