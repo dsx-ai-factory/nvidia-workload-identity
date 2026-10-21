@@ -18,9 +18,9 @@ jobs:
       github.ref == 'refs/heads/master' &&
       vars.DSX_RELEASE_MODE == 'rc-promotion'
     permissions:
-      contents: write
+      contents: read
       actions: read
       deployments: read
-    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/promote-rc.yml@a13dba1610532abfcfffc547f88f132004ffc6a4
+    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/promote-rc.yml@5e77c34230b55112e9bf8c02dbb934452693699d
     with:
       rc_version: ${{ inputs.rc_version }}

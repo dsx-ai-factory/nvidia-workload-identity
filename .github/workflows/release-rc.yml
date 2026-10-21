@@ -18,7 +18,7 @@ jobs:
       github.ref == 'refs/heads/release/1.15.0'
     permissions:
       contents: write
-    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-publish.yml@a13dba1610532abfcfffc547f88f132004ffc6a4
+    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-publish.yml@5e77c34230b55112e9bf8c02dbb934452693699d
     secrets: inherit
     with:
       promotion-manifest: true
