@@ -22,6 +22,8 @@ repository is a legacy mirror.
 - State supported behavior directly. Avoid AI-speak, marketing language, vague
   qualifiers, invented compound labels, and unsolicited comparisons with
   unsupported behavior. Do not explain a feature by saying what it is not.
+- Avoid duplicating dependency versions in documentation. Link to the pinned
+  build configuration and keep version numbers only where behavior depends on them.
 - Document current behavior. Omit internal history, revision narrative,
   meta-documentation, and speculative future designs.
 - Use plain punctuation. Do not use em dashes, en dashes, curly quotes, or
@@ -58,6 +60,8 @@ repository is a legacy mirror.
 - Keep runtime ownership separate from shared data. Use consumer-owned interfaces
   for dependency boundaries and test control. Cover acceptance and rejection.
 - Keep supplied values exact. Do not trim, normalize, case-fold, or coerce input.
+- Consume DPF source and dependency changes through upstream releases. Do not
+  patch DPF source or override its dependencies in this repository.
 - `charts/dsx-identity` installs each management-cluster shard.
 - `charts/dsx-imds` and `charts/dsx-spiffe-csi` are DPUService payloads. Keep external
   systems and secret-source resources outside these charts.

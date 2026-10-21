@@ -33,18 +33,9 @@ Component commands and runtime configuration:
 
 ### SPIRE upgrades
 
-The bundled SPIRE server and agent use 1.15.1. For an existing 1.13.x shard,
-follow [SPIRE's upgrade order](https://github.com/spiffe/spire/blob/v1.15.1/doc/upgrading.md):
-upgrade all servers to 1.14.x, then all agents to 1.14.x, then all servers to
-1.15.1, then all agents to 1.15.1. Upgrade each shard independently. A direct
-1.13.x to 1.15.x rolling upgrade exceeds the supported version skew.
-
-SPIRE 1.14 removes the deprecated `retry_rebootstrap` agent setting and requires
-the agent KeyManager directory to exist and be writable. SPIRE 1.15 changes
-some CLI JSON results from a one-element array to an object and renames the
-`bootstraped` metric label to `bootstrapped`. The repository does not use the
-removed setting or renamed label. Its `entry show -output json` consumer
-continues to receive an object with an `entries` array.
+Before upgrading SPIRE, check its
+[upgrade requirements](https://github.com/spiffe/spire/blob/main/doc/upgrading.md)
+for supported version skew, upgrade order, and configuration changes.
 
 ## Release candidates
 
@@ -66,7 +57,8 @@ and `release/**` also run `make validate`, the full [local E2E lifecycle](local-
 secret detection, and container scans. The bot must be installed for this repo,
 and its [configuration](.github/copy-pr-bot.yaml) must be on `master` to take effect.
 The shared build action scans both image platforms with Syft and Grype, uploads
-SBOMs and reports, and fails on Critical vulnerabilities or scanner errors.
+SBOMs and reports, and fails on unsuppressed Critical vulnerabilities or scanner
+errors. All image scans use the repository [Grype configuration](.github/grype.yaml).
 These scans do not submit results to Pulse.
 
 All product jobs use the event's commit and read-only repository permissions,
@@ -518,7 +510,7 @@ stack. Structured allow, deny, and dependency events never include
 credentials.
 
 SPIRE server, controller-manager, and the optional local SPIRE agent expose
-their native Prometheus metrics through chart-owned monitors. SPIRE 1.15.1
+their native Prometheus metrics through chart-owned monitors. SPIRE
 does not produce traces. SPIFFE CSI Driver, CSI node-driver-registrar, and
 the `socat` proxy expose no native application telemetry. Their health checks,
 container logs, and platform container metrics remain available.
