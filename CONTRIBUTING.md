@@ -1,4 +1,4 @@
-# Contributing to nvidia-workload-identity
+# Contributing to NVIDIA Workload Identity
 
 ## Before you start
 

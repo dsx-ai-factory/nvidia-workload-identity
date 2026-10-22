@@ -24,7 +24,7 @@ write_existing() {
         | jq -er '.data["keyset.json"]' | base64 -d >"${TEMP_DIR}/keyset.json"
     kubectl get secret "$2" -n "${NAMESPACE}" --context "${CONTEXT}" -o json \
         | jq -er '.data["active-kid.json"]' | base64 -d >"${TEMP_DIR}/active-kid.json"
-    log_info "Reusing the existing DSX Identity Keys signing keyset in ${CONTEXT}"
+    log_info "Reusing the existing NVIDIA Workload Identity Keys signing keyset in ${CONTEXT}"
 }
 
 generate_sources() {
@@ -32,7 +32,7 @@ generate_sources() {
     generated=$(cd "${SCRIPT_DIR}/.." && go run ./cmd/generate-signing-keyset generate)
     jq -jc '{keys}' <<<"${generated}" >"${TEMP_DIR}/keyset.json"
     jq -jc '{active_kid, alg}' <<<"${generated}" >"${TEMP_DIR}/active-kid.json"
-    log_info "Generated the DSX Identity Keys signing keyset source for ${CONTEXT}"
+    log_info "Generated the NVIDIA Workload Identity Keys signing keyset source for ${CONTEXT}"
 }
 
 publish_sources() {
@@ -68,7 +68,7 @@ main() {
         generate_sources
     fi
     publish_sources
-    log_success "DSX Identity Keys signing keyset source is ready for ${CONTEXT}"
+    log_success "NVIDIA Workload Identity Keys signing keyset source is ready for ${CONTEXT}"
 }
 
 trap cleanup EXIT

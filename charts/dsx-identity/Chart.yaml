@@ -1,6 +1,6 @@
 apiVersion: v2
 name: dsx-identity
-description: DSX identity plane with SPIRE, DSX Identity Keys, and Pod and VM support
+description: NVIDIA Workload Identity with SPIRE and Pod and VM support
 type: application
 version: 0.1.0
 appVersion: "0.1.0"

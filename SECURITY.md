@@ -1,8 +1,11 @@
-# Security Policy: DSX Identity (dsx-identity)
+# Security Policy: NVIDIA Workload Identity
 
 NVIDIA is dedicated to the security and trust of its software products and services, including source code repositories managed through NVIDIA organizations.
 
-If you discover a potential security vulnerability in DSX Identity, please report it privately through one of the channels below. Do not open a public issue, merge request, discussion, or public comment for security vulnerabilities.
+If you discover a potential security vulnerability in NVIDIA Workload
+Identity, please report it privately through one of the channels below. Do not
+open a public issue, merge request, discussion, or public comment for security
+vulnerabilities.
 
 ## Reporting a Vulnerability
 
@@ -26,7 +29,12 @@ Detailed reports help NVIDIA evaluate and address issues faster. NVIDIA PSIRT wi
 
 ## Security Architecture & Context
 
-DSX Identity turns shard-local SPIRE JWT-SVIDs into DSX JWTs that relying parties can validate across shards. An identity shard contains an independent SPIRE deployment and a co-located DSX Identity Keys deployment. DSX Identity Keys validates only local SPIRE JWT-SVIDs, signs DSX JWTs, publishes public signing keys through the external DSX Event Bus, and serves an aggregate JWKS for relying parties.
+NVIDIA Workload Identity turns shard-local SPIRE JWT-SVIDs into DSX JWTs that
+relying parties can validate across shards. An identity shard contains an
+independent SPIRE deployment and a co-located NVIDIA Workload Identity Keys
+deployment. NVIDIA Workload Identity Keys validates only local SPIRE
+JWT-SVIDs, signs DSX JWTs, publishes public signing keys through the external
+DSX Event Bus, and serves an aggregate JWKS for relying parties.
 
 This repository is primarily a Go service and Kubernetes Helm chart repository. It contains multiple security-sensitive binaries:
 
@@ -36,7 +44,7 @@ This repository is primarily a Go service and Kubernetes Helm chart repository. 
 - `cmd/dsx-imds-node-attestor-agent` and `cmd/dsx-imds-node-attestor-server`: SPIRE NodeAttestor plugins that bootstrap host agents using DSX JWTs obtained through IMDS.
 - `third-party/doca-platform-foundation/cmd/dpu-hw-server`: SPIRE NodeAttestor plugin for DPU node attestation.
 - `cmd/dsx-identity-controller` and `internal/identitycontroller`: Kubernetes controller that derives SPIRE `ClusterStaticEntry` resources from DPU and LaunchLayer source resources.
-- `cmd/dsx-identity-keys-proxy-csi`: CSI node plugin exposing a local socket path used by VM metadata sidecars to reach DSX Identity Keys.
+- `cmd/dsx-identity-keys-proxy-csi`: CSI node plugin exposing a local socket path used by VM metadata sidecars to reach NVIDIA Workload Identity Keys.
 - `charts/dsx-identity`: Helm chart for the management-cluster identity shard and DPF DPUService registration.
 - `charts/dsx-imds`: DPUService payload for DSX IMDS on DPU nodes.
 - `charts/dsx-spiffe-csi`: DPUService payload for SPIFFE CSI on DPU nodes.
@@ -59,8 +67,8 @@ network exposure of a particular deployment.
 
 Key trust boundaries and interfaces:
 
-- Local SPIRE Workload API sockets are trusted sources for SPIRE JWT-SVIDs. DSX Identity Keys validates `subject_token` values with `jwtsvid.ParseAndValidate` in `cmd/dsx-identity-keys/main.go` before signing DSX JWTs.
-- DSX Identity Keys exposes HTTP endpoints: `POST /v1/exchange`, `GET /.well-known/jwks.json`, `GET /.well-known/openid-configuration`, `GET /live`, and `GET /ready`.
+- Local SPIRE Workload API sockets are trusted sources for SPIRE JWT-SVIDs. NVIDIA Workload Identity Keys validates `subject_token` values with `jwtsvid.ParseAndValidate` in `cmd/dsx-identity-keys/main.go` before signing DSX JWTs.
+- NVIDIA Workload Identity Keys exposes HTTP endpoints: `POST /v1/exchange`, `GET /.well-known/jwks.json`, `GET /.well-known/openid-configuration`, `GET /live`, and `GET /ready`.
 - DSX IMDS requires direct requests with `Metadata: true` and rejects forwarded requests. Its listener sets the response TTL or hop limit to one, limiting how far a response can travel. Incoming TTL is not used as a caller authorization signal because it does not establish the sender's identity or network location. Link-local routing and network namespace isolation define the IMDS reachability boundary.
 - DSX public signing keys are shared through NATS JetStream KV in `internal/keydistribution/nats.go`; the payload is validated as public JWK material before entering the aggregate registry.
 - NATS OAuth2 mode reads client credentials from its configured file path. The chart can mount the configured Secret read-only, while external secret automation and Kubernetes RBAC determine who can read that Secret.
@@ -68,7 +76,7 @@ Key trust boundaries and interfaces:
 - The `dpu_hw` NodeAttestor uses the DPU serial as its stable agent identifier. It validates the serial format and canonicalizes it, while DPU provisioning and access to the SPIRE node-attestation service establish which DPU may assert that serial.
 - The identity controller writes SPIRE `ClusterStaticEntry` resources with server-side apply and validates duplicate SPIFFE IDs and overlapping VM holder selectors in `internal/identitycontroller/reconciler.go`.
 - Native Kubernetes admission policies under `charts/dsx-identity/templates` inject identity sidecars and constrain identity-related Pod shapes. README guidance identifies Kubernetes admission as the admission boundary.
-- DSX Identity Keys itself serves HTTP. The intended production client endpoint is the external Gateway HTTPS endpoint, but the code accepts configured HTTP URLs for local fixtures and does not enforce a URL scheme for the NodeAttestor JWKS client.
+- NVIDIA Workload Identity Keys itself serves HTTP. The intended production client endpoint is the external Gateway HTTPS endpoint, but the code accepts configured HTTP URLs for local fixtures and does not enforce a URL scheme for the NodeAttestor JWKS client.
 - The CSI node plugin is privileged and uses bidirectional mount propagation to create kubelet-managed bind mounts. That node-level privilege is required for its CSI contract, so the plugin and its image supply chain are a node security boundary.
 - Metadata service uses `jwtsvid.ParseInsecure` only to return the exchanged token subject as response metadata. When the exchange URL uses `unix://`, the exchange is carried over the CSI-provided local socket. HTTP(S) exchange URLs are also supported and rely on the configured endpoint transport.
 
@@ -76,7 +84,7 @@ Key trust boundaries and interfaces:
 
 The following scenarios represent the primary security concerns for this project, ordered by likely security impact and grounded in repository components.
 
-1. **Token Exchange Trust Expansion Through DSX Identity Keys:** `cmd/dsx-identity-keys/main.go` accepts `POST /v1/exchange`, validates local SPIRE JWT-SVIDs, converts their subjects with `internal/identity/identity.go`, and preserves only registered JWT-SVID claims. A bug in subject parsing, tenant validation, audience handling, or claim preservation could mint a DSX JWT that gives a workload broader cross-shard authority than its local SPIRE identity should allow.
+1. **Token Exchange Trust Expansion Through NVIDIA Workload Identity Keys:** `cmd/dsx-identity-keys/main.go` accepts `POST /v1/exchange`, validates local SPIRE JWT-SVIDs, converts their subjects with `internal/identity/identity.go`, and preserves only registered JWT-SVID claims. A bug in subject parsing, tenant validation, audience handling, or claim preservation could mint a DSX JWT that gives a workload broader cross-shard authority than its local SPIRE identity should allow.
 
 2. **Event Bus Public Key Poisoning or Staleness:** `internal/keydistribution/nats.go` publishes local public signing keys and watches every `shard.*.kid.*` key in the configured NATS KV bucket. Although received keys are validated as public JWKs, the shared Event Bus, bucket access policy, shard IDs, key IDs, TTLs, and OAuth2 configuration remain security-critical. Misconfigured NATS authorization, unauthorized writers, replayed stale keys, or shard ID collisions could affect the aggregate JWKS served to relying parties.
 
@@ -92,15 +100,15 @@ The following scenarios represent the primary security concerns for this project
 
 ### Critical Security Assumptions
 
-- Production deployments configure the external Gateway TLS endpoint and source-aware quotas for DSX Identity Keys. The service code starts an HTTP listener and does not configure TLS itself. The NodeAttestor JWKS client does not enforce HTTPS, so deployment configuration must use a trusted HTTPS endpoint outside local fixtures.
-- SPIRE Workload API sockets are protected by SPIFFE CSI, filesystem permissions, Pod security contexts, and node-local isolation. DSX Identity Keys, DSX Token Fetcher, and metadata-service trust JWT-SVIDs obtained from those sockets.
+- Production deployments configure the external Gateway TLS endpoint and source-aware quotas for NVIDIA Workload Identity Keys. The service code starts an HTTP listener and does not configure TLS itself. The NodeAttestor JWKS client does not enforce HTTPS, so deployment configuration must use a trusted HTTPS endpoint outside local fixtures.
+- SPIRE Workload API sockets are protected by SPIFFE CSI, filesystem permissions, Pod security contexts, and node-local isolation. NVIDIA Workload Identity Keys, DSX Token Fetcher, and metadata-service trust JWT-SVIDs obtained from those sockets.
 - The external Event Bus enforces writer identity, bucket isolation, OAuth2 policy, and transport security. The repository validates received public JWK shape but does not itself own Event Bus authorization policy.
 - External secret automation provisions signing keysets, active KIDs, and NATS OAuth2 credentials. Kubernetes RBAC and the deployment pipeline restrict access to their Secrets. The Helm chart mounts named Secrets read-only but does not create or rotate the underlying secrets.
 - The configured active signing algorithm and key material are generated and rotated by a trusted upstream key-management process. `internal/signingkey/keyset.go` validates algorithm compatibility and duplicate KIDs but does not verify the provenance of mounted private key material.
 - Native Kubernetes admission, RBAC, and chart deployment subjects enforce identity injection and registration boundaries. README identifies Kubernetes admission as the admission boundary and the controller as the sole writer for derived static entries.
 - External DPU, NICo IMDS, and LaunchLayer integrations provide correct source data and routing. The DPU source supplies the worker-to-DPU mapping used for the paired BM identity.
 - DPU provisioning maintains the serial-to-DPU association used by `dpu_hw`, and access to the SPIRE node-attestation service is limited to the paired external DPU agent. The serial is an identity input, not a secret or proof of hardware possession.
-- Relying parties validate DSX JWT signatures against the aggregate JWKS, validate issuer and audience, enforce token expiry, and apply their own authorization policy. DSX Identity Keys issues bearer JWTs but does not enforce relying-party authorization decisions.
+- Relying parties validate DSX JWT signatures against the aggregate JWKS, validate issuer and audience, enforce token expiry, and apply their own authorization policy. NVIDIA Workload Identity Keys issues bearer JWTs but does not enforce relying-party authorization decisions.
 - Consumer workloads protect DSX JWT files as bearer credentials. The token fetcher removes stale tokens and refreshes on expiry, but it does not encrypt tokens at rest in the shared Pod volume.
 - Kubernetes and container runtime isolation protect token files, proxy sockets, Workload API sockets, and mounted secrets. The repository uses non-root and read-only-root-filesystem security contexts where compatible with a component's function, while the CSI node plugin and Kata host proxy intentionally require node-level privilege. The chart cannot enforce every consumer container setting.
 - The local E2E environment is not a production security configuration. README describes unauthenticated NATS and direct HTTP fixture endpoints for local Kind clusters.
@@ -124,7 +132,7 @@ Keep Go modules, base images, Helm dependencies, and charted sidecar images upda
 - Provide `global.operatorTenant`, the DSX and SPIRE JWT issuers, SPIRE trust
   domain, cluster name, shard ID, public JWKS URL, NATS server URL, signing
   keyset Secret, active KID Secret, and any NATS OAuth2 credentials before
-  starting DSX Identity Keys.
+  starting NVIDIA Workload Identity Keys.
 - Use the external Gateway for TLS termination and request quotas in production.
 - Enable NATS OAuth2 or an equivalent Event Bus access-control mode in production.
 - Keep local fixture settings, unauthenticated NATS, direct HTTP endpoints, and example values out of production deployments.

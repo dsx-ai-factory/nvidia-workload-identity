@@ -1,17 +1,19 @@
-# DSX Identity Keys
+# NVIDIA Workload Identity Keys
 
-`dsx-identity-keys` is the DSX Identity Keys process installed in each identity
-shard. It validates only local SPIRE JWT-SVIDs, transforms their SPIFFE subject
-to the DSX identity contract, preserves the registered `aud`, `exp`, `iat`,
-`jti`, and `nbf` claims, and signs the exchanged DSX JWT with the shard's active
-key. SPIRE registration determines the tenant in the local subject, and DSX
-Identity Keys preserves it while validating the common identity grammar. It obtains local
-JWT verification bundles through the node-local SPIFFE Workload API.
+`dsx-identity-keys` is the NVIDIA Workload Identity Keys process installed in
+each identity shard. It validates only local SPIRE JWT-SVIDs, transforms their
+SPIFFE subject to the NVIDIA Workload Identity contract, preserves the
+registered `aud`, `exp`, `iat`, `jti`, and `nbf` claims, and signs the
+exchanged DSX JWT with the shard's active key. SPIRE registration determines
+the tenant in the local subject, and NVIDIA Workload Identity Keys preserves
+it while validating the common identity grammar. It obtains local JWT
+verification bundles through the node-local SPIFFE Workload API.
 
 Tenant and service determine the exchanged trust domain. The resource path
 contains complete key/value pairs with unique keys. Each segment starts with
 an ASCII letter or digit, followed by ASCII letters, digits, `.`, `_`, or `-`.
-DSX Identity Keys preserves valid paths exactly, including case and order:
+NVIDIA Workload Identity Keys preserves valid paths exactly, including case
+and order:
 
 ```text
 local:     spiffe://<local-domain>/tenant/<tenant>/service/dsx/cluster/cluster-1/namespace/team-a/workload/api
@@ -26,16 +28,17 @@ exchanged: spiffe://<tenant>.<region>.dsx.<partition>/dpu/<serial>/dpuservice/<s
 ```
 
 DPF includes the namespace because DPU service IDs are unique only within a
-Kubernetes namespace. DSX Identity Keys only preserves that suffix.
+Kubernetes namespace. NVIDIA Workload Identity Keys only preserves that
+suffix.
 
-By default, each DSX Identity Keys instance writes only its local public keys to
-one shared NATS KV bucket and watches the complete bucket. It retains one
-aggregate keyed by globally unique `kid`, and its JWKS endpoint serves every
-valid local and remote public key. Startup requires the Event Bus connection,
-KV bucket, and initial history. Later connection failures leave DSX Identity
-Keys live but not ready while it reconnects. Instances using the same bucket
-converge on the same aggregate, so relying parties can use the JWKS from any
-reachable DSX Identity Keys.
+By default, each NVIDIA Workload Identity Keys instance writes only its local
+public keys to one shared NATS KV bucket and watches the complete bucket. It
+retains one aggregate keyed by globally unique `kid`, and its JWKS endpoint
+serves every valid local and remote public key. Startup requires the Event Bus
+connection, KV bucket, and initial history. Later connection failures leave
+NVIDIA Workload Identity Keys live but not ready while it reconnects.
+Instances using the same bucket converge on the same aggregate, so relying
+parties can use the JWKS from any reachable NVIDIA Workload Identity Keys.
 
 `--disable-nats` skips the Event Bus connection and serves only the local public
 signing keys. Readiness then depends only on the local key registry. This mode
@@ -47,9 +50,9 @@ JWKS endpoint for the shard that issued its tokens.
 ```mermaid
 flowchart TB
   RP["External relying party"]
-  E1["DSX Identity Keys Deployment<br/>shard-a"]
-  E2["DSX Identity Keys Deployment<br/>shard-b"]
-  E3["DSX Identity Keys Deployment<br/>shard-c"]
+  E1["NVIDIA Workload Identity<br/>Keys Deployment<br/>shard-a"]
+  E2["NVIDIA Workload Identity<br/>Keys Deployment<br/>shard-b"]
+  E3["NVIDIA Workload Identity<br/>Keys Deployment<br/>shard-c"]
   BUS["External DSX Event Bus<br/>NATS KV bucket"]
 
   RP -->|"one aggregate JWKS"| E2
@@ -58,35 +61,36 @@ flowchart TB
   E3 <-->|"local keys out, all public keys in"| BUS
 ```
 
-The local E2E fixture uses two DSX Identity Keys instances in the same subject space:
+The local E2E fixture uses two NVIDIA Workload Identity Keys instances in the
+same subject space:
 
 ```mermaid
 flowchart LR
-    K1["k1 DSX Identity Keys Pod"] -->|"local public keys"| Bus["NATS KV bucket"]
-    K2["k2 DSX Identity Keys Pod"] -->|"local public keys"| Bus
+    K1["k1 NVIDIA Workload Identity<br/>Keys Pod"] -->|"local public keys"| Bus["NATS KV bucket"]
+    K2["k2 NVIDIA Workload Identity<br/>Keys Pod"] -->|"local public keys"| Bus
     Bus -->|"initial replay and watched updates"| K1
     Bus -->|"initial replay and watched updates"| K2
     K1 --> J1["k1 aggregate JWKS"]
     K2 --> J2["k2 aggregate JWKS"]
 ```
 
-Public keys use NATS KV keys of the form
-`shard.<shard-id>.kid.<kid>`. Each value is one public JWK. The bucket keeps one
-revision per key and applies the configured TTL. Each instance refreshes its
-local entries every quarter of that TTL, leaving three further write
-opportunities before expiry. Each instance starts an updates-only watch before
-loading `History`, so concurrent writes queue while current values are loaded.
-If the watcher closes, its replacement uses the same ordering. Each valid entry
-replaces the globally unique `kid` it addresses. NATS connections use either no
-authentication or OAuth2 client credentials. OAuth2 mode reads a
-JSON credentials file containing non-empty `client_id` and `client_secret`
-fields, discovers the token endpoint from the configured issuer, and rereads
-the credentials when the cached access token expires. OAuth scopes are
-configurable, and an empty scope list sends no scope parameter. The access
-token is sent through native NATS token authentication. Production DSX Exchange
-deployments place DSX Identity Keys clients in a dedicated NATS account, which
-provides the account boundary and JetStream capacity used by the KV bucket.
-Basic authentication is not supported. Private, malformed, unsupported, and
+Public keys use NATS KV keys of the form `shard.<shard-id>.kid.<kid>`. Each
+value is one public JWK. The bucket keeps one revision per key and applies the
+configured TTL. Each instance refreshes its local entries every quarter of
+that TTL, leaving three further write opportunities before expiry. Each
+instance starts an updates-only watch before loading `History`, so concurrent
+writes queue while current values are loaded. If the watcher closes, its
+replacement uses the same ordering. Each valid entry replaces the globally
+unique `kid` it addresses. NATS connections use either no authentication or
+OAuth2 client credentials. OAuth2 mode reads a JSON credentials file
+containing non-empty `client_id` and `client_secret` fields, discovers the
+token endpoint from the configured issuer, and rereads the credentials when
+the cached access token expires. OAuth scopes are configurable, and an empty
+scope list sends no scope parameter. The access token is sent through native
+NATS token authentication. Production deployments place NVIDIA Workload
+Identity Keys clients in a dedicated NATS account, which provides the account
+boundary and JetStream capacity used by the KV bucket. Basic
+authentication is not supported. Private, malformed, unsupported, and
 mismatched keys do not replace a valid aggregate entry.
 
 The identity chart deploys two active replicas per shard through
@@ -102,10 +106,11 @@ External secret automation requests
 {"keys":["-----BEGIN EC PRIVATE KEY-----\n...\n-----END EC PRIVATE KEY-----\n"]}
 ```
 
-DSX Identity Keys derives each `kid` from the SHA-256 public JWK thumbprint and
-accepts SEC 1 EC, PKCS#1 RSA, and PKCS#8 asymmetric private keys. The separate
-`active-kid.json` Secret entry selects one loaded key and the JOSE algorithm
-for the Transit key ring. Every loaded key must support that algorithm:
+NVIDIA Workload Identity Keys derives each `kid` from the SHA-256 public JWK
+thumbprint and accepts SEC 1 EC, PKCS#1 RSA, and PKCS#8 asymmetric private
+keys. The separate `active-kid.json` Secret entry selects one loaded key and
+the JOSE algorithm for the Transit key ring. Every loaded key must support
+that algorithm:
 
 ```json
 {"active_kid":"<kid>","alg":"ES256"}
@@ -140,10 +145,10 @@ local SPIRE JWT-SVID is the credential being exchanged.
 
 The exchange form requires `grant_type`, `subject_token`, and
 `subject_token_type`. It accepts the optional `requested_token_type`, caps
-request bodies at 1 MiB.
-Audience is preserved from the validated SVID. DSX Identity Keys does not accept an
-audience override or apply a relying-party audience allowlist. Error responses
-do not expose parser or verifier details.
+request bodies at 1 MiB. Audience is preserved from the validated SVID. NVIDIA
+Workload Identity Keys does not accept an audience override or apply a
+relying-party audience allowlist. Error responses do not expose parser or
+verifier details.
 
 ## Flags
 

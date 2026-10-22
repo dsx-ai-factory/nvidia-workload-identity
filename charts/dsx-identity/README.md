@@ -1,4 +1,4 @@
-# DSX Identity Helm chart
+# NVIDIA Workload Identity Helm chart
 
 Parent chart for one identity shard: SPIRE, Identity Keys, identity injection,
 the Identity Controller, Kata support, and DPF child-chart resources.
@@ -26,7 +26,7 @@ global:
   dsx:
     # Issuer placed in exchanged DSX JWTs.
     jwtIssuer: https://identity.example.com
-    # Deployment coordinates encoded in exchanged DSX identity trust domains.
+    # Deployment coordinates encoded in exchanged DSX JWT trust domains.
     region: region-1
     partition: example.com
     # Service used when a source has no explicit service label.
@@ -199,8 +199,9 @@ and `sandbox_cgroup_only = true`. The default `nodeSelector` targets
 Each matched consumer namespace must contain Secrets with the same names.
 
 Native Kubernetes admission policies inject identity sidecars and prevent
-application containers from mounting the Workload API or DSX Identity Keys
-Proxy sockets. Validation enforces operator Pod service and role label formats.
+application containers from mounting the Workload API or NVIDIA Workload
+Identity Keys Proxy sockets. Validation enforces operator Pod service and role
+label formats.
 
 ## Deploy
 

@@ -1,4 +1,4 @@
-DSX identity has been deployed.
+NVIDIA Workload Identity has been deployed.
 
 Trust Domain: {{ .Values.global.spire.trustDomain }}
 Cluster Name: {{ .Values.global.spire.clusterName }}
@@ -6,7 +6,7 @@ Operator Tenant: {{ .Values.global.operatorTenant }}
 
 Components:
   - SPIRE: {{ if .Values.spire.enabled }}enabled{{ else }}disabled{{ end }}
-  - DSX Identity Keys: {{ if .Values.identityKeys.enabled }}enabled{{ else }}disabled{{ end }}
+  - NVIDIA Workload Identity Keys: {{ if .Values.identityKeys.enabled }}enabled{{ else }}disabled{{ end }}
   - Pod token-fetcher injection: {{ if .Values.podTokenFetcher.enabled }}enabled{{ else }}disabled{{ end }}
   - VM support: {{ if .Values.vmSupport.enabled }}enabled{{ else }}disabled{{ end }}
   - Identity controller: {{ if .Values.identityController.enabled }}enabled{{ else }}disabled{{ end }}
