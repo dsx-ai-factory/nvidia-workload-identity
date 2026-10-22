@@ -46,7 +46,8 @@ spec:
           imagePullPolicy: {{ .Values.vmSupport.socat.image.pullPolicy }}
           args:
             # CSI consumers share no supplemental group, so any container UID must connect.
-            - UNIX-LISTEN:/run/dsx/identity-keys.sock,fork,mode=0777
+            # The hostPath retains the socket after an abrupt proxy stop.
+            - UNIX-LISTEN:/run/dsx/identity-keys.sock,fork,mode=0777,unlink-early
             - {{ $identityKeysTarget | quote }}
           resources:
             {{- toYaml .Values.vmSupport.resources.identityKeysProxy | nindent 12 }}
