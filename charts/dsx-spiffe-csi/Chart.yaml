@@ -5,5 +5,5 @@ type: application
 version: 0.1.0
 appVersion: "0.2.7"
 sources:
-  - https://github.com/dsx-ai-factory/project-dsx-identity
+  - https://github.com/dsx-ai-factory/nvidia-workload-identity
   - https://github.com/spiffe/helm-charts-hardened/tree/aabc73b1e51976d6115fa1291b71889010ee64f9/charts/spire/charts/spiffe-csi-driver
