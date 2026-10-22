@@ -154,7 +154,7 @@ func run() (runErr error) {
 		audience        = flag.String("audience", "spiffe://example.org", "JWT audience")
 		outputPath      = flag.String("output", "/run/secrets/nvidia.com/dsx/token", "output file path for the DSX JWT")
 		logLevel        slog.Level
-		identityKeysURL = flag.String("identity-keys-url", "", "RFC 8693 endpoint of DSX Identity Keys")
+		identityKeysURL = flag.String("identity-keys-url", "", "RFC 8693 endpoint of NVIDIA Workload Identity Keys")
 		healthPort      = flag.Int("health-port", 8080, "Port for the /healthz endpoint")
 		svidHint        = flag.String("svid-hint", "", "Optional exact JWT-SVID hint override")
 	)

@@ -1,4 +1,4 @@
-# DSX Identity agent guide
+# NVIDIA Workload Identity agent guide
 
 The source repository is `https://github.com/dsx-ai-factory/nvidia-workload-identity`.
 Use `gh` for pull requests, GitHub Actions, and release status. The GitLab
@@ -17,6 +17,7 @@ repository is a legacy mirror.
 
 ## Prose, comments, and documentation
 
+- Use NVIDIA Workload Identity as the project name in prose.
 - Write compact, factual sentences with plain words and active verbs. Match the
   surrounding comments and documentation. Remove words that add no information.
 - State supported behavior directly. Avoid AI-speak, marketing language, vague
@@ -113,8 +114,8 @@ repository is a legacy mirror.
 - Use focused unit or integration tests for protocol matrices, lifecycle behavior,
   rotation, expiry, and reconciliation. Keep E2E focused on deployed integration
   contracts in the [local test guide](local-e2e-tests/README.md#local-e2e).
-- Do not validate third-party behavior beyond the DSX Identity contract that
-  consumes it.
+- Do not validate third-party behavior beyond the NVIDIA Workload Identity
+  contract that consumes it.
 - Use real positive-path components. Do not substitute fake metadata responders,
   test signers, directly signed tokens, or test-only authentication paths.
 - Run `make validate` for code or configuration changes and complete required CI

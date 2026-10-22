@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Verify cross-shard DSX Identity Keys, Event Bus, and OpenBao behavior.
+# Verify cross-shard NVIDIA Workload Identity Keys, Event Bus, and OpenBao behavior.
 
 set -euo pipefail
 
@@ -318,11 +318,11 @@ assert_full_aggregates() {
             ' >/dev/null; then
             verify_tokens_with_jwks "${k1_jwks}" "$@"
             verify_tokens_with_jwks "${k2_jwks}" "$@"
-            log_success "Both DSX Identity Keys instances serve the complete aggregate and verify every required shard token"
+            log_success "Both NVIDIA Workload Identity Keys instances serve the complete aggregate and verify every required shard token"
             return 0
         fi
     done
-    log_error "DSX Identity Keys aggregates did not converge with every required key"
+    log_error "NVIDIA Workload Identity Keys aggregates did not converge with every required key"
     return 1
 }
 
@@ -362,11 +362,11 @@ main() {
     assert_token_contract k1 "${k1_token}" "${k1_subject}"
     assert_token_contract k2 "${k2_token}" "${k2_subject}"
     [[ "$(token_kid "${k1_token}")" == "${K1_ORIGINAL_KID}" ]] || {
-        log_error "k1 Pod did not use the k1 DSX Identity Keys signing key"
+        log_error "k1 Pod did not use the k1 NVIDIA Workload Identity Keys signing key"
         return 1
     }
     [[ "$(token_kid "${k2_token}")" == "${K2_ORIGINAL_KID}" ]] || {
-        log_error "k2 Pod did not use the k2 DSX Identity Keys signing key"
+        log_error "k2 Pod did not use the k2 NVIDIA Workload Identity Keys signing key"
         return 1
     }
     log_timing "Pod token delivery" "${stage_started}"
@@ -383,13 +383,13 @@ main() {
         "${K2_SPIRE_NAMESPACE}")
     local_k1_token=$(exchange_spire_svid "${K1_IDENTITY_KEYS_URL}" "${k1_spire_svid}")
     local_k2_token=$(exchange_spire_svid "${K2_IDENTITY_KEYS_URL}" "${k2_spire_svid}")
-    assert_token_contract "k1 SPIRE JWT-SVID through k1 DSX Identity Keys" "${local_k1_token}" "${k1_subject}"
-    assert_token_contract "k2 SPIRE JWT-SVID through k2 DSX Identity Keys" "${local_k2_token}" "${k2_spire_subject}"
+    assert_token_contract "k1 SPIRE JWT-SVID through k1 NVIDIA Workload Identity Keys" "${local_k1_token}" "${k1_subject}"
+    assert_token_contract "k2 SPIRE JWT-SVID through k2 NVIDIA Workload Identity Keys" "${local_k2_token}" "${k2_spire_subject}"
     [[ "$(token_kid "${local_k1_token}")" == "${K1_ORIGINAL_KID}" ]] || return 1
     [[ "$(token_kid "${local_k2_token}")" == "${K2_ORIGINAL_KID}" ]] || return 1
-    assert_exchange_rejects "k2 SPIRE JWT-SVID at k1 DSX Identity Keys" \
+    assert_exchange_rejects "k2 SPIRE JWT-SVID at k1 NVIDIA Workload Identity Keys" \
         "${K1_IDENTITY_KEYS_URL}" "${k2_spire_svid}"
-    assert_exchange_rejects "k1 SPIRE JWT-SVID at k2 DSX Identity Keys" \
+    assert_exchange_rejects "k1 SPIRE JWT-SVID at k2 NVIDIA Workload Identity Keys" \
         "${K2_IDENTITY_KEYS_URL}" "${k1_spire_svid}"
     generic_svid=$(fetch_spire_jwt_svid \
         "${K2_CONTEXT}" "${K2_SPIRE_POD}" \

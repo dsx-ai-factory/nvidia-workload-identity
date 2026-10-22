@@ -9,15 +9,15 @@ sequenceDiagram
     participant DI as DSX IMDS process
     participant DA as External DPU SPIRE agent<br/>runtime WorkloadAttestor
     participant NI as Paired DPU intercept and NICo IMDS
-    participant EX as Shard-local DSX Identity Keys Pod
+    participant EX as Shard-local NVIDIA Workload Identity Keys Pod
     participant AP as dsx_imds NodeAttestor agent plugin
     participant HA as Bare-metal host SPIRE agent
     participant SS as Local SPIRE server Pod
     participant SP as dsx_imds NodeAttestor server plugin
-    participant JWKS as Reachable DSX Identity Keys aggregate JWKS endpoint
+    participant JWKS as Reachable NVIDIA Workload Identity Keys aggregate JWKS endpoint
     DI->>DA: Request host SPIRE JWT-SVID by dsx-imds hint
     DA-->>DI: Local host SPIRE JWT-SVID
-    DI->>EX: DSX Identity Keys local SPIRE JWT-SVID
+    DI->>EX: NVIDIA Workload Identity Keys local SPIRE JWT-SVID
     EX-->>DI: Host DSX JWT
     HA->>AP: Begin node attestation
     AP->>NI: GET link-local identity with Metadata: true

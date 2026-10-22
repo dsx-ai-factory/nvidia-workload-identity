@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# DSX identity Makefile
+# NVIDIA Workload Identity Makefile
 
 .PHONY: preflight local-registry
 .PHONY: help install install-skaffold preload-vm-disk clean
@@ -19,7 +19,7 @@ KATA_UDS_PROXY := --manifest-path kata-uds-proxy/Cargo.toml
 
 # Default target
 help: ## Show this help message
-	@echo "DSX identity"
+	@echo "NVIDIA Workload Identity"
 	@echo "========================================"
 	@echo ""
 	@echo "Available targets:"
@@ -130,7 +130,8 @@ chart-dependencies:
 	@$(MISE_EXEC) ./local-e2e-tests/prepare-chart-dependencies.sh
 
 # ============================================================
-# Multi-cluster environment with independent SPIRE and DSX Identity Keys shards
+# Multi-cluster environment with independent SPIRE and
+# NVIDIA Workload Identity Keys shards
 # ============================================================
 
 # The documented parallel make invocation overlaps the VM disk pull with the

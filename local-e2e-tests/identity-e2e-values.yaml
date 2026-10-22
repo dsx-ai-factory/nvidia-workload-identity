@@ -65,7 +65,7 @@ identityKeys:
     - key: node-role.kubernetes.io/control-plane
       operator: Exists
       effect: NoSchedule
-  # The external E2E test process reaches DSX Identity Keys through the Kind node.
+  # The external E2E test process reaches NVIDIA Workload Identity Keys through the Kind node.
   service:
     type: NodePort
     nodePort: 30080

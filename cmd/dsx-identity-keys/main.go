@@ -315,7 +315,7 @@ func run() (runErr error) {
 		signingKeyset         = flag.String("signing-keyset", "/run/secrets/dsx-identity-keys/keyset.json", "private signing keyset file")
 		fileWatchPollInterval = flag.Duration("file-watch-poll-interval", 30*time.Second, "file watcher polling interval")
 		activeKID             = flag.String("active-kid", "/run/secrets/dsx-identity-keys-active-kid/active-kid.json", "JSON file containing the active signing kid and algorithm")
-		shardID               = flag.String("shard-id", "", "stable DSX Identity Keys shard identifier")
+		shardID               = flag.String("shard-id", "", "stable NVIDIA Workload Identity Keys shard identifier")
 		disableNATS           = flag.Bool("disable-nats", false, "disable NATS public key synchronization")
 		natsServer            = flag.String("nats-server", "", "NATS server URL")
 		natsClientName        = flag.String("nats-client-name", "", "NATS client name (defaults to dsx-identity-keys-<shard-id>)")
@@ -385,7 +385,7 @@ func run() (runErr error) {
 
 	server, err := newIdentityKeysServer(ctx, *issuer, *region, *partition, signingKeys, publicRegistry, *socketPath, *jwksURL)
 	if err != nil {
-		return fmt.Errorf("create DSX Identity Keys server: %w", err)
+		return fmt.Errorf("create NVIDIA Workload Identity Keys server: %w", err)
 	}
 	defer func() {
 		if err := server.Close(); err != nil {
@@ -400,7 +400,7 @@ func run() (runErr error) {
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	slog.Info("Starting DSX Identity Keys",
+	slog.Info("Starting NVIDIA Workload Identity Keys",
 		"listen_addr", *listenAddr,
 		"issuer", *issuer,
 		"shard_id", *shardID,
@@ -418,14 +418,14 @@ func run() (runErr error) {
 		return serveHTTP(runContext, httpServer)
 	})
 	if err := group.Wait(); err != nil {
-		return fmt.Errorf("run DSX Identity Keys: %w", err)
+		return fmt.Errorf("run NVIDIA Workload Identity Keys: %w", err)
 	}
 	return nil
 }
 
 func main() {
 	if err := run(); err != nil {
-		slog.Error("DSX Identity Keys failed", "error", err)
+		slog.Error("NVIDIA Workload Identity Keys failed", "error", err)
 		os.Exit(1)
 	}
 }

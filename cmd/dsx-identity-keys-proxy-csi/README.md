@@ -1,22 +1,22 @@
-# DSX Identity Keys Proxy CSI Driver
+# NVIDIA Workload Identity Keys Proxy CSI Driver
 
 `dsx-identity-keys-proxy-csi` is a node-local CSI driver for read-only
 ephemeral inline volumes. It bind mounts the directory containing the local
-DSX Identity Keys Proxy Unix socket into a consumer Pod.
+NVIDIA Workload Identity Keys Proxy Unix socket into a consumer Pod.
 
 ```mermaid
 flowchart LR
-    Proxy["Node-local DSX Identity Keys Proxy container"] -->|"identity-keys.sock"| SocketDir["Node-local socket directory"]
+    Proxy["Node-local<br/>NVIDIA Workload Identity<br/>Keys Proxy container"] -->|"identity-keys.sock"| SocketDir["Node-local socket directory"]
     Kubelet["Kubernetes kubelet process"] -->|"NodePublishVolume"| Driver["dsx-identity-keys-proxy-csi DaemonSet Pod"]
     Driver -->|"bind mount for read-only CSI request"| Consumer["virt-launcher DSX IMDS sidecar"]
     SocketDir --> Driver
     Consumer -->|"HTTP over Unix socket"| Proxy
-    Proxy -->|"verified TLS"| IdentityKeys["Shard-local DSX Identity Keys"]
+    Proxy -->|"verified TLS"| IdentityKeys["Shard-local<br/>NVIDIA Workload Identity<br/>Keys"]
 ```
 
 The identity chart deploys the driver, node-driver-registrar, and proxy in
 `charts/dsx-identity/templates/vm-support.yaml`. The VM DSX IMDS sidecar uses
-the mounted socket to reach its local DSX Identity Keys.
+the mounted socket to reach its local NVIDIA Workload Identity Keys.
 
 ## Flags
 

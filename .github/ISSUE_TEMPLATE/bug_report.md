@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Something in nvidia-workload-identity does not work as documented
+about: Something in NVIDIA Workload Identity does not work as documented
 labels: bug
 ---
 

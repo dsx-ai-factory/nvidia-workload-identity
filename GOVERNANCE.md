@@ -2,8 +2,8 @@
 
 ## Who decides
 
-dsx-ai-factory/nvidia-workload-identity is maintained by the team listed in
-CODEOWNERS. A change needs review from a code owner for the paths it touches.
+NVIDIA Workload Identity is maintained by the team listed in CODEOWNERS. A
+change needs review from a code owner for the paths it touches.
 
 ## Becoming a maintainer
 
