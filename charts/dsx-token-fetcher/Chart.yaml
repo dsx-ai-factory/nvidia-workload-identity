@@ -7,4 +7,4 @@ appVersion: "0.1.0"
 # TODO: Raise this to >=1.36 when DPF Kamaji reaches Kubernetes 1.36.
 kubeVersion: ">=1.35.0-0"
 sources:
-  - https://github.com/dsx-ai-factory/project-dsx-identity
+  - https://github.com/dsx-ai-factory/nvidia-workload-identity

@@ -2,7 +2,8 @@
 
 ## The standard
 
-Contributors to dsx-ai-factory/project-dsx-identity are expected to treat each other professionally.
+Contributors to dsx-ai-factory/nvidia-workload-identity are expected to treat
+each other professionally.
 Harassment, personal attacks, and discrimination are not tolerated, in this
 repository or in any venue where it is discussed.
 

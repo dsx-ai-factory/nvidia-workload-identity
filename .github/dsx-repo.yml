@@ -1,7 +1,7 @@
 apiVersion: dsx-repo-guide/v1
 target_gate: open_source_ready
 org: dsx-ai-factory
-repo: project-dsx-identity
+repo: nvidia-workload-identity
 
 codeowners:
   - paths: ["*"]
