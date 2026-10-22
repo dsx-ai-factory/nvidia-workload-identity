@@ -14,7 +14,7 @@ permissions:
 jobs:
   promote:
     if: >-
-      github.repository == 'dsx-ai-factory/project-dsx-identity' &&
+      github.repository == 'dsx-ai-factory/nvidia-workload-identity' &&
       github.ref == 'refs/heads/master' &&
       vars.DSX_RELEASE_MODE == 'rc-promotion'
     permissions:

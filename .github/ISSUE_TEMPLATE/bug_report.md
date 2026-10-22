@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Something in project-dsx-identity does not work as documented
+about: Something in nvidia-workload-identity does not work as documented
 labels: bug
 ---
 

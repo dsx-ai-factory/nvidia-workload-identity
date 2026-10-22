@@ -1,6 +1,6 @@
 # DSX Identity agent guide
 
-The source repository is `https://github.com/dsx-ai-factory/project-dsx-identity`.
+The source repository is `https://github.com/dsx-ai-factory/nvidia-workload-identity`.
 Use `gh` for pull requests, GitHub Actions, and release status. The GitLab
 repository is a legacy mirror.
 
