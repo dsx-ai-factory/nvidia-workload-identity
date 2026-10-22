@@ -1,21 +1,21 @@
 # DSX IMDS
 
-`metadata-service` implements DSX IMDS. It serves DSX identity through the
+`metadata-service` implements DSX IMDS. It serves DSX JWTs through the
 link-local IMDS v1 API, selects a local SPIRE JWT-SVID by hint, exchanges it,
-and returns the DSX JWT. KubeVirt uses DSX Identity Keys Proxy CSI. Paired-DPU
-placement uses a direct URL to its reachable shard-local DSX Identity Keys.
-Each process configures exactly one `--identity-keys-url`, whose scheme selects
-the transport.
-For a Unix proxy to an HTTPS virtual host, set `--identity-keys-host` to that
-route's DNS name so the exchange request carries the matching HTTP Host header.
+and returns the DSX JWT. KubeVirt uses NVIDIA Workload Identity Keys Proxy
+CSI. Paired-DPU placement uses a direct URL to its reachable shard-local
+NVIDIA Workload Identity Keys. Each process configures exactly one
+`--identity-keys-url`, whose scheme selects the transport. For a Unix proxy to
+an HTTPS virtual host, set `--identity-keys-host` to that route's DNS name so
+the exchange request carries the matching HTTP Host header.
 
 ```mermaid
 sequenceDiagram
     participant VM as KubeVirt VM external client
     participant MS as virt-launcher DSX IMDS sidecar
     participant SA as dsx_imds-attested host SPIRE agent process
-    participant CSI as DSX Identity Keys Proxy CSI socket
-    participant EX as Shard-local DSX Identity Keys Pod
+    participant CSI as NVIDIA Workload Identity Keys Proxy CSI socket
+    participant EX as Shard-local NVIDIA Workload Identity Keys Pod
     VM->>MS: GET identity with Metadata: true and aud
     MS->>SA: Request local SPIRE JWT-SVID by hint
     SA-->>MS: Local SPIRE JWT-SVID
@@ -35,11 +35,11 @@ For KubeVirt, the guest initiates the metadata request. The operator-owned
 virt-launcher Pod and tenant-facing VM identities use the same operator worker
 host's Workload API. The Pod keeps the configured operator tenant while the VM
 identity uses the tenant supplied by its LaunchLayer source. The exact
-`dsx-imds-vm` hint selects the VM identity. It does not select a separate SPIRE
-agent path. The Kubernetes WorkloadAttestor serves the operator virt-launcher
-Pod identity, SPIFFE CSI exposes the same host agent socket to the sidecar, and
-DSX Identity Keys Proxy CSI carries the exchange request to the shard-local DSX
-Identity Keys.
+`dsx-imds-vm` hint selects the VM identity. It does not select a separate
+SPIRE agent path. The Kubernetes WorkloadAttestor serves the operator
+virt-launcher Pod identity, SPIFFE CSI exposes the same host agent socket to
+the sidecar, and NVIDIA Workload Identity Keys Proxy CSI carries the exchange
+request to the shard-local NVIDIA Workload Identity Keys.
 
 ## VM identity trust path
 
@@ -51,8 +51,8 @@ flowchart TB
   HostAgent["Bare-metal host SPIRE agent process"]
   CSI["SPIFFE CSI node plugin Pod"]
   VMMetadata["virt-launcher Pod<br/>DSX IMDS (metadata-service) sidecar"]
-  Proxy["DSX Identity Keys Proxy CSI<br/>node plugin Pod"]
-  IdentityKeys["Shard-local DSX Identity Keys"]
+  Proxy["NVIDIA Workload Identity<br/>Keys Proxy CSI<br/>node plugin Pod"]
+  IdentityKeys["Shard-local<br/>NVIDIA Workload Identity<br/>Keys"]
   VMJWT["VM SPIRE JWT-SVID"]
   DSXJWT["VM DSX JWT"]
   VM["KubeVirt VM"]
@@ -77,8 +77,8 @@ flowchart TB
   HostAgent["Bare-metal host SPIRE agent process"]
   CSI["Host-provisioned SPIFFE CSI<br/>node plugin Pod"]
   Metadata["virt-launcher Pod<br/>DSX IMDS (metadata-service) sidecar"]
-  Proxy["DSX Identity Keys Proxy CSI<br/>node plugin Pod"]
-  IdentityKeys["Shard-local DSX Identity Keys Deployment"]
+  Proxy["NVIDIA Workload Identity<br/>Keys Proxy CSI<br/>node plugin Pod"]
+  IdentityKeys["Shard-local<br/>NVIDIA Workload Identity<br/>Keys Deployment"]
   VMJWT["VM SPIRE JWT-SVID"]
   DSXJWT["VM DSX JWT"]
   VM["KubeVirt VM guest"]
@@ -125,7 +125,7 @@ checks, not a replacement for that network boundary.
 | Flag | Default | Purpose |
 | --- | --- | --- |
 | `--listen` | `:80` | HTTP listen address |
-| `--identity-keys-url` | required | RFC 8693 HTTP endpoint, or `unix:///path/to/socket` for DSX Identity Keys Proxy CSI |
+| `--identity-keys-url` | required | RFC 8693 HTTP endpoint, or `unix:///path/to/socket` for NVIDIA Workload Identity Keys Proxy CSI |
 | `--spire-socket` | `/var/run/secrets/spire.io/spire-agent.sock` | SPIRE Workload API socket path |
 | `--svid-hint` | `dsx-imds` | Exact identity hint, either `dsx-imds` or `dsx-imds-vm` |
 | `--log-level` | `info` | JSON log level: `debug`, `info`, `warn`, or `error` |

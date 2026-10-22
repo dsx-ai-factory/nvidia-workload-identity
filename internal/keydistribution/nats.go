@@ -27,7 +27,7 @@ const (
 	// The watch filter shard.> receives every shard's stored keys.
 	keyKVWildcard           = keyKVPrefix + ">"
 	natsReconnectWait       = time.Second
-	natsKVBucketDescription = "DSX Identity Keys public signing keys"
+	natsKVBucketDescription = "NVIDIA Workload Identity Keys public signing keys"
 )
 
 type Synchronizer struct {

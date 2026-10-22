@@ -106,14 +106,14 @@ func newExchangeClient(exchangeURL, unixHTTPHost string) (*exchangeClient, error
 	}
 	u, err := url.Parse(exchangeURL)
 	if err != nil {
-		return nil, fmt.Errorf("parse DSX Identity Keys URL: %w", err)
+		return nil, fmt.Errorf("parse NVIDIA Workload Identity Keys URL: %w", err)
 	}
 	if u.Scheme == "unix" {
 		if unixHTTPHost == "" {
 			unixHTTPHost = "exchange"
 		}
 		if !exchangeHostPattern.MatchString(unixHTTPHost) {
-			return nil, fmt.Errorf("invalid DSX Identity Keys Unix HTTP host %q", unixHTTPHost)
+			return nil, fmt.Errorf("invalid NVIDIA Workload Identity Keys Unix HTTP host %q", unixHTTPHost)
 		}
 		return &exchangeClient{
 			endpoint:   "http://" + unixHTTPHost + "/v1/exchange",
@@ -316,8 +316,9 @@ func (s *MetadataServer) handleIdentity(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// The local DSX Identity Keys just minted this token over the CSI socket. Parse its
-	// SPIFFE claims only to expose the subject. Relying parties verify its signature.
+	// The local NVIDIA Workload Identity Keys just minted this token over the CSI
+	// socket. Parse its SPIFFE claims only to expose the subject. Relying parties
+	// verify its signature.
 	dsxJWT, err := jwtsvid.ParseInsecure(exchangeResp.AccessToken, audiences)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "Failed to extract SPIFFE ID from exchanged JWT",
@@ -377,8 +378,8 @@ func run() (runErr error) {
 	flag.TextVar(&logLevel, "log-level", slog.LevelInfo, "log level (debug, info, warn, error)")
 	var (
 		listenAddr       = flag.String("listen", ":80", "HTTP server listen address")
-		identityKeysURL  = flag.String("identity-keys-url", "", "RFC 8693 endpoint of shard-local DSX Identity Keys")
-		identityKeysHost = flag.String("identity-keys-host", "", "HTTP Host for DSX Identity Keys requests over a Unix proxy")
+		identityKeysURL  = flag.String("identity-keys-url", "", "RFC 8693 endpoint of shard-local NVIDIA Workload Identity Keys")
+		identityKeysHost = flag.String("identity-keys-host", "", "HTTP Host for NVIDIA Workload Identity Keys requests over a Unix proxy")
 		spireSocketPath  = flag.String("spire-socket", defaultSpireSocketPath, "Path to SPIRE agent socket")
 		svidHint         = flag.String("svid-hint", "dsx-imds", "Exact JWT-SVID hint (dsx-imds or dsx-imds-vm)")
 	)

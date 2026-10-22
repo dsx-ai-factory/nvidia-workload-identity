@@ -1,14 +1,16 @@
-# DSX identity
+# NVIDIA Workload Identity
 
-DSX Identity turns shard-local SPIRE identities into DSX JWTs that relying
-parties can validate across shards. An identity shard contains an independent
-SPIRE deployment and a co-located DSX Identity Keys deployment. DSX Identity Keys validates only its
-local SPIRE JWT-SVIDs, issues DSX JWTs, and distributes its public signing keys
-through the external DSX Event Bus.
+NVIDIA Workload Identity turns shard-local SPIRE identities into DSX JWTs that
+relying parties can validate across shards. An identity shard contains an
+independent SPIRE deployment and a co-located NVIDIA Workload Identity Keys
+deployment. NVIDIA Workload Identity Keys validates only its local SPIRE
+JWT-SVIDs, issues DSX JWTs, and distributes its public signing keys through
+the external DSX Event Bus.
 
 There is no SPIRE federation between shards. Cross-shard trust starts after
 token exchange, when another shard or relying party validates a DSX JWT with
-the aggregate public keys served by any DSX Identity Keys instance.
+the aggregate public keys served by any NVIDIA Workload Identity Keys
+instance.
 
 ## User guide
 
@@ -19,16 +21,16 @@ For release maintainers, see [Release candidates](#release-candidates).
 
 Component commands and runtime configuration:
 
-- [DSX Identity Controller](cmd/dsx-identity-controller/README.md)
+- [NVIDIA Workload Identity Controller](cmd/dsx-identity-controller/README.md)
 - [DSX IMDS Network Setup](cmd/dsx-imds-network-setup/README.md)
 - [`dsx_imds` NodeAttestor agent plugin](cmd/dsx-imds-node-attestor-agent/README.md)
 - [`dsx_imds` NodeAttestor server plugin](cmd/dsx-imds-node-attestor-server/README.md)
 - [`dpu_hw` NodeAttestor server plugin](third-party/doca-platform-foundation/cmd/dpu-hw-server)
 - [DSX Token Fetcher](cmd/dsx-token-fetcher/README.md)
-- [DSX Identity Keys Proxy CSI Driver](cmd/dsx-identity-keys-proxy-csi/README.md)
+- [NVIDIA Workload Identity Keys Proxy CSI Driver](cmd/dsx-identity-keys-proxy-csi/README.md)
 - [Generate Signing Keyset](cmd/generate-signing-keyset/README.md)
 - [DSX IMDS](cmd/metadata-service/README.md)
-- [DSX Identity Keys](cmd/dsx-identity-keys/README.md)
+- [NVIDIA Workload Identity Keys](cmd/dsx-identity-keys/README.md)
 - [Kata UDS Proxy](kata-uds-proxy/README.md)
 
 ### SPIRE upgrades
@@ -110,11 +112,11 @@ flowchart TB
     Controller -->|"static entries via SPIRE controller-manager"| SPIRE
     DPU -->|"dpu_hw node attestation"| SPIRE
     DPU -->|"Kubernetes workload attestation"| MDS
-    MDS -->|"host DSX identity over IMDS"| Host
+    MDS -->|"host DSX JWT over IMDS"| Host
     Host -->|"dsx_imds node attestation"| SPIRE
     Host -->|"Workload API parent"| Pod
     Host -->|"same Workload API parent"| VMHost
-    VMHost -->|"DSX identity over IMDS"| VM
+    VMHost -->|"DSX JWT over IMDS"| VM
   end
 ```
 
@@ -153,11 +155,11 @@ flowchart TB
   subgraph CSCluster["Common Services cluster"]
     direction TB
     CSSources["DPU and LaunchLayer source CRs<br/>Common Services and Data Hall control plane"]
-    CSController["DSX Identity Controller<br/>leader elected"]
+    CSController["NVIDIA Workload Identity<br/>Controller<br/>leader elected"]
     CSEntries["ClusterStaticEntry CRs"]
     CSPodManager["SPIRE controller-manager<br/>static entries and Pod registrations"]
     CSSPIRE["Common Services SPIRE server<br/>dpu_hw and dsx_imds server plugins"]
-    CSIdentityKeys["Common Services DSX Identity Keys"]
+    CSIdentityKeys["Common Services<br/>NVIDIA Workload Identity<br/>Keys"]
   end
 
   CSSources --> CSController
@@ -209,12 +211,12 @@ flowchart TB
   subgraph DHCluster["Data Hall control-plane cluster"]
     direction TB
     DHSources["DPU and LaunchLayer source CRs<br/>Data Hall capacity"]
-    DHController["DSX Identity Controller<br/>leader elected"]
+    DHController["NVIDIA Workload Identity<br/>Controller<br/>leader elected"]
     DHEntries["ClusterStaticEntry CRs"]
     DHPodManager["SPIRE controller-manager<br/>static entries and Pod registrations"]
     DHSPIRE["Data Hall SPIRE server<br/>dpu_hw and dsx_imds server plugins"]
-    DHIdentityKeys["Data Hall DSX Identity Keys"]
-    DHProxy["DSX Identity Keys Proxy CSI<br/>node plugin Pod"]
+    DHIdentityKeys["Data Hall<br/>NVIDIA Workload Identity<br/>Keys"]
+    DHProxy["NVIDIA Workload Identity<br/>Keys Proxy CSI<br/>node plugin Pod"]
   end
 
   DHSources --> DHController
@@ -252,9 +254,10 @@ dynamically tenant-supplied VM SVID from the same operator host Workload API.
 
 ### Registration parentage
 
-The DSX Identity Controller owns DPU-derived, standalone host, and VM
-`ClusterStaticEntry` CRs. The SPIRE controller-manager registers those entries
-and registers Pods directly from the chart-owned `ClusterSPIFFEID` template.
+The NVIDIA Workload Identity Controller owns DPU-derived, standalone host, and
+VM `ClusterStaticEntry` CRs. The SPIRE controller-manager registers those
+entries and registers Pods directly from the chart-owned `ClusterSPIFFEID`
+template.
 
 Hexagons show inputs, stadiums show attested parent agent IDs, and rectangles
 show static CRs or Pod registration entries. `{service}` comes from
@@ -272,7 +275,7 @@ flowchart TB
       direction TB
       DPUCR{{"INPUT CR<br/>kind: DPU<br/>BM id: carbide.nvidia.com/dpu-machine-id label<br/>agent serial: spec.serialNumber"}}
       DPUParent(["PARENT AGENT ID<br/>type: dpu_hw<br/>spiffe://{td}/spire/agent/dpu_hw/{normalized spec.serialNumber}"])
-      DPUEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: DSX Identity Controller<br/>subject: /tenant/{operator}/service/{service}/bm/{dpu-machine-id}<br/>hint: dsx-imds<br/>selectors: DPU IMDS Kubernetes selectors"]
+      DPUEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: NVIDIA Workload Identity Controller<br/>subject: /tenant/{operator}/service/{service}/bm/{dpu-machine-id}<br/>hint: dsx-imds<br/>selectors: DPU IMDS Kubernetes selectors"]
       DPUCR -->|"derives subject"| DPUEntry
       DPUParent -->|"spec.serialNumber"| DPUEntry
     end
@@ -281,7 +284,7 @@ flowchart TB
       direction TB
       HostSource{{"INPUT CR<br/>kind: BareMetalInstance<br/>tenant: org-id annotation<br/>BM id: spec.instance_id<br/>DPU id and serial: status.primary_dpu"}}
       HostParent(["PARENT AGENT ID<br/>type: dpu_hw<br/>spiffe://{td}/spire/agent/dpu_hw/{normalized DPU serial}"])
-      HostEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: DSX Identity Controller<br/>subject: /tenant/{org-id}/service/{service}/bm/{spec.instance_id}<br/>hint: dsx-imds<br/>selectors: DPU IMDS Kubernetes selectors"]
+      HostEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: NVIDIA Workload Identity Controller<br/>subject: /tenant/{org-id}/service/{service}/bm/{spec.instance_id}<br/>hint: dsx-imds<br/>selectors: DPU IMDS Kubernetes selectors"]
       HostSource -->|"derives subject"| HostEntry
       HostParent -->|"status.primary_dpu.serial_number"| HostEntry
     end
@@ -305,7 +308,7 @@ flowchart TB
       direction TB
       VMSource{{"INPUT CR<br/>kind: VirtualInstance<br/>tenant: org-id annotation<br/>VM id: spec.instance_id<br/>host: spec.node_name<br/>holder: status.pod_uid"}}
       VMParent(["PARENT AGENT ID<br/>type: dsx_imds<br/>spiffe://{td}/spire/agent/dsx_imds/tenant/{operator}/bm/{spec.node_name}"])
-      VMEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: DSX Identity Controller<br/>subject: /tenant/{org-id}/service/{service}/vm/{spec.instance_id}<br/>hint: dsx-imds-vm<br/>selector: Pod UID"]
+      VMEntry["STATIC ENTRY<br/>kind: ClusterStaticEntry<br/>owner: NVIDIA Workload Identity Controller<br/>subject: /tenant/{org-id}/service/{service}/vm/{spec.instance_id}<br/>hint: dsx-imds-vm<br/>selector: Pod UID"]
       VMSource -->|"derives subject"| VMEntry
       VMParent -->|"spec.node_name"| VMEntry
     end
@@ -321,33 +324,34 @@ For a tenant-assigned host, the `BareMetalInstance` supplies the host-to-DPU
 relationship. Its entry replaces the operator fallback derived from the DPU
 resource.
 
-Local consumers exchange local SPIRE JWT-SVIDs with their shard's DSX Identity Keys for
-DSX JWTs. DSX Identity Keys instances share only public signing keys across shards.
+Local consumers exchange local SPIRE JWT-SVIDs with their shard's NVIDIA
+Workload Identity Keys for DSX JWTs. NVIDIA Workload Identity Keys instances
+share only public signing keys across shards.
 
 ```mermaid
 flowchart LR
   Local["dsx-token-fetcher and DSX IMDS"]
-  IdentityKeys["DSX Identity Keys Deployment"]
+  IdentityKeys["NVIDIA Workload Identity<br/>Keys Deployment"]
   Consumers["DPU, host, Pod, and VM consumers"]
 
   Local -->|"local SPIRE JWT-SVID"| IdentityKeys
   IdentityKeys -->|"DSX JWT"| Local
   Local -->|"token file or IMDS"| Consumers
   IdentityKeys <-->|"Public keys in NATS KV (optional)"| Bus["External DSX Event Bus"]
-  Bus <-->|"Public keys in NATS KV"| Peers["Peer shard DSX Identity Keys instances"]
+  Bus <-->|"Public keys in NATS KV"| Peers["Peer shard<br/>NVIDIA Workload Identity<br/>Keys instances"]
   IdentityKeys -->|"public JWKS"| RelyingParty["External relying party"]
 ```
 
 A SPIRE JWT-SVID is a cluster-local credential obtained from the local SPIRE
-Workload API. A DSX JWT is the credential returned by the local DSX Identity Keys.
-SPIRE JWT-SVIDs never establish trust between shards.
+Workload API. A DSX JWT is the credential returned by the local NVIDIA
+Workload Identity Keys. SPIRE JWT-SVIDs never establish trust between shards.
 
-Install the identity chart once per shard. Each regular management cluster that
-owns DPU or LaunchLayer source CRs runs the Identity Controller for its shard.
-Every DSX Identity Keys instance validates only local SPIRE JWT-SVIDs through
-its node-local Workload API. It serves aggregate public keys received through
-the Event Bus when NATS is enabled, or only local public keys when NATS is
-disabled.
+Install the identity chart once per shard. Each regular management cluster
+that owns DPU or LaunchLayer source CRs runs the Identity Controller for its
+shard. Every NVIDIA Workload Identity Keys instance validates only local SPIRE
+JWT-SVIDs through its node-local Workload API. It serves aggregate public keys
+received through the Event Bus when NATS is enabled, or only local public keys
+when NATS is disabled.
 
 The Event Bus, OAuth2 provider, and relying parties are external to the
 identity chart.
@@ -359,9 +363,9 @@ identity chart.
 | [Kubernetes Pod](cmd/dsx-token-fetcher/README.md) | Kubernetes WorkloadAttestor under the worker's `dsx_imds`-attested host agent. The registration uses the operator tenant and worker host subject | The `dsx-token-fetcher` sidecar selects `dsx-pod`, exchanges the local SPIRE JWT-SVID, and writes the DSX JWT to a Pod-private volume mounted read-only in application containers |
 | DPU service Pod | DPF exposes the DPU SPIRE agent through `csi.spiffe.io` | Native admission injects the standard token-fetcher sidecar and token volume |
 | DPU IMDS | The external DPU agent attests through the `dpu_hw` NodeAttestor agent and server. Its Kubernetes WorkloadAttestor binds the paired BM identity to the IMDS Pod | SPIFFE CSI exposes the DPU agent Workload API socket. DSX IMDS selects `dsx-imds`, exchanges the local SPIRE JWT-SVID, and serves the BM DSX JWT through IMDS |
-| [Bare-metal host process](cmd/dsx-imds-node-attestor-agent/README.md) | The DPU agent is attested through `dpu_hw`. The host agent is attested through the repository `dsx_imds` NodeAttestor agent and server, then can serve local processes through the Unix WorkloadAttestor | The paired DPU intercept carries link-local IMDS to NICo IMDS, which passes identity requests to DSX IMDS. DPU-hosted DSX IMDS exchanges directly with its reachable shard-local DSX Identity Keys. The host agent uses the returned DSX JWT for node attestation. A host-process-specific token delivery contract is not currently defined |
+| [Bare-metal host process](cmd/dsx-imds-node-attestor-agent/README.md) | The DPU agent is attested through `dpu_hw`. The host agent is attested through the repository `dsx_imds` NodeAttestor agent and server, then can serve local processes through the Unix WorkloadAttestor | The paired DPU intercept carries link-local IMDS to NICo IMDS, which passes identity requests to DSX IMDS. DPU-hosted DSX IMDS exchanges directly with its reachable shard-local NVIDIA Workload Identity Keys. The host agent uses the returned DSX JWT for node attestation. A host-process-specific token delivery contract is not currently defined |
 | [Kata Containers Pod](kata-uds-proxy/README.md) | The guest is a VM, so `kata-uds-proxy` forwards the host Workload API over vsock | A guest sidecar independently serves the standard Workload API socket path |
-| [KubeVirt VM](cmd/metadata-service/README.md) | The controller derives the VM subject from the dynamically supplied tenant ID and parents it to the operator-owned worker host's `dsx_imds` agent. The Kubernetes WorkloadAttestor serves the operator-owned virt-launcher Pod, and SPIFFE CSI exposes that same agent's Workload API socket | The DSX IMDS sidecar selects the VM SPIRE JWT-SVID by its exact `dsx-imds-vm` hint, exchanges it through DSX Identity Keys Proxy CSI, and serves the DSX JWT through IMDS |
+| [KubeVirt VM](cmd/metadata-service/README.md) | The controller derives the VM subject from the dynamically supplied tenant ID and parents it to the operator-owned worker host's `dsx_imds` agent. The Kubernetes WorkloadAttestor serves the operator-owned virt-launcher Pod, and SPIFFE CSI exposes that same agent's Workload API socket | The DSX IMDS sidecar selects the VM SPIRE JWT-SVID by its exact `dsx-imds-vm` hint, exchanges it through NVIDIA Workload Identity Keys Proxy CSI, and serves the DSX JWT through IMDS |
 
 ## Deployment
 
@@ -380,10 +384,10 @@ security issues through [SECURITY.md](SECURITY.md).
 
 ## Licensing
 
-DSX Identity uses the [Apache License 2.0](LICENSE). Third-party code retains
-its upstream licenses and notices. [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES)
-contains dependency attribution and license texts for Go, Rust, and the
-pinned submodules.
+NVIDIA Workload Identity uses the [Apache License 2.0](LICENSE). Third-party
+code retains its upstream licenses and notices.
+[THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES) contains dependency attribution and
+license texts for Go, Rust, and the pinned submodules.
 
 `make update-licenses` runs SkyWalking Eyes to add source headers and uses
 `go-licenses` and `cargo licenses` to regenerate dependency notices.
@@ -477,8 +481,9 @@ Kubernetes nodes in their Kamaji clusters. The DPU agent's Kubernetes
 WorkloadAttestor identifies the IMDS Pod, and SPIFFE CSI exposes the agent's
 Workload API socket to that Pod.
 
-The [DSX Identity Controller](cmd/dsx-identity-controller/README.md) derives
-SPIRE registration entries from DPU and Launch Layer sources.
+The [NVIDIA Workload Identity
+Controller](cmd/dsx-identity-controller/README.md) derives SPIRE registration
+entries from DPU and Launch Layer sources.
 
 ```yaml
 apiVersion: launchlayer.nvidia.com/v1alpha1
@@ -498,9 +503,9 @@ status:
 configured operator tenant determines a VM entry's worker parent. The Identity
 Controller owns SPIFFE IDs, selectors, hints, and class names.
 
-## DSX Identity Keys and Event Bus
+## NVIDIA Workload Identity Keys and Event Bus
 
-[DSX Identity Keys](cmd/dsx-identity-keys/README.md) validates
+[NVIDIA Workload Identity Keys](cmd/dsx-identity-keys/README.md) validates
 local SPIRE JWT-SVIDs and issues DSX JWTs. By default it publishes public
 signing keys to the Event Bus and serves aggregate JWKS. With NATS disabled it
 serves only local public signing keys. The external Gateway terminates TLS and
@@ -510,14 +515,13 @@ endpoint.
 ## DSX IMDS host and VM flows
 
 [DSX IMDS](cmd/metadata-service/README.md) serves the tokenless host and VM
-identity API. The
-[`dsx_imds` NodeAttestor agent](cmd/dsx-imds-node-attestor-agent/README.md) and
-[`dsx_imds` NodeAttestor server](cmd/dsx-imds-node-attestor-server/README.md)
-bootstrap the host SPIRE agent. The
-[DSX Identity Keys Proxy CSI Driver](cmd/dsx-identity-keys-proxy-csi/README.md) carries VM
-exchange requests, and
-[DSX IMDS Network Setup](cmd/dsx-imds-network-setup/README.md) routes the VM's
-link-local metadata traffic.
+identity API. The [`dsx_imds` NodeAttestor
+agent](cmd/dsx-imds-node-attestor-agent/README.md) and [`dsx_imds`
+NodeAttestor server](cmd/dsx-imds-node-attestor-server/README.md) bootstrap
+the host SPIRE agent. The [NVIDIA Workload Identity Keys Proxy CSI
+Driver](cmd/dsx-identity-keys-proxy-csi/README.md) carries VM exchange
+requests, and [DSX IMDS Network Setup](cmd/dsx-imds-network-setup/README.md)
+routes the VM's link-local metadata traffic.
 
 ## Observability
 

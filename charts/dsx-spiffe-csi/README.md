@@ -25,8 +25,8 @@ IMDS.
 
 ## Deploy
 
-In the parent [DSX Identity chart](../dsx-identity/README.md), enable
-`dpuService.spiffeCsi.enabled` only when the DPU platform does not provide
-`csi.spiffe.io`. The parent chart renders the
-[`DPUService`](../dsx-identity/templates/dpu-service.yaml), and DPF installs this
-chart into selected DPU clusters.
+In the parent [NVIDIA Workload Identity chart](../dsx-identity/README.md),
+enable `dpuService.spiffeCsi.enabled` only when the DPU platform does not
+provide `csi.spiffe.io`. The parent chart renders the
+[`DPUService`](../dsx-identity/templates/dpu-service.yaml), and DPF installs
+this chart into selected DPU clusters.

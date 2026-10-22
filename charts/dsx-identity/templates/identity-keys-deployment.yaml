@@ -136,7 +136,7 @@ spec:
               mountPath: /run/secrets/dsx-identity-keys-nats
               readOnly: true
             {{- end }}
-          # DSX Identity Keys owns its Pod ports, including the metrics listener.
+          # NVIDIA Workload Identity Keys owns its Pod ports, including the metrics listener.
           env:
             - name: POD_NAME
               valueFrom:

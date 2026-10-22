@@ -101,7 +101,7 @@ check_token_contract() {
     if ! jq -e --arg kid "${K2_IDENTITY_KEYS_KID}" '
         .alg == "ES256" and .kid == $kid
     ' <<<"${header}" >/dev/null; then
-        log_error "DSX token was not signed by the k2 DSX Identity Keys active key"
+        log_error "DSX token was not signed by the k2 NVIDIA Workload Identity Keys active key"
         jq . <<<"${header}" 2>/dev/null || true
         return 1
     fi

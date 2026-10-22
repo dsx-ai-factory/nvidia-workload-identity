@@ -1,10 +1,11 @@
-# DSX identity chart. Override the trust domain and cluster name per shard.
+# NVIDIA Workload Identity chart.
+# Override the trust domain and cluster name per shard.
 global:
   imageTag: ""
   dsx:
     # HTTPS issuer placed in exchanged DSX JWTs and accepted for host attestation.
     jwtIssuer: ""
-    # Deployment coordinates encoded in exchanged DSX identity trust domains.
+    # Deployment coordinates encoded in exchanged DSX JWT trust domains.
     region: ""
     partition: ""
     # Default service name for chart-owned and controller-managed identities.
@@ -25,7 +26,8 @@ spire:
   spire-server:
     enabled: true
     # This image extends the pinned upstream SPIRE server image with both DSX
-    # server plugins. Keep its tag aligned with the DSX Identity chart version.
+    # server plugins. Keep its tag aligned with the NVIDIA Workload Identity
+    # chart version.
     image:
       registry: nvcr.io
       repository: 0837451325059433/components-dev/dsx-spire-server
@@ -146,7 +148,8 @@ identityKeys:
   publicKeyTTL: 10m
   # Polling covers file changes missed by filesystem notifications.
   fileWatchPollInterval: 30s
-  # Globally unique across every DSX Identity Keys instance sharing this NATS KV bucket.
+  # Globally unique across every NVIDIA Workload Identity Keys instance sharing
+  # this NATS KV bucket.
   shardID: ""
   # Existing Opaque Secret. keyset.json must contain
   # {"keys":["<PEM-encoded asymmetric private key>", ...]}.

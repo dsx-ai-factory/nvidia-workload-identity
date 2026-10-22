@@ -24,7 +24,7 @@ var (
 func run() (runErr error) {
 	flag.StringVar(&nodeID, "node-id", "", "Node ID")
 	flag.StringVar(&csiSocketPath, "csi-socket-path", "/dsx-identity-keys-proxy-csi/csi.sock", "CSI socket path")
-	flag.StringVar(&socketDir, "socket-dir", "/run/dsx", "Directory containing DSX Identity Keys socket")
+	flag.StringVar(&socketDir, "socket-dir", "/run/dsx", "Directory containing NVIDIA Workload Identity Keys socket")
 	flag.TextVar(&logLevel, "log-level", slog.LevelInfo, "log level (debug, info, warn, error)")
 	flag.Parse()
 
@@ -60,7 +60,7 @@ func run() (runErr error) {
 
 func main() {
 	if err := run(); err != nil {
-		slog.Error("DSX Identity Keys Proxy CSI failed", "error", err)
+		slog.Error("NVIDIA Workload Identity Keys Proxy CSI failed", "error", err)
 		os.Exit(1)
 	}
 }

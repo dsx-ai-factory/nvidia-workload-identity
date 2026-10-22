@@ -7,7 +7,7 @@ annotated DPU service Pods.
 
 - Kubernetes 1.36 or later
 - A `csi.spiffe.io` driver backed by the DPU cluster SPIRE agent
-- A DSX Identity Keys exchange endpoint reachable from DPU service Pods
+- A NVIDIA Workload Identity Keys exchange endpoint reachable from DPU service Pods
 
 ## Configuration
 
