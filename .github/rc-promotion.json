@@ -2,7 +2,7 @@
   "schema": 1,
   "enabled": false,
   "source_workflow": ".github/workflows/release-rc.yml",
-  "source_publisher_sha": "af41644f80052a43837d7c389d39b4a6204ef367",
+  "source_publisher_sha": "911d86017e6e0715cef26cb3105d66c2fcd985fb",
   "source_ngc_path": "0837451325059433/components-dev",
   "destination_ngc_path": "0837451325059433/components-dev",
   "images": [
