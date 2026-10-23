@@ -201,7 +201,7 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: dsx-ai-factory/dsx-github-actions/.github/actions/trufflehog-scan@e8c0885851e9314211f2b3439e827990a46ea593
+      - uses: dsx-ai-factory/dsx-github-actions/.github/actions/trufflehog-scan@af41644f80052a43837d7c389d39b4a6204ef367
         with:
           head: ${{ github.sha }}
           version: 3.91.1
@@ -235,7 +235,7 @@ jobs:
             echo EOF
           } >> "$GITHUB_OUTPUT"
       - name: Build and scan both platforms
-        uses: dsx-ai-factory/dsx-github-actions/.github/actions/docker-build@e8c0885851e9314211f2b3439e827990a46ea593
+        uses: dsx-ai-factory/dsx-github-actions/.github/actions/docker-build@af41644f80052a43837d7c389d39b4a6204ef367
         with:
           image: local/${{ matrix.name }}
           tags: ${{ github.sha }}
@@ -252,4 +252,4 @@ jobs:
 
   release-checks:
     name: RC contract checks
-    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-checks.yml@e8c0885851e9314211f2b3439e827990a46ea593
+    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-checks.yml@af41644f80052a43837d7c389d39b4a6204ef367
