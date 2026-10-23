@@ -165,6 +165,19 @@ assert_token_contract() {
     log_success "${name} token has the canonical issuer, audience, subject, and ES256 header"
 }
 
+assert_token_claims() {
+    local name="$1"
+    local token="$2"
+    local claims="$3"
+    jq -e --argjson claims "${claims}" '
+        with_entries(select(.key | startswith("dsx.nvidia.com/"))) == $claims
+    ' <<<"$(jwt_json_part "${token}" 2)" >/dev/null || {
+        log_error "${name} token subject claims do not match ${claims}"
+        return 1
+    }
+    log_success "${name} token carries the subject claims"
+}
+
 token_kid() {
     jwt_json_part "$1" 1 | jq -er '.kid'
 }
@@ -186,6 +199,27 @@ pod_subject() {
         --context "${context}" -o jsonpath='{.metadata.labels.spiffe\.nvidia\.com/service}')
     printf 'spiffe://%s.ds9.%s.nvid.id/bm/%s/pod/%s' "${tenant}" "${service}" "${node}" "${uid}"
     [[ -z "${role}" ]] || printf '/role/%s' "${role}"
+}
+
+# Print the DSX claims pod_subject's subject carries.
+pod_claims() {
+    local context="$1"
+    local pod="$2"
+    local namespace="${3:-${FIXTURE_NAMESPACE}}"
+    local pod_json
+    pod_json=$(kubectl get pod "${pod}" --namespace "${namespace}" --context "${context}" -o json)
+    jq -c --arg tenant "${OPERATOR_TENANT}" '{
+        "dsx.nvidia.com/tenant": $tenant,
+        "dsx.nvidia.com/region": "ds9",
+        "dsx.nvidia.com/service": .metadata.labels["spiffe.nvidia.com/service"],
+        "dsx.nvidia.com/partition": "nvid.id",
+        "dsx.nvidia.com/resource": ([
+            {resource_type: "bm", resource_id: .spec.nodeName},
+            {resource_type: "pod", resource_id: .metadata.uid}
+        ] + (.metadata.labels["spiffe.nvidia.com/role"] as $role |
+            if $role then [{resource_type: "role", resource_id: $role}] else [] end))
+    }
+    ' <<<"${pod_json}"
 }
 
 internal_pod_subject() {
@@ -361,6 +395,8 @@ main() {
     k2_subject=$(pod_subject "${K2_CONTEXT}" "${K2_POD}")
     assert_token_contract k1 "${k1_token}" "${k1_subject}"
     assert_token_contract k2 "${k2_token}" "${k2_subject}"
+    assert_token_claims k1 "${k1_token}" "$(pod_claims "${K1_CONTEXT}" "${K1_POD}")"
+    assert_token_claims k2 "${k2_token}" "$(pod_claims "${K2_CONTEXT}" "${K2_POD}")"
     [[ "$(token_kid "${k1_token}")" == "${K1_ORIGINAL_KID}" ]] || {
         log_error "k1 Pod did not use the k1 NVIDIA Workload Identity Keys signing key"
         return 1
@@ -385,6 +421,10 @@ main() {
     local_k2_token=$(exchange_spire_svid "${K2_IDENTITY_KEYS_URL}" "${k2_spire_svid}")
     assert_token_contract "k1 SPIRE JWT-SVID through k1 NVIDIA Workload Identity Keys" "${local_k1_token}" "${k1_subject}"
     assert_token_contract "k2 SPIRE JWT-SVID through k2 NVIDIA Workload Identity Keys" "${local_k2_token}" "${k2_spire_subject}"
+    assert_token_claims "k1 SPIRE JWT-SVID through k1 NVIDIA Workload Identity Keys" "${local_k1_token}" \
+        "$(pod_claims "${K1_CONTEXT}" "${K1_POD}")"
+    assert_token_claims "k2 SPIRE JWT-SVID through k2 NVIDIA Workload Identity Keys" "${local_k2_token}" \
+        "$(pod_claims "${K2_CONTEXT}" "${K2_SPIRE_POD}" "${K2_SPIRE_NAMESPACE}")"
     [[ "$(token_kid "${local_k1_token}")" == "${K1_ORIGINAL_KID}" ]] || return 1
     [[ "$(token_kid "${local_k2_token}")" == "${K2_ORIGINAL_KID}" ]] || return 1
     assert_exchange_rejects "k2 SPIRE JWT-SVID at k1 NVIDIA Workload Identity Keys" \

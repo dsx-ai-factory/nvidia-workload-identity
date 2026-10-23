@@ -34,6 +34,12 @@ type Subject struct {
 	Path []string
 }
 
+// Resource is one key/value pair of a subject's resource path.
+type Resource struct {
+	Type string
+	ID   string
+}
+
 // ValidTenant reports whether tenant is an unchanged DNS label.
 func ValidTenant(tenant string) bool {
 	return len(validation.IsDNS1123Label(tenant)) == 0
@@ -78,6 +84,16 @@ func (s Subject) ResourceSegments() ([]string, error) {
 	// Reattach Path unchanged so dpu/dpu-1 plus
 	// [dpuservice, storage, namespace, system] restores the original resource path.
 	return append([]string{string(s.ResourceType), s.ResourceID}, s.Path...), nil
+}
+
+// Resources returns the resource pair followed by each pair of Path, in order.
+// For bm/worker-1/pod/pod-1, it returns [{bm worker-1} {pod pod-1}].
+func (s Subject) Resources() []Resource {
+	resources := []Resource{{Type: string(s.ResourceType), ID: s.ResourceID}}
+	for i := 0; i+1 < len(s.Path); i += 2 {
+		resources = append(resources, Resource{Type: s.Path[i], ID: s.Path[i+1]})
+	}
+	return resources
 }
 
 func (s Subject) validate() error {

@@ -23,6 +23,7 @@ import (
 	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 
+	"dsx-identity/internal/dsxidentity"
 	"dsx-identity/internal/keydistribution"
 	"dsx-identity/internal/keytest"
 	"dsx-identity/internal/signingkey"
@@ -71,7 +72,11 @@ func TestStaticSigningKeysetAndClaims(t *testing.T) {
 		"custom": "not propagated",
 	}
 	subject := spiffeid.RequireFromString("spiffe://operator-1.ds9.dsx.nvid.id/bm/host-1")
-	token, err := server.resignJWT(original, subject)
+	subjectClaims := dsxidentity.SubjectClaims{
+		Tenant:   "operator-1",
+		Resource: []dsxidentity.ResourceClaim{{ResourceType: "bm", ResourceID: "host-1"}},
+	}
+	token, err := server.resignJWT(original, subject, subjectClaims)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,11 +92,13 @@ func TestStaticSigningKeysetAndClaims(t *testing.T) {
 		t.Fatal(err)
 	}
 	rawExpected, err := json.Marshal(map[string]any{
-		"aud": original["aud"],
-		"exp": original["exp"],
-		"iat": original["iat"],
-		"iss": testIssuer,
-		"sub": subject.String(),
+		"aud":                     original["aud"],
+		"exp":                     original["exp"],
+		"iat":                     original["iat"],
+		"iss":                     testIssuer,
+		"sub":                     subject.String(),
+		"dsx.nvidia.com/tenant":   "operator-1",
+		"dsx.nvidia.com/resource": []map[string]string{{"resource_type": "bm", "resource_id": "host-1"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +112,7 @@ func TestStaticSigningKeysetAndClaims(t *testing.T) {
 	}
 
 	otherSubject := spiffeid.RequireFromString("spiffe://tenant-2.ds9.dsx.nvid.id/vm/vm-2")
-	otherToken, err := server.resignJWT(original, otherSubject)
+	otherToken, err := server.resignJWT(original, otherSubject, dsxidentity.SubjectClaims{})
 	if err != nil {
 		t.Fatal(err)
 	}
