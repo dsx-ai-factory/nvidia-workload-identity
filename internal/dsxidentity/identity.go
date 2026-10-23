@@ -100,3 +100,43 @@ func pathSegments(id spiffeid.ID) ([]string, error) {
 	// bm/host-1 becomes [bm, host-1].
 	return strings.Split(path, "/"), nil
 }
+
+// ResourceClaim is one entry of the dsx.nvidia.com/resource claim.
+type ResourceClaim struct {
+	ResourceType string `json:"resource_type"`
+	ResourceID   string `json:"resource_id"`
+}
+
+// SubjectClaims are the claims an exchanged DSX JWT carries for its subject.
+// Each carries one component of the subject, so a claim never disagrees with
+// sub.
+type SubjectClaims struct {
+	Tenant    string          `json:"dsx.nvidia.com/tenant,omitempty"`
+	Region    string          `json:"dsx.nvidia.com/region,omitempty"`
+	Service   string          `json:"dsx.nvidia.com/service,omitempty"`
+	Partition string          `json:"dsx.nvidia.com/partition,omitempty"`
+	Resource  []ResourceClaim `json:"dsx.nvidia.com/resource,omitempty"`
+}
+
+// Claims returns the claims for the subject that ID encodes with the same
+// region and partition. For spiffe://operator-1.ds9.dsx.nvid.id/bm/worker-1/pod/pod-1,
+// it returns tenant operator-1, region ds9, service dsx, partition nvid.id, and
+// resource [{bm worker-1} {pod pod-1}].
+func Claims(subject identity.Subject, region, partition string) (SubjectClaims, error) {
+	if err := ValidateDomain(region, partition); err != nil {
+		return SubjectClaims{}, err
+	}
+	if _, err := subject.ResourceSegments(); err != nil {
+		return SubjectClaims{}, err
+	}
+	claims := SubjectClaims{
+		Tenant:    subject.Tenant,
+		Region:    region,
+		Service:   subject.Service,
+		Partition: partition,
+	}
+	for _, resource := range subject.Resources() {
+		claims.Resource = append(claims.Resource, ResourceClaim{ResourceType: resource.Type, ResourceID: resource.ID})
+	}
+	return claims, nil
+}

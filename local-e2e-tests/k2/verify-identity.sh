@@ -84,11 +84,26 @@ verify_dpu_controller_registration() {
     return 1
 }
 
+# Print the DSX claims of a subject with only a resource pair, such as
+# tenant-2.ds9.dsx.nvid.id/vm/<id>.
+resource_claims() {
+    local tenant="$1" service="$2" resource_type="$3" resource_id="$4"
+    jq -cn --arg tenant "${tenant}" --arg service "${service}" \
+        --arg type "${resource_type}" --arg id "${resource_id}" '{
+          "dsx.nvidia.com/tenant": $tenant,
+          "dsx.nvidia.com/region": "ds9",
+          "dsx.nvidia.com/service": $service,
+          "dsx.nvidia.com/partition": "nvid.id",
+          "dsx.nvidia.com/resource": [{resource_type: $type, resource_id: $id}]
+        }'
+}
+
 # Check the exchanged JWT contract.
 check_token_contract() {
     local token="$1"
     local expected_subject="${2:-${EXPECTED_SPIFFE_ID}}"
     local expected_audience="${3:-${TEST_AUDIENCE}}"
+    local expected_claims="${4:-$(resource_claims tenant-2 dsx vm "${VM_NAME}")}"
     local encoded padding header payload now
 
     encoded=$(cut -d. -f1 <<<"${token}")
@@ -129,6 +144,13 @@ check_token_contract() {
           ((.exp - .iat) <= 300)
         ' <<<"${payload}" >/dev/null; then
         log_error "JWT issuer, audience, subject, or expiry is invalid"
+        jq . <<<"${payload}" 2>/dev/null || true
+        return 1
+    fi
+    if ! jq -e --argjson claims "${expected_claims}" '
+        with_entries(select(.key | startswith("dsx.nvidia.com/"))) == $claims
+      ' <<<"${payload}" >/dev/null; then
+        log_error "JWT subject claims do not match ${expected_claims}"
         jq . <<<"${payload}" 2>/dev/null || true
         return 1
     fi
@@ -234,7 +256,8 @@ EOF
 }
 
 verify_imds_identity() {
-    local pod="$1" expected_subject="$2" endpoint="${3:-http://127.0.0.1:18080}" response="" token deadline=$((SECONDS + 180))
+    local pod="$1" expected_subject="$2" expected_claims="$3" endpoint="${4:-http://127.0.0.1:18080}"
+    local response="" token deadline=$((SECONDS + 180))
 
     while ((SECONDS < deadline)); do
         response=$(kubectl exec "${pod}" -n dsx-identity --context "${CONTEXT}" \
@@ -253,14 +276,15 @@ verify_imds_identity() {
     jq -e --arg subject "${expected_subject}" '.spiffe_id == $subject' \
         <<<"${response}" >/dev/null || return 1
     token=$(jq -er '.token' <<<"${response}") || return 1
-    check_token_contract "${token}" "${expected_subject}" "${HOST_AUDIENCE}" || return 1
+    check_token_contract "${token}" "${expected_subject}" "${HOST_AUDIENCE}" "${expected_claims}" || return 1
 }
 
 verify_operator_host_imds() {
     log_test "Requesting the operator worker-host identity from bootstrap IMDS..."
 
     verify_imds_identity e2e-nico-mds \
-        "spiffe://operator-1.ds9.dsx.nvid.id/bm/${OPERATOR_HOST_ID}" || return 1
+        "spiffe://operator-1.ds9.dsx.nvid.id/bm/${OPERATOR_HOST_ID}" \
+        "$(resource_claims operator-1 dsx bm "${OPERATOR_HOST_ID}")" || return 1
 
     log_success "Operator worker-host IMDS returned the configured tenant and node ID"
 }
@@ -270,6 +294,7 @@ verify_dpu_imds() {
 
     verify_imds_identity e2e-dpu-imds-probe \
         spiffe://operator-1.ds9.dsx.nvid.id/dpu/e2e-dpu-imds \
+        "$(resource_claims operator-1 dsx dpu e2e-dpu-imds)" \
         http://dsx-imds || return 1
 
     log_success "DPU IMDS exchanged its SPIFFE identity"
