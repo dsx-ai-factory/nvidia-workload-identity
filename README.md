@@ -54,9 +54,10 @@ configure the runner, protected release environment, NGC key, and release permis
 
 ### Promote an RC
 
-Promotion is disabled by default. Complete the
+Promotion requires the protected `stable-release` environment and repository variable
+`DSX_RELEASE_MODE=rc-promotion`. Administrators must complete the
 [release setup](https://github.com/dsx-ai-factory/dsx-github-actions/blob/main/docs/promote-rc.md)
-before enabling `.github/rc-promotion.json` and setting `DSX_RELEASE_MODE=rc-promotion`.
+before the first run.
 Keep the promotion workflow and policy on `master`. The release branch must also
 use the same shared publisher revision with `promotion-manifest: true` before
 publishing the RC for QA. Older RCs without that manifest cannot be promoted.
