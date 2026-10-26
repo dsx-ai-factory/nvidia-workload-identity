@@ -58,9 +58,9 @@ Promotion requires the protected `stable-release` environment and repository var
 `DSX_RELEASE_MODE=rc-promotion`. Administrators must complete the
 [release setup](https://github.com/dsx-ai-factory/dsx-github-actions/blob/main/docs/promote-rc.md)
 before the first run.
-Keep the promotion workflow and policy on `master`. The release branch must also
-use the same shared publisher revision with `promotion-manifest: true` before
-publishing the RC for QA. Older RCs without that manifest cannot be promoted.
+Keep the promotion workflow and policy on `master`. The selected RC must use the
+publisher revision recorded in `.github/rc-promotion.json`, with
+`promotion-manifest: true`. Older RCs without that manifest cannot be promoted.
 
 1. Have QA validate a published RC with a successful manifest capture.
 2. Open **Actions > Promote RC > Run workflow**. Select `master` and enter `X.Y.Z-rc.N`.
