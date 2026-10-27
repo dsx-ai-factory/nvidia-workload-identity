@@ -40,8 +40,13 @@ spec:
         kubernetes.io/hostname: k2-worker
       domain:
         cpu:
-          cores: 2
+          cores: 1
         devices:
+          # Match the Alpine RNG and headless defaults in KubeVirt E2E tests.
+          # https://github.com/kubevirt/kubevirt/blob/v1.9.0/tests/libvmifact/factory.go#L87-L95
+          # https://github.com/kubevirt/kubevirt/blob/v1.9.0/tests/testsuite/fixture.go#L179-L182
+          rng: {}
+          autoattachGraphicsDevice: false
           disks:
             - disk:
                 bus: virtio
@@ -63,9 +68,12 @@ spec:
             enabled: true
         resources:
           requests:
-            memory: 2Gi
+            cpu: 100m
+            memory: 160Mi
           limits:
-            memory: 2Gi
+            cpu: "1"
+            # Replace the 32 MiB graphics allowance KubeVirt omits for headless VMs.
+            memory: 192Mi
       networks:
         - name: default
           multus:
@@ -73,13 +81,11 @@ spec:
             default: true
       volumes:
         - containerDisk:
-            image: quay.io/containerdisks/debian:13
+            image: quay.io/kubevirt/alpine-with-test-tooling-container-disk:v1.9.0@sha256:a6f3d9ffffa7d1e4cd19aa80aae21abfc09dd289db854b4098c7ed2e14e21b55
             imagePullPolicy: IfNotPresent
           name: rootdisk
         - cloudInitNoCloud:
             secretRef:
-              name: e2e-debian-vm-cloud-init
-            networkDataSecretRef:
               name: e2e-debian-vm-cloud-init
           name: cloudinit
         - name: vm-service-account

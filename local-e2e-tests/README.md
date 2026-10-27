@@ -99,10 +99,14 @@ socket to fetch the VM SPIRE JWT-SVID.
 
 Both VMs use the same primary layer-3 UDN and real DSX IMDS sidecars. The binding
 name describes the guest's Ethernet attachment, not the UDN topology.
+Both guests use the [KubeVirt Alpine image with test tooling](k2/vm/vm.yaml).
+Each guest has one vCPU and 160 MiB of RAM, a virtual RNG, and no graphics
+device. The memory request is 160 MiB and the limit is 192 MiB before KubeVirt
+adds runtime overhead.
 
 | VM | Binding | Guest network configuration |
 | --- | --- | --- |
-| `e2e-debian-vm` | Built-in `bridge` | KubeVirt DHCP supplies the CNI-assigned address |
+| `e2e-debian-vm` | Built-in `bridge` | Cloud-init uses KubeVirt DHCP for the CNI-assigned address |
 | `e2e-debian-vm-l2bridge` | `l2bridge` with `managedTap` | Cloud-init hook supplies the CNI-assigned address, MAC match, and gateway |
 
 Both bindings create a `k6t-*` bridge and tap, then replace the original CNI
