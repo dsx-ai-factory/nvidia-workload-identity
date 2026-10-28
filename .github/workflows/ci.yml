@@ -97,9 +97,10 @@ jobs:
           free -h
       - name: Configure Zot upstream mirror
         run: |
+          # Zot lists the origin first, but tries its mirrors before the origin.
           # shellcheck disable=SC2016
           mise exec -- jq --arg mirror "$KIND_DOCKERHUB_MIRROR" \
-            '(.extensions.sync.registries[] | select(.urls | index("https://registry-1.docker.io"))).urls = [$mirror, "https://registry-1.docker.io"]' \
+            '(.extensions.sync.registries[] | select(.urls | index("https://registry-1.docker.io"))).urls = ["https://registry-1.docker.io", $mirror]' \
             local-e2e-tests/local-registry/zot-config.json > "$RUNNER_TEMP/zot-config.json"
           echo "ZOT_CONFIG_FILE=$RUNNER_TEMP/zot-config.json" >> "$GITHUB_ENV"
       - name: Docker Hub mirror diagnostics
