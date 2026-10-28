@@ -1,0 +1,531 @@
+include:
+  - component: $CI_SERVER_FQDN/cds/cds-components/helm-package@0.14.1
+    inputs:
+      job-name: helm-package-dsx-identity
+      chart-path: charts/dsx-identity
+      chart-version: $NEXT_VERSION
+      extra-repos:
+        - spiffe: https://spiffe.github.io/helm-charts-hardened/
+      extends: [.helm-package, .helm-package-rule]
+  - component: $CI_SERVER_FQDN/cds/cds-components/helm-push-ngc@0.14.1
+    inputs:
+      job-name: helm-push-ngc-dsx-identity
+      package-job: helm-package-dsx-identity
+      ngc-path: $NGC_HELM_PATH
+      ngc-force: false
+      ngc-key: $NGC_DSX_COMPONENTS_PUSH_KEY
+      extends: [.helm-push-ngc, .helm-push-ngc-rule]
+  - component: $CI_SERVER_FQDN/cds/cds-components/helm-package@0.14.1
+    inputs:
+      job-name: helm-package-dsx-spiffe-csi
+      chart-path: charts/dsx-spiffe-csi
+      chart-version: $NEXT_VERSION
+      extends: [.helm-package, .helm-package-rule]
+  - component: $CI_SERVER_FQDN/cds/cds-components/helm-push-ngc@0.14.1
+    inputs:
+      job-name: helm-push-ngc-dsx-spiffe-csi
+      package-job: helm-package-dsx-spiffe-csi
+      ngc-path: $NGC_HELM_PATH
+      ngc-force: false
+      ngc-key: $NGC_DSX_COMPONENTS_PUSH_KEY
+      extends: [.helm-push-ngc, .helm-push-ngc-rule]
+  - component: $CI_SERVER_FQDN/cds/cds-components/helm-package@0.14.1
+    inputs:
+      job-name: helm-package-dsx-imds
+      chart-path: charts/dsx-imds
+      chart-version: $NEXT_VERSION
+      extends: [.helm-package, .helm-package-rule]
+  - component: $CI_SERVER_FQDN/cds/cds-components/helm-push-ngc@0.14.1
+    inputs:
+      job-name: helm-push-ngc-dsx-imds
+      package-job: helm-package-dsx-imds
+      ngc-path: $NGC_HELM_PATH
+      ngc-force: false
+      ngc-key: $NGC_DSX_COMPONENTS_PUSH_KEY
+      extends: [.helm-push-ngc, .helm-push-ngc-rule]
+  - component: $CI_SERVER_FQDN/cds/cds-components/helm-package@0.14.1
+    inputs:
+      job-name: helm-package-dsx-token-fetcher
+      chart-path: charts/dsx-token-fetcher
+      chart-version: $NEXT_VERSION
+      extends: [.helm-package, .helm-package-rule]
+  - component: $CI_SERVER_FQDN/cds/cds-components/helm-push-ngc@0.14.1
+    inputs:
+      job-name: helm-push-ngc-dsx-token-fetcher
+      package-job: helm-package-dsx-token-fetcher
+      ngc-path: $NGC_HELM_PATH
+      ngc-force: false
+      ngc-key: $NGC_DSX_COMPONENTS_PUSH_KEY
+      extends: [.helm-push-ngc, .helm-push-ngc-rule]
+  - component: $CI_SERVER_FQDN/cds/cds-components/helm-package@0.14.1
+    inputs:
+      job-name: helm-package-dsx-token-fetcher-example
+      chart-path: charts/dsx-token-fetcher-example
+      chart-version: $NEXT_VERSION
+      extends: [.helm-package, .helm-package-rule]
+  - component: $CI_SERVER_FQDN/cds/cds-components/helm-push-ngc@0.14.1
+    inputs:
+      job-name: helm-push-ngc-dsx-token-fetcher-example
+      package-job: helm-package-dsx-token-fetcher-example
+      ngc-path: $NGC_HELM_PATH
+      ngc-force: false
+      ngc-key: $NGC_DSX_COMPONENTS_PUSH_KEY
+      extends: [.helm-push-ngc, .helm-push-ngc-rule]
+
+variables:
+  VAULT_ADDR: https://prod.vault.nvidia.com
+  VAULT_NAMESPACE: gfn-cds
+  VAULT_NAMESPACE_DUP: gfn-cds
+  VAULT_MOUNT_PATH: auth/jwt/gitlab
+  VAULT_SECRETS_DEST: ./secrets/secrets
+  NGC_REGISTRY_VAULT_KEY: dsx-components-dev
+  NGC_REGISTRY_REQUIRE_STG: "false"
+  NGC_IMAGE_PATH: "nvcr.io/0837451325059433/components-dev"
+  NGC_HELM_PATH: "0837451325059433/components-dev"
+  NGC_DSX_COMPONENTS_PUSH_KEY: "$NGC_REGISTRY_TOKEN"
+  PULSE_SCAN_VAULT_KEY: dsx
+  SLACK_CHANNEL_ID: C09VC8R4E92
+  SLACK_MESSAGE: |
+    CI pipeline complete.
+    Project: `${CI_PROJECT_NAME}` | Status: `${CI_JOB_STATUS}` | Branch: `${CI_COMMIT_REF_NAME}`
+    Pipeline: <${CI_PIPELINE_URL}|#${CI_PIPELINE_ID}> | By: `${CI_COMMIT_AUTHOR}`
+    Commit: `${CI_COMMIT_TITLE}`
+  PIPELINE_TRIGGER: "13"
+  GIT_SUBMODULE_STRATEGY: recursive
+  KIND_DIND_SERVICE_HOST: docker
+  KUBECONFIG: "$CI_PROJECT_DIR/.kube/kind-k1:$CI_PROJECT_DIR/.kube/kind-k2"
+  AL2023_KERNEL_IMAGE: public.ecr.aws/amazonlinux/amazonlinux:2023.9.20251110.1
+  DOCKER_PLATFORMS: "linux/amd64,linux/arm64"
+  MISE_VERSION: 2026.4.28
+  MISE_SHA256: ef2502a93bd3e30aea906c683b0cb410695e910ea1ca51a00f24d8ad1a7c95d5
+
+compute-next-release-version:
+  stage: init
+  extends: [.nvcf-cds-runner-tags]
+  variables:
+    GIT_STRATEGY: none
+  script:
+    - |
+      test "$GITLAB_PUBLISH_ARTIFACTS" = true
+      test "$CI_COMMIT_REF_PROTECTED" = true
+      [[ "$CI_COMMIT_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]
+      printf 'NEXT_VERSION=%s\nSKIP_SEMANTIC_RELEASE=false\n' "${CI_COMMIT_TAG#v}" > release.env
+  artifacts:
+    reports:
+      dotenv: release.env
+  rules:
+    - if: '$CI_COMMIT_TAG'
+
+# GitHub creates release tags. Builds reuse the exact mirrored tag.
+.common_scripts:
+  setup_git_version_tag:
+    - test "$(git rev-parse "refs/tags/${CI_COMMIT_TAG}^{commit}")" = "$CI_COMMIT_SHA"
+    - git describe --exact-match HEAD
+    - git config user.name CI
+    - git config user.email ci_dummy@nvidia.com
+    - git add .
+    - git stash
+    - test -z "$(git status --porcelain)"
+
+commitlint:
+  extends:
+    - .commitlint
+  variables:
+    GIT_DEPTH: "0"
+    GIT_SUBMODULE_STRATEGY: none
+
+.helm-package:
+  needs:
+    - compute-next-release-version
+    - validate
+    - e2e
+  before_script:
+    - |
+      if [[ "${NEXT_VERSION:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+        HELM_CHART_VERSION="${NEXT_VERSION}"
+      else
+        HELM_CHART_VERSION="0.0.0-$(git rev-parse --short HEAD)"
+      fi
+      export HELM_CHART_VERSION
+      yq -i '.appVersion = strenv(HELM_CHART_VERSION)' charts/dsx-identity/Chart.yaml
+      yq -i '.spire."spire-server".image.tag = strenv(HELM_CHART_VERSION)' charts/dsx-identity/values.yaml
+      yq -i '.appVersion = strenv(HELM_CHART_VERSION)' charts/dsx-imds/Chart.yaml
+      # The DPUService installs this chart independently of dsx-identity.
+      yq -i '.appVersion = strenv(HELM_CHART_VERSION)' charts/dsx-token-fetcher/Chart.yaml
+      yq -i '.appVersion = strenv(HELM_CHART_VERSION)' charts/dsx-token-fetcher-example/Chart.yaml
+      yq -i '.appVersion = strenv(HELM_CHART_VERSION)' charts/dsx-spiffe-csi/Chart.yaml
+
+.helm-package-rule:
+  rules:
+    - !reference [.rules-push-or-mr, rules]
+
+.helm-push-ngc-rule:
+  rules:
+    - !reference [.rules-push-or-mr-manual, rules]
+
+.helm-push-ngc:
+  stage: publish
+  extends:
+    - .nvcf-cds-runner-tags
+  variables:
+    NGC_DSX_COMPONENTS_PUSH_KEY: $NGC_REGISTRY_TOKEN
+
+.docker-publish:
+  variables:
+    PUSH_TO_NGC: "true"
+
+validate:
+  stage: test
+  image: golang:1.26.4-alpine
+  extends:
+    - .nvcf-cds-runner-tags
+  variables:
+    MISE_DATA_DIR: "$CI_PROJECT_DIR/.mise/mise-data"
+  cache:
+    - key:
+        prefix: mise-
+        files:
+          - mise.toml
+          - mise.lock
+      paths:
+        - "$MISE_DATA_DIR"
+  before_script:
+    - apk add --no-cache bash build-base ca-certificates curl git make
+    - curl -fsSL "https://github.com/jdx/mise/releases/download/v${MISE_VERSION}/mise-v${MISE_VERSION}-linux-x64-musl" -o /usr/local/bin/mise
+    - echo "${MISE_SHA256}  /usr/local/bin/mise" | sha256sum -c -
+    - chmod +x /usr/local/bin/mise
+    - mise install --locked
+  script:
+    - make validate
+  rules:
+    - !reference [.rules-push-or-mr, rules]
+
+e2e:
+  stage: test
+  image: golang:1.26.4-alpine
+  extends:
+    - .nvcf-cds-runner-large-dind-tags
+    - .dind-service
+  timeout: 4h
+  needs:
+    - validate
+  variables:
+    MISE_DATA_DIR: "$CI_PROJECT_DIR/.mise/mise-data"
+  cache:
+    - key:
+        prefix: mise-
+        files:
+          - mise.toml
+          - mise.lock
+      paths:
+        - "$MISE_DATA_DIR"
+  before_script:
+    - apk add --no-cache bash ca-certificates curl docker-cli docker-cli-buildx git make openssh-client openssl python3 util-linux
+    - curl -fsSL "https://github.com/jdx/mise/releases/download/v${MISE_VERSION}/mise-v${MISE_VERSION}-linux-x64-musl" -o /usr/local/bin/mise
+    - echo "${MISE_SHA256}  /usr/local/bin/mise" | sha256sum -c -
+    - chmod +x /usr/local/bin/mise
+    - mise install --locked
+    # Preload matching AL2023 modules into the host kernel shared by DinD and
+    # Kind before creating clusters.
+    - |
+      docker run --rm --privileged "${AL2023_KERNEL_IMAGE}" sh -ceu '
+        dnf -y -q install kmod "kernel-$(uname -r)"
+        depmod -a "$(uname -r)"
+        modprobe openvswitch
+        modprobe vport-geneve
+        modprobe nft_socket
+        modprobe tun
+        modprobe vhost_net
+        test -d /sys/module/openvswitch
+        test -d /sys/module/nft_socket
+      '
+  script:
+    - make -j install
+    - make test
+  after_script:
+    - |
+      if [ "${CI_JOB_STATUS}" != "success" ]; then
+        mise exec -- kubectl get kubevirt kubevirt --namespace kubevirt \
+          --context kind-k2 --request-timeout=10s -o yaml || true
+        mise exec -- kubectl get pods --namespace kubevirt \
+          --context kind-k2 --request-timeout=10s -o wide || true
+        mise exec -- kubectl get events --namespace kubevirt \
+          --context kind-k2 --request-timeout=10s --sort-by=.lastTimestamp || true
+        mise exec -- kubectl get vm,vmi,pods --namespace tenant-tenant1 \
+          --context kind-k2 --request-timeout=10s -o wide || true
+        mise exec -- kubectl get events --namespace tenant-tenant1 \
+          --context kind-k2 --request-timeout=10s --sort-by=.lastTimestamp || true
+      fi
+    - make clean
+  rules:
+    - !reference [.rules-push-or-mr, rules]
+
+.container-build:
+  stage: build
+  extends:
+    - .build-image-dind
+  variables:
+    # The GitLab registry rejects BuildKit's default provenance manifest.
+    BUILDX_NO_DEFAULT_ATTESTATIONS: "1"
+  needs:
+    - compute-next-release-version
+    - validate
+    - e2e
+
+docker-build:dsx-token-fetcher:
+  extends: [.container-build]
+  variables:
+    DOCKER_IMAGE_NAME: dsx-token-fetcher
+    EXTRA_BUILD_ARGS: "--target dsx-token-fetcher --build-arg BINARY=dsx-token-fetcher"
+
+docker-build:dsx-identity-keys:
+  extends: [.container-build]
+  variables:
+    DOCKER_IMAGE_NAME: dsx-identity-keys
+    EXTRA_BUILD_ARGS: "--target dsx-identity-keys --build-arg BINARY=dsx-identity-keys"
+
+docker-build:metadata-service:
+  extends: [.container-build]
+  variables:
+    DOCKER_IMAGE_NAME: metadata-service
+    EXTRA_BUILD_ARGS: "--target metadata-service --build-arg BINARY=metadata-service"
+
+docker-build:dsx-imds-network-setup:
+  extends: [.container-build]
+  variables:
+    DOCKER_IMAGE_NAME: dsx-imds-network-setup
+    EXTRA_BUILD_ARGS: "--target dsx-imds-network-setup --build-arg BINARY=dsx-imds-network-setup"
+
+docker-build:dsx-identity-keys-proxy-csi:
+  extends: [.container-build]
+  variables:
+    DOCKER_IMAGE_NAME: dsx-identity-keys-proxy-csi
+    EXTRA_BUILD_ARGS: "--target dsx-identity-keys-proxy-csi --build-arg BINARY=dsx-identity-keys-proxy-csi"
+
+docker-build:dsx-identity-controller:
+  extends: [.container-build]
+  variables:
+    DOCKER_IMAGE_NAME: dsx-identity-controller
+    EXTRA_BUILD_ARGS: "--target dsx-identity-controller --build-arg BINARY=dsx-identity-controller"
+
+docker-build:dsx-spire-server:
+  extends: [.container-build]
+  variables:
+    DOCKER_IMAGE_NAME: dsx-spire-server
+    DOCKERFILE_PATH: Dockerfile.spire
+    EXTRA_BUILD_ARGS: "--target dsx-spire-server"
+
+docker-build:dsx-spire-agent:
+  extends: [.container-build]
+  variables:
+    DOCKER_IMAGE_NAME: dsx-spire-agent
+    DOCKERFILE_PATH: Dockerfile.spire
+    EXTRA_BUILD_ARGS: "--target dsx-spire-agent"
+
+docker-build:dsx-kata-uds-proxy:
+  extends: [.container-build]
+  variables:
+    DOCKER_IMAGE_NAME: dsx-kata-uds-proxy
+    DOCKERFILE_PATH: kata-uds-proxy/Dockerfile
+
+pulse-scan:dsx-token-fetcher:
+  extends:
+    - .pulse-scan:container
+  needs:
+    - job: docker-build:dsx-token-fetcher
+      artifacts: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-token-fetcher
+
+pulse-scan:dsx-identity-keys:
+  extends:
+    - .pulse-scan:container
+  needs:
+    - job: docker-build:dsx-identity-keys
+      artifacts: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-identity-keys
+
+pulse-scan:metadata-service:
+  extends:
+    - .pulse-scan:container
+  needs:
+    - job: docker-build:metadata-service
+      artifacts: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: metadata-service
+
+pulse-scan:dsx-imds-network-setup:
+  extends:
+    - .pulse-scan:container
+  needs:
+    - job: docker-build:dsx-imds-network-setup
+      artifacts: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-imds-network-setup
+
+pulse-scan:dsx-identity-keys-proxy-csi:
+  extends:
+    - .pulse-scan:container
+  needs:
+    - job: docker-build:dsx-identity-keys-proxy-csi
+      artifacts: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-identity-keys-proxy-csi
+
+pulse-scan:dsx-identity-controller:
+  extends:
+    - .pulse-scan:container
+  needs:
+    - job: docker-build:dsx-identity-controller
+      artifacts: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-identity-controller
+
+pulse-scan:dsx-spire-server:
+  extends:
+    - .pulse-scan:container
+  needs:
+    - job: docker-build:dsx-spire-server
+      artifacts: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-spire-server
+
+pulse-scan:dsx-spire-agent:
+  extends:
+    - .pulse-scan:container
+  needs:
+    - job: docker-build:dsx-spire-agent
+      artifacts: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-spire-agent
+
+pulse-scan:dsx-kata-uds-proxy:
+  extends:
+    - .pulse-scan:container
+  needs:
+    - job: docker-build:dsx-kata-uds-proxy
+      artifacts: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-kata-uds-proxy
+
+docker-push-ngc:dsx-token-fetcher:
+  extends:
+    - .docker-publish
+  needs:
+    - job: docker-build:dsx-token-fetcher
+      artifacts: true
+    - job: pulse-scan:dsx-token-fetcher
+      optional: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-token-fetcher
+
+docker-push-ngc:dsx-identity-keys:
+  extends:
+    - .docker-publish
+  needs:
+    - job: docker-build:dsx-identity-keys
+      artifacts: true
+    - job: pulse-scan:dsx-identity-keys
+      optional: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-identity-keys
+
+docker-push-ngc:metadata-service:
+  extends:
+    - .docker-publish
+  needs:
+    - job: docker-build:metadata-service
+      artifacts: true
+    - job: pulse-scan:metadata-service
+      optional: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: metadata-service
+
+docker-push-ngc:dsx-imds-network-setup:
+  extends:
+    - .docker-publish
+  needs:
+    - job: docker-build:dsx-imds-network-setup
+      artifacts: true
+    - job: pulse-scan:dsx-imds-network-setup
+      optional: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-imds-network-setup
+
+docker-push-ngc:dsx-identity-keys-proxy-csi:
+  extends:
+    - .docker-publish
+  needs:
+    - job: docker-build:dsx-identity-keys-proxy-csi
+      artifacts: true
+    - job: pulse-scan:dsx-identity-keys-proxy-csi
+      optional: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-identity-keys-proxy-csi
+
+docker-push-ngc:dsx-identity-controller:
+  extends:
+    - .docker-publish
+  needs:
+    - job: docker-build:dsx-identity-controller
+      artifacts: true
+    - job: pulse-scan:dsx-identity-controller
+      optional: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-identity-controller
+
+docker-push-ngc:dsx-spire-server:
+  extends:
+    - .docker-publish
+  needs:
+    - job: docker-build:dsx-spire-server
+      artifacts: true
+    - job: pulse-scan:dsx-spire-server
+      optional: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-spire-server
+
+docker-push-ngc:dsx-spire-agent:
+  extends:
+    - .docker-publish
+  needs:
+    - job: docker-build:dsx-spire-agent
+      artifacts: true
+    - job: pulse-scan:dsx-spire-agent
+      optional: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-spire-agent
+
+docker-push-ngc:dsx-kata-uds-proxy:
+  extends:
+    - .docker-publish
+  needs:
+    - job: docker-build:dsx-kata-uds-proxy
+      artifacts: true
+    - job: pulse-scan:dsx-kata-uds-proxy
+      optional: true
+    - compute-next-release-version
+  variables:
+    DOCKER_IMAGE_NAME: dsx-kata-uds-proxy
+
+slack-notification:
+  extends:
+    - .slack-notification
