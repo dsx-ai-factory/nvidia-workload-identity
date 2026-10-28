@@ -120,7 +120,7 @@ compute-next-release-version:
 .common_scripts:
   setup_git_version_tag:
     - test "$(git rev-parse "refs/tags/${CI_COMMIT_TAG}^{commit}")" = "$CI_COMMIT_SHA"
-    - git describe --exact-match HEAD
+    - git describe --tags --exact-match HEAD
     - git config user.name CI
     - git config user.email ci_dummy@nvidia.com
     - git add .
