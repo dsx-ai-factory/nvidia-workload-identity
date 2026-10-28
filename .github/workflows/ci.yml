@@ -102,9 +102,11 @@ jobs:
           free -h
       - name: Configure Zot upstream mirror
         run: |
+          # Zot tries the URLs in order. Docker Hub can stall from these runners
+          # until the pull is canceled, so try the runner-local mirror first.
           # shellcheck disable=SC2016
           mise exec -- jq --arg mirror 'https://dc.local.gha-runners.nvidia.com' \
-            '.extensions.sync.registries[0].urls[1] = $mirror' \
+            '.extensions.sync.registries[0].urls = [$mirror, "https://registry-1.docker.io"]' \
             local-e2e-tests/local-registry/zot-config.json > "$RUNNER_TEMP/zot-config.json"
           echo "ZOT_CONFIG_FILE=$RUNNER_TEMP/zot-config.json" >> "$GITHUB_ENV"
       - name: Docker Hub mirror diagnostics
@@ -139,6 +141,10 @@ jobs:
           for context in kind-k1 kind-k2; do
             mise exec -- kubectl --context "$context" --request-timeout=10s get nodes -o wide || true
             mise exec -- kubectl --context "$context" --request-timeout=10s get pods -A -o wide || true
+            mise exec -- kubectl --context "$context" --request-timeout=10s \
+              logs -n dsx-identity deploy/dsx-identity-keys -c dsx-identity-keys --previous --tail=100 || true
+            mise exec -- kubectl --context "$context" --request-timeout=10s \
+              logs -n dsx-identity dsx-identity-server-0 --all-containers --tail=100 --prefix || true
             mise exec -- kubectl --context "$context" --request-timeout=10s get events -A --sort-by=.lastTimestamp || true
           done
           mise exec -- kubectl --context kind-k2 --request-timeout=10s get kubevirt -n kubevirt || true
@@ -175,6 +181,14 @@ jobs:
             mise exec -- kubectl --context kind-k2 --request-timeout=10s \
               exec -n ovn-kubernetes "$pod" -- ovs-ofctl dump-flows breth0 || true
           done
+      - name: Docker Hub sync sources
+        if: always() && steps.tools.outcome == 'success'
+        run: |
+          # Count which upstream Zot tried for each Docker Hub image it synced.
+          docker logs dsx-identity-registry 2>&1 | mise exec -- jq -r -R \
+            'fromjson? | select(.message == "sync: syncing image"
+              and (.remote == "dc.local.gha-runners.nvidia.com" or .remote == "registry-1.docker.io"))
+              | "\(.remote) \(.repo):\(.reference)"' | sort | uniq -c || true
       - name: Clean up E2E clusters
         if: always() && steps.tools.outcome == 'success'
         run: make clean
