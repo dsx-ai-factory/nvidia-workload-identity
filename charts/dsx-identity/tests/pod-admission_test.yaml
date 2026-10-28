@@ -137,8 +137,17 @@ tests:
           value: Deny
         documentIndex: 1
 
-  - it: omits label validation with token injection
+  - it: renders label validation without token injection
     set:
+      podTokenFetcher.enabled: false
+    template: templates/pod-label-validation-policy.yaml
+    asserts:
+      - hasDocuments:
+          count: 2
+
+  - it: omits label validation without SPIRE
+    set:
+      spire.enabled: false
       podTokenFetcher.enabled: false
     template: templates/pod-label-validation-policy.yaml
     asserts:
