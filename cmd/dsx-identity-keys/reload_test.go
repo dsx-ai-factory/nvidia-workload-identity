@@ -21,6 +21,7 @@ import (
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"golang.org/x/sync/errgroup"
 
+	"dsx-identity/internal/dsxidentity"
 	"dsx-identity/internal/filewatch"
 	"dsx-identity/internal/keydistribution"
 	"dsx-identity/internal/keytest"
@@ -176,7 +177,7 @@ func assertReloadedKeys(t *testing.T, server *identityKeysServer, active string,
 	if !slices.Equal(ids, want) {
 		t.Fatalf("JWKS kids = %v, want %v", ids, want)
 	}
-	token, err := server.resignJWT(map[string]any{"aud": []string{"test"}}, spiffeid.RequireFromString("spiffe://operator-1.ds9.dsx.nvid.id/bm/host-1"))
+	token, err := server.resignJWT(map[string]any{"aud": []string{"test"}}, spiffeid.RequireFromString("spiffe://operator-1.ds9.dsx.nvid.id/bm/host-1"), dsxidentity.SubjectClaims{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +226,7 @@ func TestReloadPublishesNewKeysAndStopsRemovedLeases(t *testing.T) {
 	copySigningFile(t, activePath, newActive)
 	keytest.RequireKeyIDs(t, peer, firstID, secondID, "peer")
 	keytest.RequireCondition(t, "new active signer", func() bool {
-		token, err := server.resignJWT(map[string]any{"aud": []string{"test"}}, spiffeid.RequireFromString("spiffe://operator-1.ds9.dsx.nvid.id/bm/host-1"))
+		token, err := server.resignJWT(map[string]any{"aud": []string{"test"}}, spiffeid.RequireFromString("spiffe://operator-1.ds9.dsx.nvid.id/bm/host-1"), dsxidentity.SubjectClaims{})
 		if err != nil {
 			return false
 		}
@@ -258,7 +259,7 @@ func TestSigningDuringSourceSwaps(t *testing.T) {
 	for range 8 {
 		readers.Go(func() error {
 			for range 100 {
-				token, err := server.resignJWT(map[string]any{"aud": []string{"test"}}, subject)
+				token, err := server.resignJWT(map[string]any{"aud": []string{"test"}}, subject, dsxidentity.SubjectClaims{})
 				if err != nil {
 					return err
 				}
