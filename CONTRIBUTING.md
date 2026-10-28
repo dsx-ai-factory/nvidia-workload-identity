@@ -1,4 +1,4 @@
-# Contributing to project-dsx-identity
+# Contributing to NVIDIA Workload Identity
 
 ## Before you start
 

@@ -120,7 +120,7 @@ spec:
 {{- end }}
 ---
 {{- end }}
-{{/* DSX Identity Keys metrics use the OTel Prometheus exporter configured by the chart. */}}
+{{/* NVIDIA Workload Identity Keys metrics use the OTel Prometheus exporter configured by the chart. */}}
 {{- if and .Values.identityKeys.enabled .Values.observability.metrics.enabled .Values.observability.metrics.serviceMonitor.enabled }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor

@@ -14,11 +14,11 @@ jobs:
   release:
     needs: dsx-component-ci
     if: >-
-      github.repository == 'dsx-ai-factory/project-dsx-identity' &&
+      github.repository == 'dsx-ai-factory/nvidia-workload-identity' &&
       github.ref == 'refs/heads/release/1.15.0'
     permissions:
       contents: write
-    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-publish.yml@c5609021216442ef4f398111512834632c30d41d
+    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-publish.yml@7b112249381ed536acbfb1d72294b104cce8ffad
     secrets: inherit
     with:
       promotion-manifest: true

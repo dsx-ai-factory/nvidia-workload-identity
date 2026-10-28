@@ -101,7 +101,7 @@ check_token_contract() {
     if ! jq -e --arg kid "${K2_IDENTITY_KEYS_KID}" '
         .alg == "ES256" and .kid == $kid
     ' <<<"${header}" >/dev/null; then
-        log_error "DSX token was not signed by the k2 DSX Identity Keys active key"
+        log_error "DSX token was not signed by the k2 NVIDIA Workload Identity Keys active key"
         jq . <<<"${header}" 2>/dev/null || true
         return 1
     fi
@@ -317,6 +317,36 @@ verify_metadata_access() {
     return 1
 }
 
+verify_identity_keys_proxy_restart() {
+    log_test "Checking VM identity after an abrupt identity keys proxy stop..."
+
+    local node pod container_id pid current_id deadline=$((SECONDS + 120))
+    node=$(kubectl get pods -l "kubevirt.io/domain=${VM_NAME}" -n "${NAMESPACE}" \
+        --context "${CONTEXT}" -o json | jq -er '.items[0].spec.nodeName') || return 1
+    pod=$(kubectl get pods -n dsx-identity --context "${CONTEXT}" \
+        -l app.kubernetes.io/name=dsx-identity-keys-proxy-csi \
+        --field-selector "spec.nodeName=${node}" -o json | jq -er '.items[0].metadata.name') || return 1
+    container_id=$(kubectl get pod "${pod}" -n dsx-identity --context "${CONTEXT}" \
+        -o json | jq -er '.status.containerStatuses[] | select(.name == "identity-keys-proxy") | .containerID') || return 1
+    pid=$(docker exec "${node}" crictl inspect "${container_id#containerd://}" | \
+        jq -er '.info.pid | select(. > 0)') || return 1
+    # Kill from the parent PID namespace so socat cannot unlink its hostPath socket.
+    docker exec "${node}" kill -KILL "${pid}" || return 1
+
+    # Wait for a replacement before checking the existing VM's mounted socket.
+    while ((SECONDS < deadline)); do
+        current_id=$(kubectl get pod "${pod}" -n dsx-identity --context "${CONTEXT}" \
+            -o json | jq -er '.status.containerStatuses[] |
+                select(.name == "identity-keys-proxy" and .state.running != null) | .containerID') || continue
+        if [[ "${current_id}" != "${container_id}" ]]; then
+            verify_metadata_access
+            return $?
+        fi
+    done
+    log_error "Identity keys proxy did not restart within 120s"
+    return 1
+}
+
 main() {
     local script_started=${SECONDS} setup_started=${SECONDS}
     local failed=0
@@ -336,6 +366,7 @@ main() {
     for VM_NAME in "${VM_NAMES[@]}"; do
         EXPECTED_SPIFFE_ID="spiffe://tenant-2.ds9.dsx.nvid.id/vm/${VM_NAME}"
         run_timed "${VM_NAME} identity and OpenBao" verify_metadata_access || failed=$((failed + 1))
+        run_timed "${VM_NAME} proxy restart recovery" verify_identity_keys_proxy_restart || failed=$((failed + 1))
     done
     echo
     if [[ $failed -eq 0 ]]; then

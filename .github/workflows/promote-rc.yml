@@ -14,13 +14,17 @@ permissions:
 jobs:
   promote:
     if: >-
-      github.repository == 'dsx-ai-factory/project-dsx-identity' &&
+      github.repository == 'dsx-ai-factory/nvidia-workload-identity' &&
       github.ref == 'refs/heads/master' &&
       vars.DSX_RELEASE_MODE == 'rc-promotion'
     permissions:
       contents: read
       actions: read
       deployments: read
-    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/promote-rc.yml@c5609021216442ef4f398111512834632c30d41d
+    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/promote-rc.yml@cc6dd8c9951d8abe4147ebb726785e6eecc23f75
     with:
       rc_version: ${{ inputs.rc_version }}
+    secrets:
+      RC_PROMOTION_APP_PRIVATE_KEY: ${{ secrets.RC_PROMOTION_APP_PRIVATE_KEY }}
+      RC_PROMOTION_SOURCE_NGC_KEY: ${{ secrets.RC_PROMOTION_SOURCE_NGC_KEY }}
+      RC_PROMOTION_DESTINATION_NGC_KEY: ${{ secrets.RC_PROMOTION_DESTINATION_NGC_KEY }}

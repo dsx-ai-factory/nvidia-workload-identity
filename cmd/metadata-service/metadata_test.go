@@ -222,7 +222,7 @@ func TestExchangeSPIRESVIDRejectsUnavailableCSIUnixSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := client.Exchange(context.Background(), "local-svid"); err == nil {
-		t.Fatal("expected unavailable DSX Identity Keys Proxy socket to fail")
+		t.Fatal("expected unavailable NVIDIA Workload Identity Keys Proxy socket to fail")
 	}
 }
 
@@ -264,7 +264,7 @@ func TestDirectExchangeVerifiesTLSCertificate(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := client.Exchange(context.Background(), "local-svid"); err == nil {
-		t.Fatal("self-signed DSX Identity Keys certificate was accepted")
+		t.Fatal("self-signed NVIDIA Workload Identity Keys certificate was accepted")
 	}
 }
 

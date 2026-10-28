@@ -1,4 +1,4 @@
-# DSX Identity Controller
+# NVIDIA Workload Identity Controller
 
 `dsx-identity-controller` watches DPU, Launch Layer `VirtualInstance`, and
 Launch Layer `BareMetalInstance` objects in one management cluster. It derives
@@ -27,7 +27,7 @@ external `dpu_hw`-attested agent identified by the DPU serial number.
 
 ```mermaid
 flowchart LR
-    DPU["DPU custom resource"] --> Controller["DSX Identity Controller Deployment"]
+    DPU["DPU custom resource"] --> Controller["NVIDIA Workload Identity<br/>Controller Deployment"]
     VI["VirtualInstance"] --> Controller
     BMI["BareMetalInstance"] --> Controller
     Controller --> Entry["SPIRE ClusterStaticEntry custom resource"]

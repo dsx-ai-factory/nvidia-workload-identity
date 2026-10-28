@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: Ask for a change in project-dsx-identity
+about: Ask for a change in NVIDIA Workload Identity
 labels: enhancement
 ---
 

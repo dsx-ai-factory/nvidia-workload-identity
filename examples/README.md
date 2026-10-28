@@ -1,10 +1,10 @@
-# DSX Identity user guide
+# NVIDIA Workload Identity user guide
 
 - Kubernetes and DPUService Pods use the
   [token-fetcher sidecar](token-fetcher/README.md).
 - Paired bare-metal hosts and KubeVirt VMs use the link-local DSX IMDS
   endpoint.
-- Relying parties validate DSX JWTs with the DSX Identity Keys JWKS endpoint.
+- Relying parties validate DSX JWTs with the NVIDIA Workload Identity Keys JWKS endpoint.
 
 ## Acquire a token from link-local IMDS
 

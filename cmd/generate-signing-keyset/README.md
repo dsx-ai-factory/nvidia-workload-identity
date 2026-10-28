@@ -11,7 +11,7 @@ mise exec -- go run ./cmd/generate-signing-keyset generate > generated.json
 ```
 
 The command writes a combined document that can be split into the two files
-consumed by DSX Identity Keys:
+consumed by NVIDIA Workload Identity Keys:
 
 ```json
 {
@@ -23,7 +23,7 @@ consumed by DSX Identity Keys:
 }
 ```
 
-Create the two files consumed by DSX Identity Keys:
+Create the two files consumed by NVIDIA Workload Identity Keys:
 
 ```bash
 jq -c '{keys}' generated.json > keyset.json
@@ -63,7 +63,7 @@ The input may be either a combined generator document or a `keyset.json`
 document containing the `keys` array. SEC 1 EC, PKCS#1 RSA, and PKCS#8 private
 keys are supported.
 
-## DSX Identity Keys files
+## NVIDIA Workload Identity Keys files
 
 `keyset.json`:
 

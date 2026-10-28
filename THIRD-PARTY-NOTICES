@@ -20,14 +20,12 @@ github.com/google/nftables v0.3.0 (Apache-2.0)
 https://github.com/google/nftables/blob/v0.3.0/LICENSE
 github.com/minio/highwayhash v1.0.3 (Apache-2.0)
 https://github.com/minio/highwayhash/blob/v1.0.3/LICENSE
-google.golang.org/genproto/googleapis/api/httpbody v0.0.0-20260526163538-3dc84a4a5aaa (Apache-2.0)
-https://github.com/googleapis/go-genproto/blob/3dc84a4a5aaa/googleapis/api/LICENSE
-google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa (Apache-2.0)
-https://github.com/googleapis/go-genproto/blob/3dc84a4a5aaa/googleapis/rpc/LICENSE
+google.golang.org/genproto/googleapis/api/httpbody v0.0.0-20260803160001-6ac0973c030d (Apache-2.0)
+https://github.com/googleapis/go-genproto/blob/6ac0973c030d/googleapis/api/LICENSE
+google.golang.org/genproto/googleapis/rpc v0.0.0-20260803160001-6ac0973c030d (Apache-2.0)
+https://github.com/googleapis/go-genproto/blob/6ac0973c030d/googleapis/rpc/LICENSE
 google.golang.org/genproto/googleapis/rpc/status v0.0.0-20260526163538-3dc84a4a5aaa (Apache-2.0)
 https://github.com/googleapis/go-genproto/blob/3dc84a4a5aaa/googleapis/rpc/LICENSE
-google.golang.org/grpc v1.81.1 (Apache-2.0)
-https://github.com/grpc/grpc-go/blob/v1.81.1/LICENSE
 google.golang.org/grpc v1.83.2 (Apache-2.0)
 https://github.com/grpc/grpc-go/blob/v1.83.2/LICENSE
 k8s.io/api v0.32.3 (Apache-2.0)
@@ -737,18 +735,18 @@ github.com/oklog/run v1.0.0 (Apache-2.0)
 https://github.com/oklog/run/blob/v1.0.0/LICENSE
 github.com/oklog/run v1.1.0 (Apache-2.0)
 https://github.com/oklog/run/blob/v1.1.0/LICENSE
-github.com/prometheus/client_golang/prometheus v1.23.2 (Apache-2.0)
-https://github.com/prometheus/client_golang/blob/v1.23.2/LICENSE
+github.com/prometheus/client_golang/prometheus v1.24.1 (Apache-2.0)
+https://github.com/prometheus/client_golang/blob/v1.24.1/LICENSE
 github.com/prometheus/client_model/go v0.6.2 (Apache-2.0)
 https://github.com/prometheus/client_model/blob/v0.6.2/LICENSE
-github.com/prometheus/common v0.67.5 (Apache-2.0)
-https://github.com/prometheus/common/blob/v0.67.5/LICENSE
+github.com/prometheus/common v0.70.1 (Apache-2.0)
+https://github.com/prometheus/common/blob/v0.70.1/LICENSE
 github.com/prometheus/otlptranslator v1.0.0 (Apache-2.0)
 https://github.com/prometheus/otlptranslator/blob/v1.0.0/LICENSE
-github.com/prometheus/procfs v0.20.1 (Apache-2.0)
-https://github.com/prometheus/procfs/blob/v0.20.1/LICENSE
-github.com/spiffe/go-spiffe/v2 v2.6.0 (Apache-2.0)
-https://github.com/spiffe/go-spiffe/blob/v2.6.0/LICENSE
+github.com/prometheus/procfs v0.21.1 (Apache-2.0)
+https://github.com/prometheus/procfs/blob/v0.21.1/LICENSE
+github.com/spiffe/go-spiffe/v2 v2.7.0 (Apache-2.0)
+https://github.com/spiffe/go-spiffe/blob/v2.7.0/LICENSE
 github.com/spiffe/spire-api-sdk/proto/spire/api v1.12.0 (Apache-2.0)
 https://github.com/spiffe/spire-api-sdk/blob/v1.12.0/LICENSE
 github.com/spiffe/spire-controller-manager v0.6.2 (Apache-2.0)
@@ -759,8 +757,8 @@ github.com/spiffe/spire-plugin-sdk v1.15.1 (Apache-2.0)
 https://github.com/spiffe/spire-plugin-sdk/blob/v1.15.1/LICENSE
 go.opentelemetry.io/auto/sdk v1.2.1 (Apache-2.0)
 https://github.com/open-telemetry/opentelemetry-go-instrumentation/blob/sdk/v1.2.1/sdk/LICENSE
-go.opentelemetry.io/proto/otlp v1.10.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-proto-go/blob/otlp/v1.10.0/otlp/LICENSE
+go.opentelemetry.io/proto/otlp v1.11.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-proto-go/blob/otlp/v1.11.0/otlp/LICENSE
 
                                  Apache License
                            Version 2.0, January 2004
@@ -965,122 +963,122 @@ https://github.com/open-telemetry/opentelemetry-proto-go/blob/otlp/v1.10.0/otlp/
    limitations under the License.
 
 ========================================================================
-go.opentelemetry.io/contrib/bridges/otelslog v0.19.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go-contrib/blob/bridges/otelslog/v0.19.0/bridges/otelslog/LICENSE
-go.opentelemetry.io/contrib/bridges/otelslog v0.19.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go-contrib/blob/bridges/otelslog/v0.19.0/bridges/otelslog/LICENSE
-go.opentelemetry.io/contrib/bridges/prometheus v0.69.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go-contrib/blob/bridges/prometheus/v0.69.0/bridges/prometheus/LICENSE
-go.opentelemetry.io/contrib/bridges/prometheus v0.69.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go-contrib/blob/bridges/prometheus/v0.69.0/bridges/prometheus/LICENSE
-go.opentelemetry.io/contrib/exporters/autoexport v0.69.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go-contrib/blob/exporters/autoexport/v0.69.0/exporters/autoexport/LICENSE
-go.opentelemetry.io/contrib/exporters/autoexport v0.69.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go-contrib/blob/exporters/autoexport/v0.69.0/exporters/autoexport/LICENSE
-go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.69.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go-contrib/blob/instrumentation/google.golang.org/grpc/otelgrpc/v0.69.0/instrumentation/google.golang.org/grpc/otelgrpc/LICENSE
-go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.69.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go-contrib/blob/instrumentation/google.golang.org/grpc/otelgrpc/v0.69.0/instrumentation/google.golang.org/grpc/otelgrpc/LICENSE
-go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go-contrib/blob/instrumentation/net/http/otelhttp/v0.69.0/instrumentation/net/http/otelhttp/LICENSE
-go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go-contrib/blob/instrumentation/net/http/otelhttp/v0.69.0/instrumentation/net/http/otelhttp/LICENSE
-go.opentelemetry.io/contrib/instrumentation/runtime v0.69.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go-contrib/blob/instrumentation/runtime/v0.69.0/instrumentation/runtime/LICENSE
-go.opentelemetry.io/contrib/instrumentation/runtime v0.69.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go-contrib/blob/instrumentation/runtime/v0.69.0/instrumentation/runtime/LICENSE
-go.opentelemetry.io/contrib/propagators/autoprop v0.69.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go-contrib/blob/propagators/autoprop/v0.69.0/propagators/autoprop/LICENSE
-go.opentelemetry.io/contrib/propagators/autoprop v0.69.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go-contrib/blob/propagators/autoprop/v0.69.0/propagators/autoprop/LICENSE
-go.opentelemetry.io/contrib/propagators/aws/xray v1.44.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go-contrib/blob/propagators/aws/v1.44.0/propagators/aws/LICENSE
-go.opentelemetry.io/contrib/propagators/aws/xray v1.44.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go-contrib/blob/propagators/aws/v1.44.0/propagators/aws/LICENSE
-go.opentelemetry.io/contrib/propagators/b3 v1.44.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go-contrib/blob/propagators/b3/v1.44.0/propagators/b3/LICENSE
-go.opentelemetry.io/contrib/propagators/b3 v1.44.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go-contrib/blob/propagators/b3/v1.44.0/propagators/b3/LICENSE
-go.opentelemetry.io/contrib/propagators/jaeger v1.44.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go-contrib/blob/propagators/jaeger/v1.44.0/propagators/jaeger/LICENSE
-go.opentelemetry.io/contrib/propagators/jaeger v1.44.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go-contrib/blob/propagators/jaeger/v1.44.0/propagators/jaeger/LICENSE
-go.opentelemetry.io/contrib/propagators/ot v1.44.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go-contrib/blob/propagators/ot/v1.44.0/propagators/ot/LICENSE
-go.opentelemetry.io/contrib/propagators/ot v1.44.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go-contrib/blob/propagators/ot/v1.44.0/propagators/ot/LICENSE
-go.opentelemetry.io/otel v1.44.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go/blob/v1.44.0/LICENSE
-go.opentelemetry.io/otel v1.44.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go/blob/v1.44.0/LICENSE
-go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc v0.20.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlplog/otlploggrpc/v0.20.0/exporters/otlp/otlplog/otlploggrpc/LICENSE
-go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc v0.20.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlplog/otlploggrpc/v0.20.0/exporters/otlp/otlplog/otlploggrpc/LICENSE
-go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp v0.20.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlplog/otlploghttp/v0.20.0/exporters/otlp/otlplog/otlploghttp/LICENSE
-go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp v0.20.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlplog/otlploghttp/v0.20.0/exporters/otlp/otlplog/otlploghttp/LICENSE
-go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.44.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlpmetric/otlpmetricgrpc/v1.44.0/exporters/otlp/otlpmetric/otlpmetricgrpc/LICENSE
-go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.44.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlpmetric/otlpmetricgrpc/v1.44.0/exporters/otlp/otlpmetric/otlpmetricgrpc/LICENSE
-go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.44.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlpmetric/otlpmetrichttp/v1.44.0/exporters/otlp/otlpmetric/otlpmetrichttp/LICENSE
-go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.44.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlpmetric/otlpmetrichttp/v1.44.0/exporters/otlp/otlpmetric/otlpmetrichttp/LICENSE
-go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.44.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlptrace/v1.44.0/exporters/otlp/otlptrace/LICENSE
-go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.44.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlptrace/v1.44.0/exporters/otlp/otlptrace/LICENSE
-go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.44.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlptrace/otlptracegrpc/v1.44.0/exporters/otlp/otlptrace/otlptracegrpc/LICENSE
-go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.44.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlptrace/otlptracegrpc/v1.44.0/exporters/otlp/otlptrace/otlptracegrpc/LICENSE
-go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.44.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlptrace/otlptracehttp/v1.44.0/exporters/otlp/otlptrace/otlptracehttp/LICENSE
-go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.44.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlptrace/otlptracehttp/v1.44.0/exporters/otlp/otlptrace/otlptracehttp/LICENSE
-go.opentelemetry.io/otel/exporters/prometheus v0.66.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go/blob/exporters/prometheus/v0.66.0/exporters/prometheus/LICENSE
-go.opentelemetry.io/otel/exporters/prometheus v0.66.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go/blob/exporters/prometheus/v0.66.0/exporters/prometheus/LICENSE
-go.opentelemetry.io/otel/exporters/stdout/stdoutlog v0.20.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go/blob/exporters/stdout/stdoutlog/v0.20.0/exporters/stdout/stdoutlog/LICENSE
-go.opentelemetry.io/otel/exporters/stdout/stdoutlog v0.20.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go/blob/exporters/stdout/stdoutlog/v0.20.0/exporters/stdout/stdoutlog/LICENSE
-go.opentelemetry.io/otel/exporters/stdout/stdoutmetric v1.44.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go/blob/exporters/stdout/stdoutmetric/v1.44.0/exporters/stdout/stdoutmetric/LICENSE
-go.opentelemetry.io/otel/exporters/stdout/stdoutmetric v1.44.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go/blob/exporters/stdout/stdoutmetric/v1.44.0/exporters/stdout/stdoutmetric/LICENSE
-go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.44.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go/blob/exporters/stdout/stdouttrace/v1.44.0/exporters/stdout/stdouttrace/LICENSE
-go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.44.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go/blob/exporters/stdout/stdouttrace/v1.44.0/exporters/stdout/stdouttrace/LICENSE
-go.opentelemetry.io/otel/log v0.20.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go/blob/log/v0.20.0/log/LICENSE
-go.opentelemetry.io/otel/log v0.20.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go/blob/log/v0.20.0/log/LICENSE
-go.opentelemetry.io/otel/metric v1.44.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go/blob/metric/v1.44.0/metric/LICENSE
-go.opentelemetry.io/otel/metric v1.44.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go/blob/metric/v1.44.0/metric/LICENSE
-go.opentelemetry.io/otel/sdk v1.44.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go/blob/sdk/v1.44.0/sdk/LICENSE
-go.opentelemetry.io/otel/sdk v1.44.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go/blob/sdk/v1.44.0/sdk/LICENSE
-go.opentelemetry.io/otel/sdk/log v0.20.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go/blob/sdk/log/v0.20.0/sdk/log/LICENSE
-go.opentelemetry.io/otel/sdk/log v0.20.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go/blob/sdk/log/v0.20.0/sdk/log/LICENSE
-go.opentelemetry.io/otel/sdk/metric v1.44.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go/blob/sdk/metric/v1.44.0/sdk/metric/LICENSE
-go.opentelemetry.io/otel/sdk/metric v1.44.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go/blob/sdk/metric/v1.44.0/sdk/metric/LICENSE
-go.opentelemetry.io/otel/trace v1.44.0 (Apache-2.0)
-https://github.com/open-telemetry/opentelemetry-go/blob/trace/v1.44.0/trace/LICENSE
-go.opentelemetry.io/otel/trace v1.44.0 (BSD-3-Clause)
-https://github.com/open-telemetry/opentelemetry-go/blob/trace/v1.44.0/trace/LICENSE
+go.opentelemetry.io/contrib/bridges/otelslog v0.20.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go-contrib/blob/bridges/otelslog/v0.20.0/bridges/otelslog/LICENSE
+go.opentelemetry.io/contrib/bridges/otelslog v0.20.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go-contrib/blob/bridges/otelslog/v0.20.0/bridges/otelslog/LICENSE
+go.opentelemetry.io/contrib/bridges/prometheus v0.70.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go-contrib/blob/bridges/prometheus/v0.70.0/bridges/prometheus/LICENSE
+go.opentelemetry.io/contrib/bridges/prometheus v0.70.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go-contrib/blob/bridges/prometheus/v0.70.0/bridges/prometheus/LICENSE
+go.opentelemetry.io/contrib/exporters/autoexport v0.70.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go-contrib/blob/exporters/autoexport/v0.70.0/exporters/autoexport/LICENSE
+go.opentelemetry.io/contrib/exporters/autoexport v0.70.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go-contrib/blob/exporters/autoexport/v0.70.0/exporters/autoexport/LICENSE
+go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.70.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go-contrib/blob/instrumentation/google.golang.org/grpc/otelgrpc/v0.70.0/instrumentation/google.golang.org/grpc/otelgrpc/LICENSE
+go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.70.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go-contrib/blob/instrumentation/google.golang.org/grpc/otelgrpc/v0.70.0/instrumentation/google.golang.org/grpc/otelgrpc/LICENSE
+go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.70.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go-contrib/blob/instrumentation/net/http/otelhttp/v0.70.0/instrumentation/net/http/otelhttp/LICENSE
+go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.70.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go-contrib/blob/instrumentation/net/http/otelhttp/v0.70.0/instrumentation/net/http/otelhttp/LICENSE
+go.opentelemetry.io/contrib/instrumentation/runtime v0.70.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go-contrib/blob/instrumentation/runtime/v0.70.0/instrumentation/runtime/LICENSE
+go.opentelemetry.io/contrib/instrumentation/runtime v0.70.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go-contrib/blob/instrumentation/runtime/v0.70.0/instrumentation/runtime/LICENSE
+go.opentelemetry.io/contrib/propagators/autoprop v0.70.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go-contrib/blob/propagators/autoprop/v0.70.0/propagators/autoprop/LICENSE
+go.opentelemetry.io/contrib/propagators/autoprop v0.70.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go-contrib/blob/propagators/autoprop/v0.70.0/propagators/autoprop/LICENSE
+go.opentelemetry.io/contrib/propagators/aws/xray v1.45.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go-contrib/blob/propagators/aws/v1.45.0/propagators/aws/LICENSE
+go.opentelemetry.io/contrib/propagators/aws/xray v1.45.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go-contrib/blob/propagators/aws/v1.45.0/propagators/aws/LICENSE
+go.opentelemetry.io/contrib/propagators/b3 v1.45.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go-contrib/blob/propagators/b3/v1.45.0/propagators/b3/LICENSE
+go.opentelemetry.io/contrib/propagators/b3 v1.45.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go-contrib/blob/propagators/b3/v1.45.0/propagators/b3/LICENSE
+go.opentelemetry.io/contrib/propagators/jaeger v1.45.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go-contrib/blob/propagators/jaeger/v1.45.0/propagators/jaeger/LICENSE
+go.opentelemetry.io/contrib/propagators/jaeger v1.45.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go-contrib/blob/propagators/jaeger/v1.45.0/propagators/jaeger/LICENSE
+go.opentelemetry.io/contrib/propagators/ot v1.45.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go-contrib/blob/propagators/ot/v1.45.0/propagators/ot/LICENSE
+go.opentelemetry.io/contrib/propagators/ot v1.45.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go-contrib/blob/propagators/ot/v1.45.0/propagators/ot/LICENSE
+go.opentelemetry.io/otel v1.45.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go/blob/v1.45.0/LICENSE
+go.opentelemetry.io/otel v1.45.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go/blob/v1.45.0/LICENSE
+go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc v0.21.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlplog/otlploggrpc/v0.21.0/exporters/otlp/otlplog/otlploggrpc/LICENSE
+go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc v0.21.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlplog/otlploggrpc/v0.21.0/exporters/otlp/otlplog/otlploggrpc/LICENSE
+go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp v0.21.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlplog/otlploghttp/v0.21.0/exporters/otlp/otlplog/otlploghttp/LICENSE
+go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp v0.21.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlplog/otlploghttp/v0.21.0/exporters/otlp/otlplog/otlploghttp/LICENSE
+go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.45.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlpmetric/otlpmetricgrpc/v1.45.0/exporters/otlp/otlpmetric/otlpmetricgrpc/LICENSE
+go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.45.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlpmetric/otlpmetricgrpc/v1.45.0/exporters/otlp/otlpmetric/otlpmetricgrpc/LICENSE
+go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.45.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlpmetric/otlpmetrichttp/v1.45.0/exporters/otlp/otlpmetric/otlpmetrichttp/LICENSE
+go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.45.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlpmetric/otlpmetrichttp/v1.45.0/exporters/otlp/otlpmetric/otlpmetrichttp/LICENSE
+go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.45.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlptrace/v1.45.0/exporters/otlp/otlptrace/LICENSE
+go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.45.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlptrace/v1.45.0/exporters/otlp/otlptrace/LICENSE
+go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.45.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlptrace/otlptracegrpc/v1.45.0/exporters/otlp/otlptrace/otlptracegrpc/LICENSE
+go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.45.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlptrace/otlptracegrpc/v1.45.0/exporters/otlp/otlptrace/otlptracegrpc/LICENSE
+go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.45.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlptrace/otlptracehttp/v1.45.0/exporters/otlp/otlptrace/otlptracehttp/LICENSE
+go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.45.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlptrace/otlptracehttp/v1.45.0/exporters/otlp/otlptrace/otlptracehttp/LICENSE
+go.opentelemetry.io/otel/exporters/prometheus v0.67.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go/blob/exporters/prometheus/v0.67.0/exporters/prometheus/LICENSE
+go.opentelemetry.io/otel/exporters/prometheus v0.67.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go/blob/exporters/prometheus/v0.67.0/exporters/prometheus/LICENSE
+go.opentelemetry.io/otel/exporters/stdout/stdoutlog v0.21.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go/blob/exporters/stdout/stdoutlog/v0.21.0/exporters/stdout/stdoutlog/LICENSE
+go.opentelemetry.io/otel/exporters/stdout/stdoutlog v0.21.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go/blob/exporters/stdout/stdoutlog/v0.21.0/exporters/stdout/stdoutlog/LICENSE
+go.opentelemetry.io/otel/exporters/stdout/stdoutmetric v1.45.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go/blob/exporters/stdout/stdoutmetric/v1.45.0/exporters/stdout/stdoutmetric/LICENSE
+go.opentelemetry.io/otel/exporters/stdout/stdoutmetric v1.45.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go/blob/exporters/stdout/stdoutmetric/v1.45.0/exporters/stdout/stdoutmetric/LICENSE
+go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.45.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go/blob/exporters/stdout/stdouttrace/v1.45.0/exporters/stdout/stdouttrace/LICENSE
+go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.45.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go/blob/exporters/stdout/stdouttrace/v1.45.0/exporters/stdout/stdouttrace/LICENSE
+go.opentelemetry.io/otel/log v0.21.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go/blob/log/v0.21.0/log/LICENSE
+go.opentelemetry.io/otel/log v0.21.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go/blob/log/v0.21.0/log/LICENSE
+go.opentelemetry.io/otel/metric v1.45.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go/blob/metric/v1.45.0/metric/LICENSE
+go.opentelemetry.io/otel/metric v1.45.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go/blob/metric/v1.45.0/metric/LICENSE
+go.opentelemetry.io/otel/sdk v1.45.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go/blob/sdk/v1.45.0/sdk/LICENSE
+go.opentelemetry.io/otel/sdk v1.45.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go/blob/sdk/v1.45.0/sdk/LICENSE
+go.opentelemetry.io/otel/sdk/log v0.21.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go/blob/sdk/log/v0.21.0/sdk/log/LICENSE
+go.opentelemetry.io/otel/sdk/log v0.21.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go/blob/sdk/log/v0.21.0/sdk/log/LICENSE
+go.opentelemetry.io/otel/sdk/metric v1.45.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go/blob/sdk/metric/v1.45.0/sdk/metric/LICENSE
+go.opentelemetry.io/otel/sdk/metric v1.45.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go/blob/sdk/metric/v1.45.0/sdk/metric/LICENSE
+go.opentelemetry.io/otel/trace v1.45.0 (Apache-2.0)
+https://github.com/open-telemetry/opentelemetry-go/blob/trace/v1.45.0/trace/LICENSE
+go.opentelemetry.io/otel/trace v1.45.0 (BSD-3-Clause)
+https://github.com/open-telemetry/opentelemetry-go/blob/trace/v1.45.0/trace/LICENSE
 
                                  Apache License
                            Version 2.0, January 2004
@@ -1318,8 +1316,8 @@ github.com/container-storage-interface/spec/lib/go/csi v1.11.0 (Apache-2.0)
 https://github.com/container-storage-interface/spec/blob/v1.11.0/LICENSE
 github.com/go-logr/logr v1.4.3 (Apache-2.0)
 https://github.com/go-logr/logr/blob/v1.4.3/LICENSE
-go.yaml.in/yaml/v2 v2.4.4 (Apache-2.0)
-https://github.com/yaml/go-yaml/blob/v2.4.4/LICENSE
+github.com/go-logr/logr v1.4.4 (Apache-2.0)
+https://github.com/go-logr/logr/blob/v1.4.4/LICENSE
 sigs.k8s.io/controller-runtime v0.20.4 (Apache-2.0)
 https://github.com/kubernetes-sigs/controller-runtime/blob/v0.20.4/LICENSE
 sigs.k8s.io/structured-merge-diff/v4 v4.4.2 (Apache-2.0)
@@ -2288,8 +2286,8 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ========================================================================
-github.com/klauspost/compress/s2 v1.18.5 (BSD-3-Clause)
-https://github.com/klauspost/compress/blob/v1.18.5/s2/LICENSE
+github.com/klauspost/compress/s2 v1.19.1 (BSD-3-Clause)
+https://github.com/klauspost/compress/blob/v1.19.1/s2/LICENSE
 
 Copyright (c) 2011 The Snappy-Go Authors. All rights reserved.
 Copyright (c) 2019 Klaus Post. All rights reserved.
@@ -2459,12 +2457,12 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ========================================================================
-github.com/klauspost/compress v1.18.5 (Apache-2.0)
-https://github.com/klauspost/compress/blob/v1.18.5/LICENSE
-github.com/klauspost/compress v1.18.5 (BSD-3-Clause)
-https://github.com/klauspost/compress/blob/v1.18.5/LICENSE
-github.com/klauspost/compress v1.18.5 (MIT)
-https://github.com/klauspost/compress/blob/v1.18.5/LICENSE
+github.com/klauspost/compress v1.19.1 (Apache-2.0)
+https://github.com/klauspost/compress/blob/v1.19.1/LICENSE
+github.com/klauspost/compress v1.19.1 (BSD-3-Clause)
+https://github.com/klauspost/compress/blob/v1.19.1/LICENSE
+github.com/klauspost/compress v1.19.1 (MIT)
+https://github.com/klauspost/compress/blob/v1.19.1/LICENSE
 
 Copyright (c) 2012 The Go Authors. All rights reserved.
 Copyright (c) 2019 Klaus Post. All rights reserved.
@@ -2798,8 +2796,8 @@ LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ========================================================================
-github.com/prometheus/client_golang/internal/github.com/golang/gddo/httputil v1.23.2 (BSD-3-Clause)
-https://github.com/prometheus/client_golang/blob/v1.23.2/internal/github.com/golang/gddo/LICENSE
+github.com/prometheus/client_golang/internal/github.com/golang/gddo/httputil v1.24.1 (BSD-3-Clause)
+https://github.com/prometheus/client_golang/blob/v1.24.1/internal/github.com/golang/gddo/LICENSE
 
 Copyright (c) 2013 The Go Authors. All rights reserved.
 
@@ -3357,8 +3355,8 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ========================================================================
-github.com/felixge/httpsnoop v1.0.4 (MIT)
-https://github.com/felixge/httpsnoop/blob/v1.0.4/LICENSE.txt
+github.com/felixge/httpsnoop v1.1.0 (MIT)
+https://github.com/felixge/httpsnoop/blob/v1.1.0/LICENSE.txt
 
 Copyright (c) 2016 Felix Geisendörfer (felix@debuggable.com)
 

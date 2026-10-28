@@ -13,10 +13,10 @@ http://dsx-imds.dsx-identity.svc.cluster.local
 
 ## Requirements and values
 
-The parent [DSX Identity chart](../dsx-identity/README.md) supplies the release
-version, image, selectors, and exchange URL. DPF supplies scheduling and
-ownership fields under `serviceDaemonSet`. A registered `csi.spiffe.io` driver
-must expose the local DPU agent Workload API socket.
+The parent [NVIDIA Workload Identity chart](../dsx-identity/README.md)
+supplies the release version, image, selectors, and exchange URL. DPF supplies
+scheduling and ownership fields under `serviceDaemonSet`. A registered
+`csi.spiffe.io` driver must expose the local DPU agent Workload API socket.
 
 | Value | Purpose |
 |---|---|
@@ -32,7 +32,7 @@ registered identity.
 
 ## Deploy
 
-In the parent [DSX Identity chart](../dsx-identity/README.md),
+In the parent [NVIDIA Workload Identity chart](../dsx-identity/README.md),
 `dpuService.imds.enabled` defaults to `true`. The parent chart renders the
-[`DPUService`](../dsx-identity/templates/dpu-service.yaml), and DPF installs this
-chart into selected DPU clusters.
+[`DPUService`](../dsx-identity/templates/dpu-service.yaml), and DPF installs
+this chart into selected DPU clusters.

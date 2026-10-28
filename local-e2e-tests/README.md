@@ -11,14 +11,14 @@ Controller, OVN-Kubernetes layer-3 UDN, and KubeVirt VMs using `bridge` and
 describe only this fixture and do not define a trust hierarchy. Local identity
 components use one replica and SPIRE uses its SQLite default.
 
-Local fixtures configure DSX Identity Keys HTTP endpoints directly. The local
-Zot registry caches image pulls for both Kind clusters and local builds through
-`mirror.gcr.io`. Set `KIND_DOCKERHUB_MIRROR` to an HTTPS registry origin to route
-all Docker Hub pulls from Kind directly through that mirror. An unavailable mirror
-fails the pull without falling back to Docker Hub. Leave it unset to keep the local
-Zot route. Other registries keep using Zot. CI uses the NVIDIA Docker Hub mirror
-for Kind and Zot. It does not save Zot storage in GitHub Actions caches, leaving
-that quota for build and tool caches.
+Local fixtures configure NVIDIA Workload Identity Keys HTTP endpoints
+directly. The local Zot registry caches image pulls for both Kind clusters and
+local builds through `mirror.gcr.io`. Set `KIND_DOCKERHUB_MIRROR` to an HTTPS
+registry origin to route Docker Hub pulls from Kind directly through that mirror.
+If the mirror is unavailable, the pull fails. Leave it unset to use Zot.
+Other registries keep using Zot. CI uses the NVIDIA mirror for Kind and as Zot's
+first Docker Hub upstream, with Docker Hub as Zot's fallback. Zot caches images
+during the job, but CI does not save its storage in GitHub Actions caches.
 
 The identity chart is installed independently in both clusters. The remaining
 components are separate Skaffold modules. Shared fixture settings and the
@@ -32,10 +32,10 @@ shard-specific overrides are in:
 
 Kind starts without an external DPU or an attested worker agent. Before the
 worker agent is available, the control-plane node represents the Phase 0 seed
-host. Each identity chart is installed once. Its normal DSX Identity Keys Pod runs on
-the seed node and uses the ordinary operator-Pod registration there while the
-worker's `dsx_imds` agent attests. DSX Identity Keys has no bootstrap-specific identity
-or deployment path.
+host. Each identity chart is installed once. Its normal NVIDIA Workload
+Identity Keys Pod runs on the seed node and uses the ordinary operator-Pod
+registration there while the worker's `dsx_imds` agent attests. NVIDIA
+Workload Identity Keys has no bootstrap-specific identity or deployment path.
 
 Both local shards must exercise host attestation without physical DPU hardware.
 Each therefore runs an official SPIRE agent DaemonSet constrained to its worker
@@ -79,7 +79,7 @@ flowchart TB
   DPUMetadata["E2E DSX IMDS<br/>(metadata-service)"]
   Agent["Bare-metal worker<br/>dsx_imds SPIRE agent process"]
   Plugin["dsx_imds NodeAttestor<br/>agent plugin"]
-  IdentityKeys["k2 DSX Identity Keys Pod"]
+  IdentityKeys["k2 NVIDIA Workload Identity<br/>Keys Pod"]
   Server["k2 SPIRE server Pod<br/>dsx_imds server plugin"]
 ```
 
@@ -128,16 +128,17 @@ for the packet path.
 
 ## Cross-shard OpenBao validation
 
-The local E2E topology deploys OpenBao in k1 as an external relying party. A VM
-DSX JWT issued in k2 is accepted because the k2 DSX Identity Keys public key propagates
-through the Event Bus and appears in the k1 DSX Identity Keys aggregate JWKS.
+The local E2E topology deploys OpenBao in k1 as an external relying party. A
+VM DSX JWT issued in k2 is accepted because the k2 NVIDIA Workload Identity
+Keys public key propagates through the Event Bus and appears in the k1 NVIDIA
+Workload Identity Keys aggregate JWKS.
 
 ```mermaid
 sequenceDiagram
   participant Test as E2E test process
   participant Gateway as Envoy Gateway<br/>data-plane Pod in k1
   participant Bao as OpenBao Pod in k1
-  participant JWKS as k1 DSX Identity Keys Pod<br/>aggregate JWKS endpoint
+  participant JWKS as k1 NVIDIA Workload Identity Keys Pod<br/>aggregate JWKS endpoint
 
   Test->>Gateway: JWT CEL login with k2 VM DSX JWT
   Gateway->>Bao: Forward login request
