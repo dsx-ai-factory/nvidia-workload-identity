@@ -4,9 +4,12 @@
 package main
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
+
+	"dsx-identity/internal/dsxidentity"
 )
 
 func TestExchangeSubject(t *testing.T) {
@@ -67,12 +70,24 @@ func TestExchangeSubject(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := exchangeSubject("ds9", "nvid.id", spiffeid.RequireFromString(test.local))
+			got, claims, err := exchangeSubject("ds9", "nvid.id", spiffeid.RequireFromString(test.local))
 			if err != nil {
 				t.Fatal(err)
 			}
 			if got.String() != test.dsx {
 				t.Fatalf("got %q, want %q", got, test.dsx)
+			}
+			// The claims must agree with the exchanged sub.
+			subject, err := dsxidentity.Parse(got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := dsxidentity.Claims(subject, "ds9", "nvid.id")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(claims, want) {
+				t.Fatalf("claims = %#v, want %#v", claims, want)
 			}
 		})
 	}
@@ -81,7 +96,7 @@ func TestExchangeSubject(t *testing.T) {
 func TestExchangeSubjectRejectsTenantlessLocalID(t *testing.T) {
 	t.Parallel()
 
-	if _, err := exchangeSubject(
+	if _, _, err := exchangeSubject(
 		"ds9",
 		"nvid.id",
 		spiffeid.RequireFromString("spiffe://k2.internal/dpu/dpu-1/process/dpu-agent"),
@@ -102,7 +117,7 @@ func TestExchangeSubjectRejectsInvalidPairs(t *testing.T) {
 		t.Run(path, func(t *testing.T) {
 			t.Parallel()
 			id := spiffeid.RequireFromString("spiffe://k2.internal/tenant/tenant-2/service/dsx/" + path)
-			if _, err := exchangeSubject("ds9", "nvid.id", id); err == nil {
+			if _, _, err := exchangeSubject("ds9", "nvid.id", id); err == nil {
 				t.Fatal("invalid subject was exchanged")
 			}
 		})

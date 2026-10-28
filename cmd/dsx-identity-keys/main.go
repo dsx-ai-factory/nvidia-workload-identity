@@ -106,7 +106,7 @@ func (s *identityKeysServer) Close() error {
 	return s.jwtSource.Close()
 }
 
-func (s *identityKeysServer) resignJWT(originalClaims map[string]any, newSubject spiffeid.ID) (string, error) {
+func (s *identityKeysServer) resignJWT(originalClaims map[string]any, newSubject spiffeid.ID, subjectClaims dsxidentity.SubjectClaims) (string, error) {
 	// Preserve only registered JWT-SVID claims across the shard boundary.
 	newClaims := make(map[string]any, 7)
 	for _, name := range []string{"aud", "exp", "iat", "jti", "nbf"} {
@@ -118,7 +118,8 @@ func (s *identityKeysServer) resignJWT(originalClaims map[string]any, newSubject
 	newClaims["iss"] = s.issuer
 
 	signer := s.signingKeys.Get().Signer()
-	token, err := jwt.Signed(signer).Claims(newClaims).Serialize()
+	// Later claims win, so write the subject claims first.
+	token, err := jwt.Signed(signer).Claims(subjectClaims).Claims(newClaims).Serialize()
 	if err != nil {
 		return "", fmt.Errorf("sign JWT: %w", err)
 	}
@@ -176,13 +177,13 @@ func (s *identityKeysServer) handleTokenExchange(w http.ResponseWriter, r *http.
 		writeTokenError(w, http.StatusUnauthorized, "invalid_grant", "subject_token validation failed")
 		return
 	}
-	newID, err := exchangeSubject(s.region, s.partition, validatedSVID.ID)
+	newID, subjectClaims, err := exchangeSubject(s.region, s.partition, validatedSVID.ID)
 	if err != nil {
 		slog.WarnContext(r.Context(), "Rejected token exchange", "reason", "unsupported_subject", "error", err)
 		writeTokenError(w, http.StatusBadRequest, "invalid_request", "subject_token subject is not supported")
 		return
 	}
-	token, err := s.resignJWT(validatedSVID.Claims, newID)
+	token, err := s.resignJWT(validatedSVID.Claims, newID, subjectClaims)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "Failed to sign JWT", "error", err)
 		writeTokenError(w, http.StatusInternalServerError, "server_error", "Failed to sign JWT")
@@ -208,13 +209,20 @@ func (s *identityKeysServer) handleTokenExchange(w http.ResponseWriter, r *http.
 	}
 }
 
-func exchangeSubject(region, partition string, id spiffeid.ID) (spiffeid.ID, error) {
+func exchangeSubject(region, partition string, id spiffeid.ID) (spiffeid.ID, dsxidentity.SubjectClaims, error) {
 	local, err := spireidentity.Parse(id)
 	if err != nil {
-		return spiffeid.ID{}, err
+		return spiffeid.ID{}, dsxidentity.SubjectClaims{}, err
 	}
-
-	return dsxidentity.ID(local, region, partition)
+	newID, err := dsxidentity.ID(local, region, partition)
+	if err != nil {
+		return spiffeid.ID{}, dsxidentity.SubjectClaims{}, err
+	}
+	claims, err := dsxidentity.Claims(local, region, partition)
+	if err != nil {
+		return spiffeid.ID{}, dsxidentity.SubjectClaims{}, err
+	}
+	return newID, claims, nil
 }
 
 func (s *identityKeysServer) handleJWKS(w http.ResponseWriter, _ *http.Request) {

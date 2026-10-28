@@ -3,7 +3,8 @@
 `dsx-identity-keys` is the NVIDIA Workload Identity Keys process installed in
 each identity shard. It validates only local SPIRE JWT-SVIDs, transforms their
 SPIFFE subject to the NVIDIA Workload Identity contract, preserves the
-registered `aud`, `exp`, `iat`, `jti`, and `nbf` claims, and signs the
+registered `aud`, `exp`, `iat`, `jti`, and `nbf` claims, writes the subject
+components as [claims](#token-claims), and signs the
 exchanged DSX JWT with the shard's active key. SPIRE registration determines
 the tenant in the local subject, and NVIDIA Workload Identity Keys preserves
 it while validating the common identity grammar. It obtains local JWT
@@ -44,6 +45,32 @@ parties can use the JWKS from any reachable NVIDIA Workload Identity Keys.
 signing keys. Readiness then depends only on the local key registry. This mode
 does not distribute keys between shards, so each relying party must use the
 JWKS endpoint for the shard that issued its tokens.
+
+## Token claims
+
+The exchanged DSX JWT carries each component of its subject as a claim, so
+relying parties can authorize on claims without parsing `sub`. Each value is
+the component encoded into `sub`. For
+`spiffe://operator-1.ds9.dsx.nvid.id/bm/worker-1/pod/<pod-uid>/role/web`:
+
+```json
+{
+  "dsx.nvidia.com/tenant": "operator-1",
+  "dsx.nvidia.com/region": "ds9",
+  "dsx.nvidia.com/service": "dsx",
+  "dsx.nvidia.com/partition": "nvid.id",
+  "dsx.nvidia.com/resource": [
+    {"resource_type": "bm", "resource_id": "worker-1"},
+    {"resource_type": "pod", "resource_id": "<pod-uid>"},
+    {"resource_type": "role", "resource_id": "web"}
+  ]
+}
+```
+
+`resource` lists every path pair in order, starting with the resource itself.
+A rule on one entry, such as `{bm, worker-1}`, matches the host and every
+workload on it, like a prefix match on `sub`. To match only the host, the rule
+must also check the length of `resource`, like an exact match on `sub`.
 
 ## Flat key distribution
 

@@ -87,3 +87,41 @@ func TestRejectInvalidResourcePairs(t *testing.T) {
 		})
 	}
 }
+
+func TestResources(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		resource  []string
+		resources []Resource
+	}{
+		{
+			name:      "resource",
+			resource:  []string{"bm", "host-1"},
+			resources: []Resource{{"bm", "host-1"}},
+		},
+		{
+			name:      "pod on a host",
+			resource:  []string{"bm", "worker-1", "pod", "pod-1", "role", "web"},
+			resources: []Resource{{"bm", "worker-1"}, {"pod", "pod-1"}, {"role", "web"}},
+		},
+		{
+			name:      "DPU service",
+			resource:  []string{"dpu", "dpu-1", "dpuservice", "storage_service", "namespace", "storage-system"},
+			resources: []Resource{{"dpu", "dpu-1"}, {"dpuservice", "storage_service"}, {"namespace", "storage-system"}},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			subject, err := ParseResource("tenant-2", "dsx", test.resource)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := subject.Resources(); !reflect.DeepEqual(got, test.resources) {
+				t.Errorf("Resources() = %v, want %v", got, test.resources)
+			}
+		})
+	}
+}

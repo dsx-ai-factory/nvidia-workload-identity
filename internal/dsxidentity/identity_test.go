@@ -4,6 +4,7 @@
 package dsxidentity
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -130,5 +131,106 @@ func TestRejectInvalidID(t *testing.T) {
 				t.Fatal("expected error")
 			}
 		})
+	}
+}
+
+func TestClaims(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "bare metal",
+			raw:  "spiffe://tenant-2.ds9.dsx.nvid.id/bm/host-1",
+			want: `{"dsx.nvidia.com/tenant": "tenant-2", "dsx.nvidia.com/region": "ds9", "dsx.nvidia.com/service": "dsx",
+				"dsx.nvidia.com/partition": "nvid.id",
+				"dsx.nvidia.com/resource": [{"resource_type": "bm", "resource_id": "host-1"}]}`,
+		},
+		{
+			name: "vm with role",
+			raw:  "spiffe://tenant-2.ds9.dsx.nvid.id/vm/vm-1/role/database",
+			want: `{"dsx.nvidia.com/tenant": "tenant-2", "dsx.nvidia.com/region": "ds9", "dsx.nvidia.com/service": "dsx",
+				"dsx.nvidia.com/partition": "nvid.id",
+				"dsx.nvidia.com/resource": [{"resource_type": "vm", "resource_id": "vm-1"}, {"resource_type": "role", "resource_id": "database"}]}`,
+		},
+		{
+			name: "pod with role",
+			raw:  "spiffe://operator-1.ds9.identity-probe.nvid.id/bm/worker-1/pod/13c31c2c-2673-42d1-bdeb-241864db47f6/role/web",
+			want: `{"dsx.nvidia.com/tenant": "operator-1", "dsx.nvidia.com/region": "ds9", "dsx.nvidia.com/service": "identity-probe",
+				"dsx.nvidia.com/partition": "nvid.id",
+				"dsx.nvidia.com/resource": [{"resource_type": "bm", "resource_id": "worker-1"},
+					{"resource_type": "pod", "resource_id": "13c31c2c-2673-42d1-bdeb-241864db47f6"},
+					{"resource_type": "role", "resource_id": "web"}]}`,
+		},
+		{
+			name: "process with role",
+			raw:  "spiffe://tenant-2.ds9.dsx.nvid.id/bm/host-1/process/nke-agent/role/operator",
+			want: `{"dsx.nvidia.com/tenant": "tenant-2", "dsx.nvidia.com/region": "ds9", "dsx.nvidia.com/service": "dsx",
+				"dsx.nvidia.com/partition": "nvid.id",
+				"dsx.nvidia.com/resource": [{"resource_type": "bm", "resource_id": "host-1"}, {"resource_type": "process", "resource_id": "nke-agent"},
+					{"resource_type": "role", "resource_id": "operator"}]}`,
+		},
+		{
+			name: "DPU service",
+			raw:  "spiffe://operator-1.ds9.dsx.nvid.id/dpu/dpu-1/dpuservice/storage_service/namespace/storage-system",
+			want: `{"dsx.nvidia.com/tenant": "operator-1", "dsx.nvidia.com/region": "ds9", "dsx.nvidia.com/service": "dsx",
+				"dsx.nvidia.com/partition": "nvid.id",
+				"dsx.nvidia.com/resource": [{"resource_type": "dpu", "resource_id": "dpu-1"},
+					{"resource_type": "dpuservice", "resource_id": "storage_service"},
+					{"resource_type": "namespace", "resource_id": "storage-system"}]}`,
+		},
+		{
+			name: "generic key",
+			raw:  "spiffe://tenant-2.ds9.dsx.nvid.id/Cluster/Cluster-1/namespace/team-a",
+			want: `{"dsx.nvidia.com/tenant": "tenant-2", "dsx.nvidia.com/region": "ds9", "dsx.nvidia.com/service": "dsx",
+				"dsx.nvidia.com/partition": "nvid.id",
+				"dsx.nvidia.com/resource": [{"resource_type": "Cluster", "resource_id": "Cluster-1"},
+					{"resource_type": "namespace", "resource_id": "team-a"}]}`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			subject, err := Parse(spiffeid.RequireFromString(test.raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			claims, err := Claims(subject, testRegion, testPartition)
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := json.Marshal(claims)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got, want any
+			if err := json.Unmarshal(encoded, &got); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal([]byte(test.want), &want); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("got %s, want %s", encoded, test.want)
+			}
+		})
+	}
+}
+
+func TestClaimsRejectInvalidInput(t *testing.T) {
+	t.Parallel()
+
+	subject := identity.Subject{Tenant: "tenant-2", Service: "dsx", ResourceType: identity.ResourceBM, ResourceID: "host-1"}
+	if _, err := Claims(subject, "DS9", testPartition); err == nil {
+		t.Error("invalid region succeeded")
+	}
+	subject.Path = []string{"pod"}
+	if _, err := Claims(subject, testRegion, testPartition); err == nil {
+		t.Error("unpaired path succeeded")
 	}
 }
