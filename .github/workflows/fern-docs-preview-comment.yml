@@ -1,0 +1,207 @@
+# Workflow 2 of 2 for Fern doc previews.
+#
+# Runs after "Preview Fern Docs: Build" completes. Builds a preview with
+# FERN_TOKEN and posts a stable PR comment with the preview link.
+#
+# This job runs the Fern CLI with FERN_TOKEN in its environment against page
+# content written by the PR author. Fern reads any local file a page names, so an
+# author who controls those pages could print the token on a preview page. The
+# copy-pr-bot vets a PR before it creates pull-request/<n>, and that vetting is the
+# control. tools/check-docs-paths runs as defense in depth and is a deny-list.
+#
+# The artifact is still untrusted. The Fern CLI runs against fern/ and tools/
+# from the default branch. Only the pages that the PR's index.yml lists are copied
+# in from the artifact. stage-fern-site refuses paths under fern/, tools/, and
+# .github/, so the artifact cannot replace trusted files. Frozen version content
+# is extracted here from the trusted registry and tags. A PR that edits fern/ or tools/ is not previewed with those edits
+# until it merges.
+#
+# Required configuration: repository or organization secret FERN_TOKEN.
+
+name: "Preview Fern Docs: Comment"
+
+on:
+  workflow_run:
+    workflows: ["Preview Fern Docs: Build"]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  preview:
+    # head_repository is set by GitHub, not by the PR author.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Download pages and metadata
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: fern-preview
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate and read PR metadata
+        id: metadata
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          PR_NUMBER=$(cat preview-metadata/pr_number)
+          # [[ =~ ]] matches the whole string. grep -E is per line and would let
+          # "12<newline>foo=bar" through into $GITHUB_OUTPUT.
+          if ! [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "::error::Invalid pr_number in artifact"
+            exit 1
+          fi
+          # The number comes from the artifact. Require that the PR head is the
+          # commit that triggered this run and that the run came from the bot
+          # branch for the same number. Only the bot creates that branch.
+          PR_HEAD=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}" --jq '.head.sha')
+          if [ "$PR_HEAD" != "$RUN_HEAD_SHA" ] || [ "$RUN_HEAD_BRANCH" != "pull-request/${PR_NUMBER}" ]; then
+            echo "::error::pr_number ${PR_NUMBER} does not match the run that produced the artifact"
+            exit 1
+          fi
+          echo "pr_number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      # No ref: a workflow_run checkout defaults to the default branch, which is
+      # the trusted tree.
+      - name: Checkout trusted tree from the default branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          path: trusted
+
+      - name: Overlay the PR's pages on the trusted tree
+        run: python3 trusted/tools/stage-fern-site site trusted
+
+      # Registered versions serve frozen pages from their release tag. The
+      # registry and the tags come from the trusted tree, so the preview matches
+      # master even when the PR branch predates a registration. The loop does
+      # nothing until the first version is registered.
+      - name: Extract frozen version content
+        working-directory: trusted
+        run: |
+          set -eo pipefail
+          for version_file in fern/versions/v*.yml; do
+            [ -f "$version_file" ] || continue
+            version=$(basename "$version_file" .yml)
+            python3 tools/fern-frozen-content "$version" "fern/versions/${version}-content" "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          done
+
+      - name: Check docs paths before using FERN_TOKEN
+        # Runs the checker from the default branch, not from the PR.
+        run: |
+          stage="$(mktemp -d)"
+          trap 'rm -rf "$stage"' EXIT
+          python3 trusted/tools/stage-fern-site --with-fern trusted "$stage"
+          python3 trusted/tools/check-docs-paths --allow '../index.yml' "$stage"
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+
+      # Intentionally unpinned: Fern ships often with no LTS channel and the
+      # NVIDIA global theme tracks the latest CLI.
+      - name: Install Fern CLI
+        run: npm install -g fern-api@latest
+
+      - name: Generate preview URL
+        id: generate-docs
+        env:
+          FERN_TOKEN: ${{ secrets.FERN_TOKEN }}
+          PR_NUMBER: ${{ steps.metadata.outputs.pr_number }}
+        working-directory: ./trusted/fern
+        run: |
+          set -o pipefail
+          fern generate --docs --preview --id "pr-${PR_NUMBER}" 2>&1 | tee "$RUNNER_TEMP/fern-output.log"
+          # Fern prints "Published docs to URL", sometimes followed by " (URL)".
+          URL=$(sed -n 's/.*Published docs to \(https:[^[:space:]]*\).*/\1/p' "$RUNNER_TEMP/fern-output.log" | tail -1)
+          if [ -z "$URL" ]; then
+            echo "::error::Failed to generate preview URL. See fern output above."
+            exit 1
+          fi
+          if ! printf '%s' "$URL" | grep -qE '^https://[a-zA-Z0-9._-]+\.buildwithfern\.com([/:?#]|$)'; then
+            echo "::error::Unexpected preview URL host (expected buildwithfern.com): ${URL}"
+            exit 1
+          fi
+          echo "preview_url=$URL" >> "$GITHUB_OUTPUT"
+
+      # The page-links request does not send FERN_TOKEN.
+      - name: Build page links for changed files
+        id: page-links
+        env:
+          PREVIEW_URL: ${{ steps.generate-docs.outputs.preview_url }}
+        run: |
+          CHANGED_FILES=""
+          if [ -f preview-metadata/changed_md_files ]; then
+            CHANGED_FILES=$(cat preview-metadata/changed_md_files)
+          fi
+          if [ -z "$CHANGED_FILES" ] || [ -z "$PREVIEW_URL" ]; then
+            echo "page_links=" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+
+          BASE_URL="${PREVIEW_URL%/}"
+          FILES_PARAM=$(echo "$CHANGED_FILES" | tr '\n' ',' | sed 's/,$//' \
+            | python3 -c "import sys, urllib.parse; print(urllib.parse.quote(sys.stdin.read().strip(), safe=',/'))")
+          RESPONSE=$(curl -sf "${PREVIEW_URL}/api/fern-docs/get-slug-for-file?files=${FILES_PARAM}" 2>/dev/null) || {
+            echo "page_links=" >> "$GITHUB_OUTPUT"; exit 0
+          }
+
+          PAGE_LINKS=$(echo "$RESPONSE" | jq -r --arg url "$BASE_URL" \
+            '.mappings[] | select(.slug != null) | "- [\(.slug)](\($url)/\(.slug))"')
+
+          if [ -n "$PAGE_LINKS" ]; then
+            { echo "page_links<<EOF"; echo "$PAGE_LINKS"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+          else
+            echo "page_links=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post or update PR comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.metadata.outputs.pr_number }}
+          PREVIEW_URL: ${{ steps.generate-docs.outputs.preview_url }}
+          PAGE_LINKS: ${{ steps.page-links.outputs.page_links }}
+        run: |
+          BODY=":herb: **Preview your docs:** <${PREVIEW_URL}>"
+          if [ -n "${PAGE_LINKS}" ]; then
+            BODY="${BODY}
+
+          Here are the markdown pages you've updated:
+          ${PAGE_LINKS}"
+          fi
+
+          MARKER="<!-- preview-docs -->"
+          BODY="${BODY}
+
+          ${MARKER}"
+
+          # Match only the bot's own comment, because anyone can post the marker.
+          # Page through all comments so an older one is still found.
+          COMMENT_ID=$(gh api --paginate "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | contains(\"${MARKER}\"))) | .id" | tr -d '\r' | head -1)
+
+          if [ -n "$COMMENT_ID" ]; then
+            gh api "repos/${{ github.repository }}/issues/comments/${COMMENT_ID}" \
+              -X PATCH -f body="$BODY"
+          else
+            gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+              -f body="$BODY"
+          fi

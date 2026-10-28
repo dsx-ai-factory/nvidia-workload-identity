@@ -41,8 +41,11 @@ repository is a legacy mirror.
 - Ordinary tests run through standard validation. Do not add README test
   sections, per-package test commands, or test coverage lists for them.
   Adding or changing an ordinary test does not require a README update.
-- Keep current documentation in these READMEs. Do not add a `docs` directory or
-  standalone implementation plans unless the user explicitly requests one.
+- Keep current documentation in these READMEs and in `docs/`, which holds the
+  operator pages the root README links to. Fern publishes operator documentation
+  only, through the navigation in `index.yml` and the config in `fern/`. Keep
+  developer material such as releases, CI, and E2E out of the Fern navigation.
+  Do not add standalone implementation plans unless the user explicitly requests one.
 - Show user-facing API contracts with concrete request and response examples.
 - Finish prose and comment updates before editing diagrams. Use simple, readable
   diagrams that retain the relevant components and connections. The network
