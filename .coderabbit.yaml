@@ -1,0 +1,11 @@
+reviews:
+  path_instructions:
+    - path: ".github/workflows/*fern*.yml"
+      instructions: |
+        `npm install -g fern-api@latest` is intentional. Fern has no LTS channel and
+        the NVIDIA global theme tracks the latest CLI. Do not recommend pinning the
+        Fern CLI version.
+    - path: "fern/fern.config.json"
+      instructions: |
+        `"version": "latest"` is intentional. Do not recommend pinning the Fern CLI
+        version.

@@ -46,6 +46,14 @@ repository is a legacy mirror.
   only, through the navigation in `index.yml` and the config in `fern/`. Keep
   developer material such as releases, CI, and E2E out of the Fern navigation.
   Do not add standalone implementation plans unless the user explicitly requests one.
+- Prevent documentation drift. When a change affects behavior, configuration, an
+  API, a name, or a file location, survey every documentation touchpoint before
+  finishing. Search for the old and new terms across the root README, `docs/`,
+  component, chart, and example READMEs, `local-e2e-tests/README.md`, Helm values
+  comments, diagrams, and `index.yml`. Update each place that describes the
+  change. When a page is added, removed, or renamed, update `index.yml`, the
+  Documentation list in the root README, and every link to it. Report the
+  touchpoints you checked and any you left unchanged.
 - Show user-facing API contracts with concrete request and response examples.
 - Finish prose and comment updates before editing diagrams. Use simple, readable
   diagrams that retain the relevant components and connections. The network
@@ -76,6 +84,9 @@ repository is a legacy mirror.
   shared when a component bypasses it.
 - Use repository-pinned tools and dependencies. Pin container images and never
   use `latest`.
+- Do not pin the Fern CLI. Use `"version": "latest"` in `fern/fern.config.json`
+  and `fern-api@latest` in workflows. This is the one exception to the rule above.
+  Do not add or suggest a pin, even when a reviewer asks for one.
 - Use Go 1.26+, standard formatting, structured `slog` logging, context cancellation,
   and the shared telemetry package.
 - Never call `os.Exit` outside `main`. Keep cleanup in an error-returning function
