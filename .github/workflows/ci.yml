@@ -79,6 +79,12 @@ jobs:
         with:
           version: 2026.4.28
           install_args: --locked
+      - uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        id: zot-cache
+        with:
+          # The full Zot storage exceeds GitHub's 10 GB per-entry limit.
+          path: ${{ env.ZOT_DATA_DIR }}/library
+          key: zot-dockerhub-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('local-e2e-tests/local-registry/zot-config.json') }}
       - name: Prepare host networking and virtualization
         run: |
           # The AWS image omits VRF and holds its matching extra module package.
@@ -172,12 +178,18 @@ jobs:
       - name: Clean up E2E clusters
         if: always() && steps.tools.outcome == 'success'
         run: make clean
-      - name: Stop Zot
-        if: always() && steps.tools.outcome == 'success'
+      - name: Stop Zot before caching
+        if: always() && steps.install.outcome == 'success' && steps.zot-cache.outputs.cache-hit != 'true'
+        id: stop-zot
         run: |
-          if docker container inspect dsx-identity-registry >/dev/null 2>&1; then
-            docker stop dsx-identity-registry
-          fi
+          docker stop dsx-identity-registry
+          sudo chown -R "$(id -u):$(id -g)" "$ZOT_DATA_DIR/library"
+          du -sh "$ZOT_DATA_DIR/library"
+      - uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        if: always() && steps.stop-zot.outcome == 'success'
+        with:
+          path: ${{ env.ZOT_DATA_DIR }}/library
+          key: ${{ steps.zot-cache.outputs.cache-primary-key }}
 
   secret-detection:
     name: Secret detection
