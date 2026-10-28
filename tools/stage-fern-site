@@ -11,8 +11,8 @@ the fern/ directory.
 
 It rejects a page path that Fern could use to read a file outside the published
 set: a ".." segment, an absolute or backslash path, a suffix other than .md or
-.mdx, a path under fern/, tools/, or .github/, a symbolic link, and a file that
-does not exist. DEST may already exist, which lets the preview job overlay a
+.mdx, a page that resolves under fern/, tools/, or .github/, a symbolic link, and
+a file that does not exist. DEST may already exist, which lets the preview job overlay a
 pull request's pages onto a trusted checkout.
 
 Usage: stage-fern-site [--with-fern] SRC DEST
@@ -21,6 +21,7 @@ Usage: stage-fern-site [--with-fern] SRC DEST
 from __future__ import annotations
 
 import argparse
+import posixpath
 import re
 import shutil
 import sys
@@ -46,15 +47,19 @@ def problem(src: Path, page: str) -> str | None:
         return "path leaves the repository or is not relative"
     if Path(page).suffix.lower() not in PAGE_SUFFIXES:
         return "page is not a .md or .mdx file"
-    if parts[0] in RESERVED_ROOTS:
-        return f"page is under reserved directory {parts[0]}/"
     full = src / page
     if full.is_symlink():
         return "page is a symbolic link"
     if not full.is_file():
         return "page does not exist"
-    if src.resolve() not in full.resolve().parents:
+    # Check the resolved location, not the written path. A "./fern/x.md" prefix or
+    # a symlinked directory would otherwise reach a reserved directory.
+    root, resolved = src.resolve(), full.resolve()
+    if root not in resolved.parents:
         return "page resolves outside the source tree"
+    top = resolved.relative_to(root).parts[0]
+    if top in RESERVED_ROOTS:
+        return f"page is under reserved directory {top}/"
     return None
 
 
@@ -79,7 +84,7 @@ def main() -> int:
     args.dest.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(index, args.dest / "index.yml")
     for page in pages:
-        target = args.dest / page
+        target = args.dest / posixpath.normpath(page)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(args.src / page, target)
     if args.with_fern:
