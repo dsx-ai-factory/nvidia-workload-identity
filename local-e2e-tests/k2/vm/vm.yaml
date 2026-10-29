@@ -35,6 +35,9 @@ spec:
         spiffe.nvidia.com/service: dsx
       annotations:
         spiffe.nvidia.com/inject-dsx-imds: "true"
+        hooks.kubevirt.io/hookSidecars: '[{"args": ["--version", "v1alpha2"], "configMap":
+          {"name": "e2e-l2bridge-cloud-init", "key": "preCloudInitIso", "hookPath":
+          "/usr/bin/preCloudInitIso"}}]'
     spec:
       nodeSelector:
         kubernetes.io/hostname: k2-worker
@@ -61,7 +64,8 @@ spec:
               name: vm-service-account
           interfaces:
             - name: default
-              # Built-in bridge supplies DHCP for the CNI-assigned guest address.
+              # Built-in bridge supplies DHCP for the CNI-assigned IPv4 address.
+              # The cloud-init hook configures the CNI-assigned IPv6 address.
               bridge: {}
         features:
           acpi:
@@ -77,6 +81,7 @@ spec:
       networks:
         - name: default
           multus:
+            # Multus default-network references require an explicit namespace.
             networkName: tenant-tenant1/tenant-tenant1-network
             default: true
       volumes:
@@ -93,6 +98,8 @@ spec:
             serviceAccountName: e2e-debian-vm
 ---
 # Launch Layer normally publishes the virt-launcher Pod UID to VirtualInstance status.
+# Keep this publisher on the dual-stack network so it can reach the IPv4 API
+# service while registering VMs from all three network modes.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -137,11 +144,22 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
-              for vm in e2e-debian-vm e2e-debian-vm-l2bridge; do
-                kubectl wait --for=create pod -l "kubevirt.io/domain=$vm" --timeout=300s
-                uid=$(kubectl get pod -l "kubevirt.io/domain=$vm" -o jsonpath='{.items[0].metadata.uid}')
-                kubectl patch virtualinstance "$vm" --subresource=status --type=merge -p "{\"status\":{\"pod_uid\":\"$uid\"}}"
+              set -eu
+              failed=0
+              for namespace in tenant-tenant1 tenant-tenant1-ipv4 tenant-tenant1-ipv6; do
+                for vm in e2e-debian-vm e2e-debian-vm-l2bridge; do
+                  if ! kubectl wait -n "$namespace" --for=create pod -l "kubevirt.io/domain=$vm" --timeout=300s; then
+                    failed=1
+                    continue
+                  fi
+                  if ! uid=$(kubectl get pod -n "$namespace" -l "kubevirt.io/domain=$vm" -o jsonpath='{.items[0].metadata.uid}'); then
+                    failed=1
+                    continue
+                  fi
+                  kubectl patch virtualinstance "$vm" -n "$namespace" --subresource=status --type=merge -p "{\"status\":{\"pod_uid\":\"$uid\"}}" || failed=1
+                done
               done
+              exit "$failed"
           resources:
             requests:
               cpu: 10m

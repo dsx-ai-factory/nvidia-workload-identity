@@ -101,34 +101,52 @@ socket to fetch the VM SPIRE JWT-SVID.
 
 ## VM network bindings
 
-Both VMs use the same primary layer-3 UDN and real DSX IMDS sidecars. The binding
+Each network mode runs both VM bindings with real DSX IMDS sidecars. The binding
 name describes the guest's Ethernet attachment, not the UDN topology.
 Both guests use the [KubeVirt Alpine image with test tooling](k2/vm/vm.yaml).
 Each guest has one vCPU and 160 MiB of RAM, a virtual RNG, and no graphics
 device. The memory request is 160 MiB and the limit is 192 MiB before KubeVirt
 adds runtime overhead.
 
+| Namespace | Primary UDN | Identity suffix | IMDS endpoints |
+| --- | --- | --- | --- |
+| `tenant-tenant1` | Dual stack | None | `169.254.169.254` and `fd00:76b9::254` |
+| `tenant-tenant1-ipv4` | IPv4 only | `-ipv4` | `169.254.169.254` |
+| `tenant-tenant1-ipv6` | IPv6 only | `-ipv6` | `fd00:76b9::254` |
+
+The single-stack Kustomize overlays reuse the VM resources and SSH credentials.
+Each namespace has its own UDN, external client, and VM identity subjects.
+The Launch Layer status publisher runs in the dual-stack namespace to reach
+the IPv4 Kubernetes API service. Namespace Roles let it publish all six
+virt-launcher Pod UIDs to their VirtualInstance status.
+
 | VM | Binding | Guest network configuration |
 | --- | --- | --- |
-| `e2e-debian-vm` | Built-in `bridge` | Cloud-init uses KubeVirt DHCP for the CNI-assigned address |
-| `e2e-debian-vm-l2bridge` | `l2bridge` with `managedTap` | Cloud-init hook supplies the CNI-assigned address, MAC match, and gateway |
+| `e2e-debian-vm` | Built-in `bridge` | Cloud-init uses KubeVirt DHCP for allocated IPv4 and configures allocated IPv6 |
+| `e2e-debian-vm-l2bridge` | `l2bridge` with `managedTap` | Cloud-init hook supplies the CNI-assigned addresses, MAC match, and gateways |
 
-Both bindings create a `k6t-*` bridge and tap, then replace the original CNI
-interface with a dummy. IMDS setup reads the primary OVN pod-networks entry
+Both bindings rename the CNI interface and attach it to a `k6t-*` bridge with
+the VM tap. A dummy takes the original interface name and retains the Pod
+address configuration. IMDS setup reads the primary OVN pod-networks entry
 through the Downward API, so it works even when the dummy has no guest IPv4.
 It installs the guest reply route and a permanent neighbor through the IMDS
 veth path. Both fixtures retain the OVN allocation MAC required by the sidecar.
 
-The l2bridge fixture registers `managedTap` in KubeVirt and enables its upstream
-cloud-init hook. An E2E-only admission policy projects the Pod's OVN allocation
-into that hook. The hook configures guest networking because `managedTap`
-supplies no DHCP server.
+Both fixtures use KubeVirt's upstream cloud-init hook. An E2E-only admission
+policy projects the Pod's OVN allocation into that hook. The hook configures
+allocated IPv6 addresses for `bridge` and all allocated addresses for `l2bridge`,
+which supplies no DHCP server. The l2bridge fixture registers `managedTap` in KubeVirt.
 
-For each binding, the external client SSHes to the CNI-assigned guest address,
-requests a VM identity from `169.254.169.254`, and authenticates the returned
-token through OpenBao. The checks verify the VM subject, signature, and allowed
-and forbidden secret access. See the [network setup README](../cmd/dsx-imds-network-setup/README.md)
-for the packet path.
+For each binding and network mode, the external client SSHes to the CNI-assigned
+guest address, requests a VM identity from each applicable IMDS endpoint, and
+authenticates each returned token through OpenBao. The checks verify the VM
+subject, signature, and allowed and forbidden secret access. See the [network
+setup README](../cmd/dsx-imds-network-setup/README.md) for the packet path.
+
+After the initial identity checks, the suite abruptly restarts the shared worker
+identity keys proxy and requests identity from every existing VM again. This
+checks recovery of each mounted socket across both bindings and all three
+network modes.
 
 ## Cross-shard OpenBao validation
 
@@ -160,12 +178,17 @@ sequenceDiagram
 
 Repository validation requires Git, mise, Make, `curl`, and a supported Linux
 host. `make validate` builds Linux-only nftables code and exercises Unix socket
-paths that exceed macOS limits. macOS and WSL are unsupported. Mise installs
-the repository-pinned tools. The full E2E lifecycle also requires Docker with
+paths that exceed macOS limits. macOS and WSL are unsupported. Mise installs the
+repository-pinned tools. The full E2E lifecycle also requires Docker with
 Buildx, OpenSSL, OpenSSH, and the kernel features needed by OVN-Kubernetes and
-KubeVirt, including the `vrf` module for primary UDN gateways. Missing
-prerequisites fail the job rather than skipping tests. CI installs Ubuntu's
-extra module package for the running kernel before loading these modules.
+KubeVirt, including the `vrf` module for primary UDN gateways and IPv6-enabled
+Docker networking for the dual-stack k2 cluster. Missing prerequisites fail the
+job rather than skipping tests. CI installs Ubuntu's extra module package for
+the running kernel before loading these modules.
+
+The registry setup creates the shared `kind` Docker network with IPv6 enabled.
+An existing IPv4-only `kind` network must be recreated with IPv6 before running
+this fixture. Stop its clusters and attached containers before recreating it.
 
 ```bash
 git submodule update --init --recursive

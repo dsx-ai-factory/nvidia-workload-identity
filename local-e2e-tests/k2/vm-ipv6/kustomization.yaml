@@ -1,0 +1,63 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: tenant-tenant1-ipv6
+resources:
+  - ../vm
+patches:
+  - target:
+      kind: UserDefinedNetwork
+      name: tenant-tenant1-network
+    patch: |-
+      - op: replace
+        path: /spec/layer3/subnets
+        value:
+          - cidr: fd00:10:3::/48
+            hostSubnet: 64
+  - target:
+      kind: VirtualInstance
+      name: e2e-debian-vm
+    patch: |-
+      - op: replace
+        path: /spec/instance_id
+        value: e2e-debian-vm-ipv6
+  - target:
+      kind: VirtualInstance
+      name: e2e-debian-vm-l2bridge
+    patch: |-
+      - op: replace
+        path: /spec/instance_id
+        value: e2e-debian-vm-l2bridge-ipv6
+  # Keep both VM bindings on the primary allocation in this namespace.
+  - target:
+      kind: VirtualMachine
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/networks/0/multus/networkName
+        value: tenant-tenant1-ipv6/tenant-tenant1-network
+  # The dual-stack publisher registers both single-stack namespaces.
+  - patch: |-
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: e2e-launch-layer-status
+      $patch: delete
+  - patch: |-
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: e2e-launch-layer-status
+      $patch: delete
+# Apply after namespace transformation so the binding keeps the shared account.
+replacements:
+  - sourceValue: tenant-tenant1
+    targets:
+      - select:
+          kind: RoleBinding
+          name: e2e-launch-layer-status
+        fieldPaths:
+          - subjects.0.namespace
+        options:
+          create: true

@@ -11,20 +11,24 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CLUSTER_NAME="k2"
 CONTEXT="kind-${CLUSTER_NAME}"
-# bridge uses KubeVirt DHCP. l2bridge/managedTap uses the cloud-init hook.
+# bridge uses IPv4 DHCP and the cloud-init hook for IPv6.
+# l2bridge/managedTap uses the hook for both address families.
 # Both must return their own signed VM identity and pass the same OpenBao checks.
 VM_NAMES=(e2e-debian-vm e2e-debian-vm-l2bridge)
 if [[ -n "${VM_NAME:-}" ]]; then
     VM_NAMES=("${VM_NAME}")
 fi
 VM_NAME="${VM_NAMES[0]}"
-VM_TENANT="${VM_TENANT:-tenant1}"
+VM_TENANTS=(tenant1 tenant1-ipv4 tenant1-ipv6)
+if [[ -n "${VM_TENANT:-}" ]]; then
+    VM_TENANTS=("${VM_TENANT}")
+fi
+VM_TENANT="${VM_TENANTS[0]}"
 NAMESPACE="tenant-${VM_TENANT}"
 TEST_AUDIENCE="spiffe://ds9.dsx.nvid.id/openbao"
 HOST_AUDIENCE="spiffe://k2.sjc-1.nvidia.com/spire/server"
 EXPECTED_ISSUER="https://ds9.dsx.nvid.id"
 EXPECTED_SPIFFE_ID="spiffe://tenant-2.ds9.dsx.nvid.id/vm/${VM_NAME}"
-IMDS_IP="169.254.169.254"
 GATEWAY_HOST="gateway.sjc-1.nvidia.com"
 OPENBAO_URL="http://${GATEWAY_HOST}:8200"
 EXTERNAL_CLIENT_NAME="e2e-external-client"
@@ -103,7 +107,7 @@ check_token_contract() {
     local token="$1"
     local expected_subject="${2:-${EXPECTED_SPIFFE_ID}}"
     local expected_audience="${3:-${TEST_AUDIENCE}}"
-    local expected_claims="${4:-$(resource_claims tenant-2 dsx vm "${VM_NAME}")}"
+    local expected_claims="${4:-$(resource_claims tenant-2 dsx vm "${expected_subject##*/}")}"
     local encoded padding header payload now
 
     encoded=$(cut -d. -f1 <<<"${token}")
@@ -303,47 +307,60 @@ verify_dpu_imds() {
 verify_metadata_access() {
     log_test "Requesting DSX IMDS v1 from guest ${VM_NAME} through the tenant network..."
 
-    local vm_ip response command
+    local vm_ip response command imds_ip status network_ips
+    local -a imds_ips=()
     local ssh_started
-    # VMI and SSH readiness can precede guest IMDS readiness, so retry the IMDS request itself.
-    command="curl -fsS --max-time 10 "
-    command+="--retry 180 --retry-all-errors --retry-connrefused --retry-delay 1 --retry-max-time 180 "
-    command+="-G -H 'Metadata: true' -H 'Accept: application/json' "
-    command+="'http://${IMDS_IP}/latest/meta-data/identity' --data-urlencode 'aud=${TEST_AUDIENCE}'"
     run_timed "VM VMI readiness" kubectl wait \
         --for=condition=Ready \
         "vmi/${VM_NAME}" -n "${NAMESPACE}" --context "${CONTEXT}" \
         --timeout=300s || return 1
     # managedTap guests need not report their address through the guest agent.
     # Use the CNI allocation to reach the real guest, then assert its IMDS response.
-    vm_ip=$(kubectl get pods -l "kubevirt.io/domain=${VM_NAME}" -n "${NAMESPACE}" \
+    network_ips=$(kubectl get pods -l "kubevirt.io/domain=${VM_NAME}" -n "${NAMESPACE}" \
         --context "${CONTEXT}" -o json | jq -er '
           [.items[] |
            .metadata.annotations["k8s.ovn.org/pod-networks"] | fromjson |
            .[] | select(.role == "primary") | .ip_addresses[] |
-           split("/")[0] | select(test("^[0-9]+(\\.[0-9]+){3}$"))][0]
+           split("/")[0]] |
+          if length == 0 then error("primary network has no addresses") else . end
         ') || return 1
+    vm_ip=$(jq -er '.[0]' <<<"${network_ips}") || return 1
+    # Match network setup's address-family selection for every tenant.
+    if jq -e 'any(.[]; contains(":") | not)' <<<"${network_ips}" >/dev/null; then
+        imds_ips+=(169.254.169.254)
+    fi
+    if jq -e 'any(.[]; contains(":"))' <<<"${network_ips}" >/dev/null; then
+        imds_ips+=("[fd00:76b9::254]")
+    fi
     ssh_started=${SECONDS}
-    if [[ -n "${vm_ip}" ]] && response=$(ssh_vm "${vm_ip}" "${command}"); then
-        log_timing "VM SSH and metadata" "${ssh_started}"
-        response="${response//$'\r'/}"
-        parse_jwt_response "${response}" || return 1
-        run_timed "VM OpenBao authentication" verify_openbao_access || return 1
-        return 0
-    fi
+    for imds_ip in "${imds_ips[@]}"; do
+        # VMI and SSH readiness can precede guest IMDS readiness, so retry the IMDS request itself.
+        command="curl --noproxy '*' -g -fsS --max-time 10 "
+        command+="--retry 180 --retry-all-errors --retry-connrefused --retry-delay 1 --retry-max-time 180 "
+        command+="-G -H 'Metadata: true' -H 'Accept: application/json' "
+        command+="'http://${imds_ip}/latest/meta-data/identity' --data-urlencode 'aud=${TEST_AUDIENCE}'"
+        if response=$(ssh_vm "${vm_ip}" "${command}"); then
+            response="${response//$'\r'/}"
+            parse_jwt_response "${response}" || return 1
+            run_timed "${VM_NAME} ${imds_ip} OpenBao authentication" verify_openbao_access || return 1
+            command="curl --noproxy '*' -g -sS --max-time 10 -o /dev/null -w '%{http_code}' "
+            command+="'http://${imds_ip}/latest/meta-data/identity?aud=${TEST_AUDIENCE}'"
+            status=$(ssh_vm "${vm_ip}" "${command}") || return 1
+            if [[ "${status}" != 400 ]]; then
+                log_error "IMDS at ${imds_ip} accepted a request without Metadata: true: HTTP ${status}"
+                return 1
+            fi
+        else
+            log_error "Guest ${VM_NAME} could not retrieve identity from ${imds_ip}"
+            return 1
+        fi
+    done
     log_timing "VM SSH and metadata" "${ssh_started}"
-
-    log_error "External client could not retrieve a DSX IMDS response from the VM"
-    if [[ -n "${vm_ip}" ]]; then
-        ssh_vm "${vm_ip}" "${command}" || true
-    else
-        log_error "VM has no reported primary-network IPv4 address"
-    fi
-    return 1
+    return 0
 }
 
-verify_identity_keys_proxy_restart() {
-    log_test "Checking VM identity after an abrupt identity keys proxy stop..."
+restart_identity_keys_proxy() {
+    log_test "Abruptly restarting the worker identity keys proxy..."
 
     local node pod container_id pid current_id deadline=$((SECONDS + 120))
     node=$(kubectl get pods -l "kubevirt.io/domain=${VM_NAME}" -n "${NAMESPACE}" \
@@ -364,12 +381,43 @@ verify_identity_keys_proxy_restart() {
             -o json | jq -er '.status.containerStatuses[] |
                 select(.name == "identity-keys-proxy" and .state.running != null) | .containerID') || continue
         if [[ "${current_id}" != "${container_id}" ]]; then
-            verify_metadata_access
-            return $?
+            return 0
         fi
     done
     log_error "Identity keys proxy did not restart within 120s"
     return 1
+}
+
+verify_vm_identities() {
+    local identity_suffix failed=0
+    for VM_TENANT in "${VM_TENANTS[@]}"; do
+        NAMESPACE="tenant-${VM_TENANT}"
+        case "${VM_TENANT}" in
+            tenant1-ipv4)
+                identity_suffix=-ipv4
+                ;;
+            tenant1-ipv6)
+                identity_suffix=-ipv6
+                ;;
+            *)
+                identity_suffix=""
+                ;;
+        esac
+        kubectl wait --for=condition=Ready "pod/${EXTERNAL_CLIENT_NAME}" \
+            --namespace "${NAMESPACE}" --context "${CONTEXT}" --timeout=120s >/dev/null || return 1
+        for VM_NAME in "${VM_NAMES[@]}"; do
+            EXPECTED_SPIFFE_ID="spiffe://tenant-2.ds9.dsx.nvid.id/vm/${VM_NAME}${identity_suffix}"
+            if ! run_timed "${VM_TENANT} ${VM_NAME} identity and OpenBao" verify_metadata_access; then
+                failed=$((failed + 1))
+                kubectl logs --context "${CONTEXT}" -n "${NAMESPACE}" \
+                    -l "kubevirt.io/domain=${VM_NAME}" -c metadata-service \
+                    --tail=30 --prefix --request-timeout=10s >&2 || true
+                kubectl logs --context "${CONTEXT}" -n tenant-tenant1 \
+                    job/e2e-launch-layer-status --tail=30 --request-timeout=10s >&2 || true
+            fi
+        done
+    done
+    [[ "${failed}" -eq 0 ]]
 }
 
 main() {
@@ -388,11 +436,17 @@ main() {
     run_timed "DPU controller registration" verify_dpu_controller_registration || failed=$((failed + 1))
     run_timed "operator host IMDS" verify_operator_host_imds || failed=$((failed + 1))
     run_timed "DPU IMDS" verify_dpu_imds || failed=$((failed + 1))
-    for VM_NAME in "${VM_NAMES[@]}"; do
-        EXPECTED_SPIFFE_ID="spiffe://tenant-2.ds9.dsx.nvid.id/vm/${VM_NAME}"
-        run_timed "${VM_NAME} identity and OpenBao" verify_metadata_access || failed=$((failed + 1))
-        run_timed "${VM_NAME} proxy restart recovery" verify_identity_keys_proxy_restart || failed=$((failed + 1))
-    done
+    if run_timed "VM identities" verify_vm_identities; then
+        # All fixtures share one worker proxy. Restart once, then check every
+        # existing VM socket. Repeated crashes accumulate kubelet backoff.
+        if run_timed "identity keys proxy restart" restart_identity_keys_proxy; then
+            run_timed "VM identities after proxy restart" verify_vm_identities || failed=$((failed + 1))
+        else
+            failed=$((failed + 1))
+        fi
+    else
+        failed=$((failed + 1))
+    fi
     echo
     if [[ $failed -eq 0 ]]; then
         log_timing "k2 identity verification total" "${script_started}"

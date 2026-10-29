@@ -1,7 +1,7 @@
 # DSX IMDS
 
 `metadata-service` implements DSX IMDS. It serves DSX JWTs through the
-link-local IMDS v1 API, selects a local SPIRE JWT-SVID by hint, exchanges it,
+IMDS v1 API, selects a local SPIRE JWT-SVID by hint, exchanges it,
 and returns the DSX JWT. KubeVirt uses NVIDIA Workload Identity Keys Proxy
 CSI. Paired-DPU placement uses a direct URL to its reachable shard-local
 NVIDIA Workload Identity Keys. Each process configures exactly one
@@ -115,6 +115,21 @@ header defaults to JSON. Plain text returns only the DSX JWT. JSON returns
 `Cache-Control: no-store`. Response connections use IPv4 TTL 1 or IPv6 hop
 limit 1. Dependency failures return sanitized HTTP errors. `GET /health`
 reports process health.
+
+KubeVirt guests reach DSX IMDS at `169.254.169.254` over IPv4 and
+`fd00:76b9::254` over IPv6. The network setup sidecar configures the endpoints
+for the address families in the primary OVN allocation. Both `bridge` and
+`l2bridge` bindings require the OVN-allocated guest address and MAC. See the
+[network setup README](../dsx-imds-network-setup/README.md) for guest routing.
+
+```bash
+curl --noproxy '*' -g -H 'Metadata: true' \
+  'http://[fd00:76b9::254]/latest/meta-data/identity?aud=spiffe://ds9.dsx.nvid.id/openbao'
+```
+
+```json
+{"token":"<DSX JWT>","expires_in":300,"spiffe_id":"spiffe://tenant-2.ds9.dsx.nvid.id/vm/vm-1234"}
+```
 
 The API is intentionally tokenless. The paired DPU intercept and NICo enforce
 physical source binding, network isolation, and response hop limits. `Metadata: true` and proxy-header rejection are additional request

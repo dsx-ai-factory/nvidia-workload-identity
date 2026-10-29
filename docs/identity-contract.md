@@ -117,4 +117,6 @@ NodeAttestor server](../cmd/dsx-imds-node-attestor-server/README.md) bootstrap
 the host SPIRE agent. The [NVIDIA Workload Identity Keys Proxy CSI
 Driver](../cmd/dsx-identity-keys-proxy-csi/README.md) carries VM exchange
 requests, and [DSX IMDS Network Setup](../cmd/dsx-imds-network-setup/README.md)
-routes the VM's link-local metadata traffic.
+routes the VM's metadata traffic to `169.254.169.254` over IPv4 and
+`fd00:76b9::254` over IPv6. It configures the address families present in the
+primary OVN allocation, including IPv4-only, IPv6-only, and dual-stack guests.

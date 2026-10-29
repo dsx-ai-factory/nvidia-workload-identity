@@ -3,12 +3,14 @@ kind: ConfigMap
 metadata:
   name: e2e-l2bridge-cloud-init
 data:
-  # managedTap supplies no DHCP server. Configure the CNI-allocated guest address
-  # through KubeVirt's upstream cloud-init hook.
+  # managedTap supplies no DHCP server. Configure the CNI-allocated guest addresses
+  # through KubeVirt's upstream cloud-init hook for both families.
+  # bridge uses DHCP for IPv4 and this hook for CNI-allocated IPv6.
   preCloudInitIso: |
     #!/usr/bin/env python3
     import argparse
     import json
+    import ipaddress
     from pathlib import Path
     from time import monotonic, sleep
 
@@ -31,14 +33,25 @@ data:
     if len(primary) != 1:
         raise RuntimeError("expected one primary guest network")
     network = primary[0]
+    vmi = json.loads(args.vmi)
+    bridge = "bridge" in vmi["spec"]["domain"]["devices"]["interfaces"][0]
+    ipv4 = any(ipaddress.ip_interface(address).version == 4
+               for address in network["ip_addresses"])
+    addresses = [address for address in network["ip_addresses"]
+                 if not bridge or ipaddress.ip_interface(address).version == 6]
+    routes = [{"to": "::/0" if ipaddress.ip_address(gateway).version == 6 else "0.0.0.0/0",
+               "via": gateway}
+              for gateway in network["gateway_ips"]
+              if not bridge or ipaddress.ip_address(gateway).version == 6]
     data = json.loads(args.cloud_init)
     data["NetworkData"] = json.dumps({
         "version": 2,
         "ethernets": {
             "primary": {
                 "match": {"macaddress": network["mac_address"]},
-                "addresses": network["ip_addresses"],
-                "routes": [{"to": "0.0.0.0/0", "via": network["gateway_ips"][0]}],
+                "dhcp4": bridge and ipv4,
+                "addresses": addresses,
+                "routes": routes,
             }
         },
     })

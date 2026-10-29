@@ -15,7 +15,7 @@ instance.
 ## User guide
 
 See the [examples user guide](../examples/README.md) to acquire and consume DSX
-JWTs through token-fetcher injection or the link-local IMDS endpoint.
+JWTs through token-fetcher injection or the DSX IMDS endpoint.
 
 Component commands and runtime configuration:
 

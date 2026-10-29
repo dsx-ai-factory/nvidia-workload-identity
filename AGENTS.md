@@ -31,6 +31,8 @@ repository is a legacy mirror.
   semicolons in prose or comments.
 - Comments should explain non-obvious behavior, ordering, ownership, security
   constraints, or workarounds. Do not restate the code.
+- Preserve command equivalents and packet-rule bytecode explanations. Update
+  them for each supported address family when changing network code.
 - In Helm templates and YAML, explain non-obvious templating, merge semantics,
   ordering, compatibility, and cross-resource behavior inline.
 - Explain supported VM network modes beside the sidecar code and E2E fixtures
@@ -54,6 +56,7 @@ repository is a legacy mirror.
   change. When a page is added, removed, or renamed, update `index.yml`, the
   Documentation list in the root README, and every link to it. Report the
   touchpoints you checked and any you left unchanged.
+- Do not embed scripts in READMEs. Use simple commands and explanations.
 - Show user-facing API contracts with concrete request and response examples.
 - Finish prose and comment updates before editing diagrams. Use simple, readable
   diagrams that retain the relevant components and connections. The network
@@ -151,6 +154,7 @@ repository is a legacy mirror.
 
 ## Git and pull requests
 
+- Do not post comments as the user, except to trigger CI when needed.
 - Read active GitHub Actions and release workflows before creating or updating a
   pull request. Search for an equivalent open pull request or branch first.
 - Use a `feat/` or `fix/` branch for release-producing changes.

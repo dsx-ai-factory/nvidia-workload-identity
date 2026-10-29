@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# The cluster and primary VM UDN need IPv6 for the IMDS guest checks.
+# These ranges match k2's Kind cluster configuration.
+podNetwork: "10.244.0.0/16/24,fd00:10:244::/48/64"
+serviceNetwork: "10.96.0.0/16,fd00:10:96::/112"

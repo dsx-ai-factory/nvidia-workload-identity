@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"net"
+	"reflect"
 	"testing"
 
 	"github.com/google/nftables"
@@ -72,7 +73,7 @@ func TestReconcileIMDSRule(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			rules := &testNFTRules{existing: test.existing}
-			if err := nftAddIMDSRule(rules, nil, nil, mac); err != nil {
+			if err := nftAddIMDSRule(rules, nil, nil, mac, net.ParseIP(imdsIP)); err != nil {
 				t.Fatal(err)
 			}
 			if len(rules.added) != test.add || len(rules.replaced) != test.replace || len(rules.deleted) != test.delete || rules.flushes != 1 {
@@ -118,12 +119,61 @@ func TestPreserveOtherNFTRules(t *testing.T) {
 			foreign := testIMDSRule(mac)
 			test.change(foreign)
 			rules := &testNFTRules{existing: []*nftables.Rule{foreign}}
-			if err := nftAddIMDSRule(rules, nil, nil, mac); err != nil {
+			if err := nftAddIMDSRule(rules, nil, nil, mac, net.ParseIP(imdsIP)); err != nil {
 				t.Fatal(err)
 			}
 			if len(rules.added) != 1 || len(rules.replaced) != 0 || len(rules.deleted) != 0 || rules.flushes != 1 {
 				t.Fatalf("foreign rule suppressed setup or was modified: add=%d replace=%d delete=%d flush=%d", len(rules.added), len(rules.replaced), len(rules.deleted), rules.flushes)
 			}
 		})
+	}
+}
+
+func TestReconcileIPv6IMDSRule(t *testing.T) {
+	mac := net.HardwareAddr{2, 0, 0, 0, 0, 2}
+	oldMAC := net.HardwareAddr{2, 0, 0, 0, 0, 1}
+	ipv6Rule := func(mac net.HardwareAddr) *nftables.Rule {
+		rule := testIMDSRule(mac)
+		rule.Exprs[1].(*expr.Cmp).Data = binaryutil.BigEndian.PutUint16(unix.ETH_P_IPV6)
+		rule.Exprs[2].(*expr.Payload).Offset = 24
+		rule.Exprs[2].(*expr.Payload).Len = 16
+		rule.Exprs[3].(*expr.Cmp).Data = net.ParseIP(imdsIPv6)
+		return rule
+	}
+	for _, test := range []struct {
+		name                 string
+		existing             []*nftables.Rule
+		add, replace, delete int
+	}{
+		{name: "fresh", add: 1},
+		{name: "IPv4 preserved", existing: []*nftables.Rule{testIMDSRule(mac)}, add: 1},
+		{name: "correct MAC reused", existing: []*nftables.Rule{ipv6Rule(mac)}},
+		{name: "stale MAC replaced", existing: []*nftables.Rule{ipv6Rule(oldMAC)}, replace: 1},
+		{name: "duplicate removed", existing: []*nftables.Rule{ipv6Rule(mac), ipv6Rule(oldMAC)}, delete: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			rules := &testNFTRules{existing: test.existing}
+			if err := nftAddIMDSRule(rules, nil, nil, mac, net.ParseIP(imdsIPv6)); err != nil {
+				t.Fatal(err)
+			}
+			if len(rules.added) != test.add || len(rules.replaced) != test.replace || len(rules.deleted) != test.delete || rules.flushes != 1 {
+				t.Fatalf("operations: add=%d replace=%d delete=%d flush=%d", len(rules.added), len(rules.replaced), len(rules.deleted), rules.flushes)
+			}
+			for _, rule := range append(rules.added, rules.replaced...) {
+				want := ipv6Rule(mac)
+				for i := range want.Exprs {
+					if !reflect.DeepEqual(rule.Exprs[i], want.Exprs[i]) {
+						t.Fatalf("expression %d = %#v, want %#v", i, rule.Exprs[i], want.Exprs[i])
+					}
+				}
+			}
+		})
+	}
+	rules := &testNFTRules{}
+	if err := nftAddIMDSRule(rules, nil, nil, mac, nil); err == nil {
+		t.Fatal("accepted missing metadata IP")
+	}
+	if len(rules.added) != 0 || rules.flushes != 0 {
+		t.Fatal("invalid address changed rules")
 	}
 }

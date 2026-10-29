@@ -32,7 +32,14 @@ registry_image() {
     esac
 }
 
-docker network inspect kind >/dev/null 2>&1 || docker network create kind >/dev/null
+# Create the shared network before Zot so k2 can use dual-stack networking.
+if ! docker network inspect kind >/dev/null 2>&1; then
+    docker network create --ipv6 --subnet fd00:76b9:1::/64 kind >/dev/null
+fi
+if [[ "$(docker network inspect kind --format '{{.EnableIPv6}}')" != true ]]; then
+    log_error "The existing kind Docker network must support IPv6. See local-e2e-tests/README.md"
+    exit 1
+fi
 
 if ! docker container inspect "${REGISTRY_NAME}" >/dev/null 2>&1; then
     if [[ -n "${ZOT_DATA_DIR:-}" ]]; then
