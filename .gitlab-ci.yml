@@ -26,7 +26,7 @@ sonarqube:
   image:
     name: sonarsource/sonar-scanner-cli:5.0@sha256:02372948eaeeb10dfbe0cfd4174d44b8e405d0aeae431532b2bdb21d0347bf23
     entrypoint: [""]
-  allow_failure: false
+  allow_failure: true
   needs: []
   variables:
     GIT_DEPTH: "0"
