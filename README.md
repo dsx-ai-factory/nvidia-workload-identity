@@ -74,6 +74,7 @@ requirements.
 The GitLab mirror runs SonarQube analysis against the existing
 [project](https://sonar.nvidia.com/dashboard?id=NBUSW_DSX_DSX_nvidia-workload-identity).
 Its analysis token comes from Vault. This job does not register releases in nSpect.
+Pulse and SonarQube failures appear as warnings and do not block GitLab pipelines.
 
 NGC publication is off by default. The artifact pipeline is loaded only when
 `GITLAB_PUBLISH_ARTIFACTS=true` and the pipeline targets a protected
