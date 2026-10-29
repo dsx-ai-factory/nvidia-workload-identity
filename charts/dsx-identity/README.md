@@ -200,8 +200,8 @@ Each matched consumer namespace must contain Secrets with the same names.
 
 Native Kubernetes admission policies inject identity sidecars and prevent
 application containers from mounting the Workload API or NVIDIA Workload
-Identity Keys Proxy sockets. Validation enforces operator Pod service and role
-label formats.
+Identity Keys Proxy sockets. Whenever `spire.enabled` is true, validation
+enforces operator Pod service and role label formats.
 
 ## Deploy
 

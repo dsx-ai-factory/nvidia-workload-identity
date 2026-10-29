@@ -67,6 +67,7 @@ jobs:
       KIND_DIND_SERVICE_HOST: localhost
       KUBECONFIG: ${{ github.workspace }}/.kube/kind-k1:${{ github.workspace }}/.kube/kind-k2
       ZOT_DATA_DIR: ${{ github.workspace }}/.cache/zot
+      KIND_DOCKERHUB_MIRROR: https://dc.local.gha-runners.nvidia.com
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -102,17 +103,16 @@ jobs:
           free -h
       - name: Configure Zot upstream mirror
         run: |
+          # Zot lists the origin first, but tries its mirrors before the origin.
           # shellcheck disable=SC2016
-          mise exec -- jq --arg mirror 'https://dc.local.gha-runners.nvidia.com' \
-            '.extensions.sync.registries[0].urls[1] = $mirror' \
+          mise exec -- jq --arg mirror "$KIND_DOCKERHUB_MIRROR" \
+            '(.extensions.sync.registries[] | select(.urls | index("https://registry-1.docker.io"))).urls = ["https://registry-1.docker.io", $mirror]' \
             local-e2e-tests/local-registry/zot-config.json > "$RUNNER_TEMP/zot-config.json"
           echo "ZOT_CONFIG_FILE=$RUNNER_TEMP/zot-config.json" >> "$GITHUB_ENV"
       - name: Docker Hub mirror diagnostics
         run: |
           curl -sS --connect-timeout 5 --max-time 15 -D - -o /dev/null \
-            https://dc.local.gha-runners.nvidia.com/v2/library/busybox/manifests/1.37.0-uclibc || true
-          curl -sS --connect-timeout 5 --max-time 15 -D - -o /dev/null \
-            https://dc.local.gha-runners.nvidia.com/v2/nicolaka/netshoot/manifests/v0.16 || true
+            "$KIND_DOCKERHUB_MIRROR/v2/" || true
       # The checked-out CI commit is stable, so skip hashing nine image contexts.
       - run: make -j install SKAFFOLD_RUN="mise exec -- skaffold run --iterative-status-check=false --tag=${GITHUB_SHA}"
         id: install
