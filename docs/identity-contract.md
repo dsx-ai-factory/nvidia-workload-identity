@@ -34,7 +34,8 @@ spiffe://<local-trust-domain>/tenant/<tenant>/service/<service>/<key>/<value>[/<
 
 | Resource | Tenant source | Subject resource path |
 |---|---|---|
-| DPU | `global.operatorTenant` | `/dpu/<dpu-id>` |
+| DPU | Operator tenant in DPF identity templates | `/dpu/<normalized-serial>` resource prefix |
+| DPU-paired operator bare-metal host | `global.operatorTenant` | `/bm/<dpu-machine-id>` |
 | Operator bare-metal Kubernetes worker | `global.operatorTenant` | `/bm/<node-name>` |
 | Kubernetes Pod | `global.operatorTenant` | `/bm/<node-name>/pod/<pod-uid>` |
 | Bare-metal host with a Launch Layer source | `launchlayer.nvidia.com/org-id` annotation | `/bm/<bm-id>` |
@@ -71,7 +72,7 @@ The chart requires the controller-manager value to equal
 `global.operatorTenant`. Because it is part of the SPIRE Pod template, changing
 both values causes the StatefulSet to roll out without a restart hook.
 
-DPU identities remain separate controller-derived static entries parented to
+The paired host identity is a controller-derived static entry parented to
 the external `dpu_hw` agent identified by the normalized DPU serial. DPUs are
 Kubernetes nodes in their Kamaji clusters. The DPU agent's Kubernetes
 WorkloadAttestor identifies the IMDS Pod, and SPIFFE CSI exposes the agent's
@@ -97,7 +98,20 @@ status:
 `BareMetalInstance` uses the same tenant annotation, `spec.instance_id`, and
 `status.primary_dpu.machine_id` plus `status.primary_dpu.serial_number`. The
 configured operator tenant determines a VM entry's worker parent. The Identity
-Controller owns SPIFFE IDs, selectors, hints, and class names.
+Controller owns these entries' SPIFFE IDs, selectors, hints, and class names.
+
+## DPU identities
+
+DPF registers the DPU Agent process and opted-in DPUService workloads beneath
+the DPU's `spiffe://<local-trust-domain>/spire/agent/dpu_hw/<normalized-serial>`
+agent ID. These workload subjects use the `/dpu/<normalized-serial>` resource
+prefix. The paired host's `/bm/<dpu-machine-id>` identity is a separate entry
+owned by the NVIDIA Workload Identity Controller. A complete tenant
+`BareMetalInstance` replaces that operator host entry with
+`/bm/<spec.instance_id>` under the assigned tenant.
+
+See the [identity chart configuration](../charts/dsx-identity/README.md#dpf-identity-configuration)
+for the DPF templates used to produce these subjects.
 
 ## NVIDIA Workload Identity Keys and Event Bus
 

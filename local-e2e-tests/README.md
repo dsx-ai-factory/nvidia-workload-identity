@@ -52,7 +52,7 @@ exchanges the selected SPIRE JWT-SVID, and uses the returned DSX JWT for
 `dsx_imds` node attestation. It does not test physical link-local routing or
 NICo integration.
 
-The ordinary-agent entry is the permitted fixture at the external `dsx_dpu`
+The ordinary-agent entry is the permitted fixture at the external `dpu_hw`
 boundary. E2E requests the operator-host identity from IMDS and attests the
 worker's `dsx_imds` SPIRE agent with it. The fixture derives the operator host
 ID from the worker name without creating a controller input for that worker.

@@ -57,6 +57,8 @@ repository is a legacy mirror.
   Documentation list in the root README, and every link to it. Report the
   touchpoints you checked and any you left unchanged.
 - Do not embed scripts in READMEs. Use simple commands and explanations.
+- Keep `docs/identity-contract.md` focused on subject formats and identity
+  ownership. Put deployment configuration in the relevant chart README.
 - Show user-facing API contracts with concrete request and response examples.
 - Finish prose and comment updates before editing diagrams. Use simple, readable
   diagrams that retain the relevant components and connections. The network

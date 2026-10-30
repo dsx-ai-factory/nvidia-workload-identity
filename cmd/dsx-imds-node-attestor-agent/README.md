@@ -6,14 +6,14 @@ NICo IMDS passthrough, then sends that token as the SPIRE
 node-attestation payload.
 
 The external DPU establishes the first local SPIRE identities through
-`dsx_dpu`. DSX IMDS selects the host identity beneath that DPU agent and
+`dpu_hw`. DSX IMDS selects the host identity beneath that DPU agent and
 exchanges it for the DSX JWT used by this plugin. The bare-metal host agent must
 complete `dsx_imds` node attestation before it can serve host processes through
 the Unix WorkloadAttestor or provide identities to VMs.
 
 ## Host identity trust path
 
-The external `dsx_dpu` NodeAttestor agent and server plugins attest the DPU
+The external `dpu_hw` NodeAttestor agent and server plugins attest the DPU
 agent. Its runtime WorkloadAttestor makes the registered host identity
 available to DSX IMDS. The repository-owned `dsx_imds` NodeAttestor agent and
 server plugins then attest the host agent, whose Unix WorkloadAttestor serves
@@ -24,13 +24,13 @@ flowchart TB
   DPUIdentities["DPU local SPIRE identities<br/>from shard-local SPIRE"]
   HostIdentities["Host local SPIRE identities<br/>from shard-local SPIRE"]
   IdentityKeys["Shard-local<br/>NVIDIA Workload Identity<br/>Keys"]
-  DPUAgent["DPU SPIRE agent process<br/>dsx_dpu agent plugin"]
+  DPUAgent["DPU SPIRE agent process<br/>dpu_hw agent plugin"]
   NICoIMDS["Paired DPU link-local intercept<br/>NICo IMDS passthrough"]
   DSXIMDS["DSX IMDS<br/>(metadata-service)"]
   HostAgent["Bare-metal host SPIRE agent process<br/>dsx_imds agent plugin"]
   HostProcess["Bare-metal host process"]
 
-  DPUAgent -->|"dsx_dpu node attestation"| DPUIdentities
+  DPUAgent -->|"dpu_hw node attestation"| DPUIdentities
   DPUIdentities -->|"host SPIRE JWT-SVID"| DSXIMDS
   DSXIMDS -->|"exchange for host DSX JWT"| IdentityKeys
   IdentityKeys -->|"host DSX JWT"| DSXIMDS

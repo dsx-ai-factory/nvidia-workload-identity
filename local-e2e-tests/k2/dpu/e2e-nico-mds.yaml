@@ -4,7 +4,7 @@ metadata:
   name: e2e-nico-mds
   namespace: dsx-identity
 ---
-# Local E2E uses this Pod as the NICo MDS fixture at the external dsx_dpu boundary.
+# Local E2E uses this Pod as the NICo MDS fixture at the external dpu_hw boundary.
 apiVersion: v1
 kind: Pod
 metadata:
