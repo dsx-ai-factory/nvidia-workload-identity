@@ -32,10 +32,9 @@ jobs:
         with:
           node-version: '22'
 
-      # Intentionally unpinned: Fern ships often with no LTS channel and the
-      # NVIDIA global theme tracks the latest CLI.
+      # Keep this version in step with fern/fern.config.json.
       - name: Install Fern CLI
-        run: npm install -g fern-api@latest
+        run: npm install -g fern-api@5.186.0
 
       # Registered versions point at <tag>-content/ pages that are generated, not
       # committed. Without them fern check fails on every push after the first

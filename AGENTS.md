@@ -84,9 +84,8 @@ repository is a legacy mirror.
   shared when a component bypasses it.
 - Use repository-pinned tools and dependencies. Pin container images and never
   use `latest`.
-- Do not pin the Fern CLI. Use `"version": "latest"` in `fern/fern.config.json`
-  and `fern-api@latest` in workflows. This is the one exception to the rule above.
-  Do not add or suggest a pin, even when a reviewer asks for one.
+- Pin the Fern CLI to the same version in `fern/fern.config.json` and in every
+  `fern-api@` install in `.github/workflows/`.
 - Use Go 1.26+, standard formatting, structured `slog` logging, context cancellation,
   and the shared telemetry package.
 - Never call `os.Exit` outside `main`. Keep cleanup in an error-returning function
