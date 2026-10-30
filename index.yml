@@ -1,0 +1,49 @@
+navigation:
+  - page: Overview
+    path: docs/overview.md
+  - page: Architecture
+    path: docs/architecture.md
+  - page: Identity contract
+    path: docs/identity-contract.md
+  - page: Observability
+    path: docs/observability.md
+  - section: User guide
+    contents:
+      - page: Examples
+        path: examples/README.md
+      - page: Token fetcher example
+        path: examples/token-fetcher/README.md
+  - section: Components
+    contents:
+      - page: Identity controller
+        path: cmd/dsx-identity-controller/README.md
+      - page: Identity Keys
+        path: cmd/dsx-identity-keys/README.md
+      - page: Keys proxy CSI driver
+        path: cmd/dsx-identity-keys-proxy-csi/README.md
+      - page: IMDS network setup
+        path: cmd/dsx-imds-network-setup/README.md
+      - page: NodeAttestor agent
+        path: cmd/dsx-imds-node-attestor-agent/README.md
+      - page: NodeAttestor server
+        path: cmd/dsx-imds-node-attestor-server/README.md
+      - page: Token fetcher
+        path: cmd/dsx-token-fetcher/README.md
+      - page: Generate signing keyset
+        path: cmd/generate-signing-keyset/README.md
+      - page: IMDS
+        path: cmd/metadata-service/README.md
+      - page: Kata UDS proxy
+        path: kata-uds-proxy/README.md
+  - section: Charts
+    contents:
+      - page: dsx-identity
+        path: charts/dsx-identity/README.md
+      - page: dsx-imds
+        path: charts/dsx-imds/README.md
+      - page: dsx-spiffe-csi
+        path: charts/dsx-spiffe-csi/README.md
+      - page: dsx-token-fetcher
+        path: charts/dsx-token-fetcher/README.md
+      - page: dsx-token-fetcher-example
+        path: charts/dsx-token-fetcher-example/README.md

@@ -41,8 +41,19 @@ repository is a legacy mirror.
 - Ordinary tests run through standard validation. Do not add README test
   sections, per-package test commands, or test coverage lists for them.
   Adding or changing an ordinary test does not require a README update.
-- Keep current documentation in these READMEs. Do not add a `docs` directory or
-  standalone implementation plans unless the user explicitly requests one.
+- Keep current documentation in these READMEs and in `docs/`, which holds the
+  operator pages the root README links to. Fern publishes operator documentation
+  only, through the navigation in `index.yml` and the config in `fern/`. Keep
+  developer material such as releases, CI, and E2E out of the Fern navigation.
+  Do not add standalone implementation plans unless the user explicitly requests one.
+- Prevent documentation drift. When a change affects behavior, configuration, an
+  API, a name, or a file location, survey every documentation touchpoint before
+  finishing. Search for the old and new terms across the root README, `docs/`,
+  component, chart, and example READMEs, `local-e2e-tests/README.md`, Helm values
+  comments, diagrams, and `index.yml`. Update each place that describes the
+  change. When a page is added, removed, or renamed, update `index.yml`, the
+  Documentation list in the root README, and every link to it. Report the
+  touchpoints you checked and any you left unchanged.
 - Show user-facing API contracts with concrete request and response examples.
 - Finish prose and comment updates before editing diagrams. Use simple, readable
   diagrams that retain the relevant components and connections. The network
@@ -73,6 +84,8 @@ repository is a legacy mirror.
   shared when a component bypasses it.
 - Use repository-pinned tools and dependencies. Pin container images and never
   use `latest`.
+- Pin the Fern CLI to the same version in `fern/fern.config.json` and in every
+  `fern-api@` install in `.github/workflows/`.
 - Use Go 1.26+, standard formatting, structured `slog` logging, context cancellation,
   and the shared telemetry package.
 - Never call `os.Exit` outside `main`. Keep cleanup in an error-returning function

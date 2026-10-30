@@ -42,7 +42,7 @@ kubectl exec dsx-token-fetcher-example -- \
 
 A DPUService must opt into SPIFFE registration. The example packages a
 token-fetcher-enabled DaemonSet in the
-[`dsx-token-fetcher-example`](../../charts/dsx-token-fetcher-example) chart:
+[`dsx-token-fetcher-example`](../../charts/dsx-token-fetcher-example/README.md) chart:
 
 ```yaml
 spec:
