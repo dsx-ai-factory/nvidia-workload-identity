@@ -268,7 +268,7 @@ The Event Bus, OAuth2 provider, and relying parties are external to the
 identity chart.
 
 DPF registers DPU Agent and DPUService workload identities through the external
-[DPF identity configuration](identity-contract.md#dpf-identity-configuration).
+[DPF identity configuration](../charts/dsx-identity/README.md#dpf-identity-configuration).
 The Identity Controller registers the paired host identity served by DPU IMDS.
 
 ## Identity delivery

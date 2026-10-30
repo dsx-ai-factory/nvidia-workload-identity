@@ -100,7 +100,7 @@ status:
 configured operator tenant determines a VM entry's worker parent. The Identity
 Controller owns these entries' SPIFFE IDs, selectors, hints, and class names.
 
-## DPF identity configuration
+## DPU identities
 
 DPF registers the DPU Agent process and opted-in DPUService workloads beneath
 the DPU's `spiffe://<local-trust-domain>/spire/agent/dpu_hw/<normalized-serial>`
@@ -110,36 +110,8 @@ owned by the NVIDIA Workload Identity Controller. A complete tenant
 `BareMetalInstance` replaces that operator host entry with
 `/bm/<spec.instance_id>` under the assigned tenant.
 
-Configure DPF's identity templates in the external `DPFOperatorConfig` before
-provisioning DPUs. The local templates must include the tenant and service
-segments required by NVIDIA Workload Identity Keys. This fragment shows
-operator tenant `operator-1`, service `dsx`, region `ds9`, and partition
-`nvid.id`:
-
-```yaml
-spec:
-  security:
-    spiffe:
-      dpuAgentSPIFFEIDTemplate: 'spiffe://{{ .TrustDomain }}/tenant/operator-1/service/dsx/dpu/{{ .SerialNumber }}/process/dpu-agent'
-      dpuAgentExchangedSPIFFEIDTemplate: 'spiffe://operator-1.ds9.dsx.nvid.id/dpu/{{ .SerialNumber }}/process/dpu-agent'
-      dpuServiceSPIFFEIDTemplate: 'spiffe://{{ .TrustDomain }}/tenant/operator-1/service/dsx/dpu/{{ .SerialNumber }}/dpuservice/{{ .ServiceID }}/namespace/{{ .Namespace }}'
-      dpuServiceExchangedSPIFFEIDTemplate: 'spiffe://operator-1.ds9.dsx.nvid.id/dpu/{{ .SerialNumber }}/dpuservice/{{ .ServiceID }}/namespace/{{ .Namespace }}'
-      tokenExchangeEndpoint: https://identity-keys.shard.example.com/v1/exchange
-```
-
-Match the tenant to `global.operatorTenant` and the service, region, and
-partition to `global.dsx.defaultServiceName`, `global.dsx.region`, and
-`global.dsx.partition`. DPF supplies the normalized serial,
-namespace, and service ID. The DPU Agent's helper uses `tokenExchangeEndpoint`
-before writing its Kubernetes API token. Its exchanged subject template must
-match the token subject because DPF uses it for the DPU Agent's RoleBinding.
-DPUService token-fetcher sidecars use the exchange URL configured in the
-identity chart. DPF validates the DPUService exchanged subject template but
-does not consume that subject itself.
-
-Set the remaining DPF SPIFFE fields, provide the trust bundle, and configure
-Kubernetes API authentication as described in the
-[DPF SPIFFE guide](https://github.com/NVIDIA/doca-platform/blob/f1b50e85122a3df6047708e41a8203f8cdce03a1/docs/public/advanced-configuration/spiffe-identity.md).
+See the [identity chart configuration](../charts/dsx-identity/README.md#dpf-identity-configuration)
+for the DPF templates used to produce these subjects.
 
 ## NVIDIA Workload Identity Keys and Event Bus
 

@@ -32,7 +32,7 @@ DPF includes the namespace because DPU service IDs are unique only within a
 Kubernetes namespace. NVIDIA Workload Identity Keys only preserves that
 suffix.
 
-Configure the external [DPF identity templates](../../docs/identity-contract.md#dpf-identity-configuration)
+Configure the external [DPF identity templates](../../charts/dsx-identity/README.md#dpf-identity-configuration)
 to supply the local tenant and service segments and this DPUService suffix.
 
 By default, each NVIDIA Workload Identity Keys instance writes only its local

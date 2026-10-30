@@ -40,7 +40,7 @@ kubectl exec dsx-token-fetcher-example -- \
 
 ## DPUService Pods
 
-Configure the external [DPF identity templates](../../docs/identity-contract.md#dpf-identity-configuration)
+Configure the external [DPF identity templates](../../charts/dsx-identity/README.md#dpf-identity-configuration)
 and opt the DPUService into SPIFFE registration. The example packages a
 token-fetcher-enabled DaemonSet in the
 [`dsx-token-fetcher-example`](../../charts/dsx-token-fetcher-example/README.md) chart:
