@@ -1,4 +1,4 @@
-# E2E uses k8s_psat at the external dsx_dpu boundary.
+# E2E uses k8s_psat at the external dpu_hw boundary.
 apiVersion: spire.spiffe.io/v1alpha1
 kind: ClusterSPIFFEID
 metadata:

@@ -171,6 +171,10 @@ container uses that port. The annotation must contain a valid TCP port number.
 Keep the token-fetcher policy in a standalone `DPUService`. A policy-only
 service in a `DPUDeployment` blocks `DPUNodeMaintenance`.
 
+Configure the external [DPF identity templates](../../docs/identity-contract.md#dpf-identity-configuration)
+before provisioning DPUs. DPF registers DPU Agent and DPUService workload
+identities. The Identity Controller registers the paired bare-metal host.
+
 `identityController.sourceAPIPollInterval` sets the discovery retry period for
 absent DPU and Launch Layer APIs. It defaults to `1h` and must be a positive
 Go duration, such as `30m`. Installed APIs use watches for source changes.

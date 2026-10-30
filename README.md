@@ -17,7 +17,7 @@ instance.
 
 - [Overview](docs/overview.md) covers the user guide, component list, SPIRE upgrades, and deployment.
 - [Architecture](docs/architecture.md) describes the identity hierarchy and identity delivery.
-- [Identity contract](docs/identity-contract.md) defines DSX JWT subjects and the host and VM flows.
+- [Identity contract](docs/identity-contract.md) defines DSX JWT subjects, DPF identity templates, and the host and VM flows.
 - [Observability](docs/observability.md) covers logs, metrics, and traces.
 
 ## Release candidates
