@@ -32,16 +32,18 @@ import (
 
 const (
 	imdsIP                 = "169.254.169.254"
+	imdsIPv6               = "fd00:76b9::254"
 	vethVMSide             = "imds-vm"  // max 15 chars for ifname
 	vethContainerSide      = "imds-ctr" // max 15 chars for ifname
 	bridgePrefix           = "k6t-"
 	defaultPodNetworksFile = "/var/run/dsx-imds/pod-networks"
 	defaultTapIfName       = "tap0"
-	metaCIDR               = "169.254.169.254/32"
 
 	// IPv4 header offsets (RFC 791)
 	ipv4DstAddrOffset = 16 // Destination IP address offset in IPv4 header
 	ipv4AddrLen       = 4  // IPv4 address length in bytes
+	// IPv6 keeps the destination in the fixed header (RFC 8200).
+	ipv6DstAddrOffset = 24
 
 	// Ethernet header offsets (IEEE 802.3)
 	ethDstAddrOffset = 0 // Destination MAC address offset in Ethernet header
@@ -123,7 +125,7 @@ func setupPodNetwork(ctx context.Context) error {
 	// Both hand the CNI link to a bridge and tap, then leave a dummy behind.
 	// Wait for QEMU to open the tap, then read guest IP/MAC from OVN.
 	slog.Debug("Waiting for KubeVirt network", "bridge_prefix", bridgePrefix)
-	bridgeLink, vmIP, vmMAC, err := waitForKubeVirtNetwork(ctx, nlHandle, *podNetworksFile)
+	bridgeLink, vmIPs, vmMAC, err := waitForKubeVirtNetwork(ctx, nlHandle, *podNetworksFile)
 	if err != nil {
 		return fmt.Errorf("waiting for KubeVirt network: %w", err)
 	}
@@ -148,42 +150,39 @@ func setupPodNetwork(ctx context.Context) error {
 		return err
 	}
 
-	// Assign IMDS IP
-	if err := assignIMDSIP(nlHandle, vethCtr); err != nil {
-		return err
-	}
+	for _, vmIP := range vmIPs {
+		metadataIP := net.ParseIP(imdsIP).To4()
+		if vmIP.To4() == nil {
+			metadataIP = net.ParseIP(imdsIPv6)
+		}
+		if err := assignIMDSIP(nlHandle, vethCtr, metadataIP); err != nil {
+			return err
+		}
+		if err := setupNftablesMACRewrite(vethCtr.Attrs().HardwareAddr, metadataIP); err != nil {
+			return err
+		}
+		slog.Info("Got VM IP and MAC", "ip", vmIP.String(), "mac", vmMAC.String())
 
-	// Get veth MAC
-	vethMAC := vethCtr.Attrs().HardwareAddr
-	slog.Info("Got veth MAC", "mac", vethMAC.String())
-
-	// Setup nftables in the namespace
-	if err := setupNftablesMACRewrite(vethMAC); err != nil {
-		return err
-	}
-
-	slog.Info("Got VM IP and MAC", "ip", vmIP.String(), "mac", vmMAC.String())
-
-	// Remove the UDN interface's local-table route so the /32 route below returns replies through the veth.
-	if err := deleteLocalRouteForIP(nlHandle, vmIP); err != nil {
-		return err
-	}
-
-	// Add reply route for VM IP
-	if err := addVMRoute(nlHandle, vethCtr, vmIP); err != nil {
-		return err
-	}
-
-	// Use the OVN allocation MAC for deterministic replies without ARP.
-	// Supported guests retain this MAC rather than overriding it in the VMI.
-	if err := addVMNeighbor(nlHandle, vethCtr, vmIP, vmMAC); err != nil {
-		return err
+		// Remove the UDN interface's local-table route so the /32 or /128 route
+		// below returns replies through the veth.
+		if err := deleteLocalRouteForIP(nlHandle, vmIP); err != nil {
+			return err
+		}
+		if err := addVMRoute(nlHandle, vethCtr, vmIP); err != nil {
+			return err
+		}
+		// Use the OVN allocation MAC for deterministic replies without ARP or
+		// IPv6 neighbor discovery. Supported guests retain this MAC rather than
+		// overriding it in the VMI.
+		if err := addVMNeighbor(nlHandle, vethCtr, vmIP, vmMAC); err != nil {
+			return err
+		}
 	}
 
 	return nil
 }
 
-func waitForKubeVirtNetwork(ctx context.Context, nlHandle *netlink.Handle, statusFile string) (netlink.Link, net.IP, net.HardwareAddr, error) {
+func waitForKubeVirtNetwork(ctx context.Context, nlHandle *netlink.Handle, statusFile string) (netlink.Link, []net.IP, net.HardwareAddr, error) {
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
@@ -306,22 +305,28 @@ func bringUpLink(nlHandle *netlink.Handle, link netlink.Link) error {
 	return nil
 }
 
-// assignIMDSIP assigns the metadata service IP address to an interface.
+type addressWriter interface {
+	AddrReplace(netlink.Link, *netlink.Addr) error
+}
+
+// assignIMDSIP assigns an IPv4 or IPv6 metadata service address to an interface.
 // Equivalent to: ip addr replace 169.254.169.254/32 dev imds-ctr
-func assignIMDSIP(nlHandle *netlink.Handle, link netlink.Link) error {
-	imdsAddr, err := netlink.ParseAddr(metaCIDR)
-	if err != nil {
-		return fmt.Errorf("parsing IMDS address: %w", err)
+// IPv6 equivalent: ip -6 addr replace fd00:76b9::254/128 dev imds-ctr nodad
+func assignIMDSIP(nlHandle addressWriter, link netlink.Link, ip net.IP) error {
+	addr := &netlink.Addr{IPNet: hostPrefix(ip)}
+	if ip.To4() == nil {
+		// Each VM has a separate network namespace for this fixed service address.
+		// Skip DAD so the address is usable as soon as setup finishes.
+		addr.Flags = unix.IFA_F_NODAD
 	}
-	slog.Debug("Assigning IMDS IP", "cidr", metaCIDR, "dev", link.Attrs().Name)
-	if err := nlHandle.AddrReplace(link, imdsAddr); err != nil {
-		return fmt.Errorf("assigning IP to %s: %w", link.Attrs().Name, err)
+	if err := nlHandle.AddrReplace(link, addr); err != nil {
+		return fmt.Errorf("assigning IMDS IP to %s: %w", link.Attrs().Name, err)
 	}
 	return nil
 }
 
 // setupNftablesMACRewrite configures nftables to rewrite destination MAC for IMDS traffic.
-func setupNftablesMACRewrite(vethMAC net.HardwareAddr) error {
+func setupNftablesMACRewrite(vethMAC net.HardwareAddr, metadataIP net.IP) error {
 	slog.Debug("Setting up nftables bridge nat table")
 
 	// Create nftables connection in the target namespace
@@ -343,11 +348,11 @@ func setupNftablesMACRewrite(vethMAC net.HardwareAddr) error {
 	}
 
 	// Add rule (idempotent)
-	if err := nftAddIMDSRule(conn, table, chain, vethMAC); err != nil {
+	if err := nftAddIMDSRule(conn, table, chain, vethMAC, metadataIP); err != nil {
 		return err
 	}
 
-	slog.Debug("nftables rule added", "dst_ip", imdsIP, "dst_mac", vethMAC.String())
+	slog.Debug("nftables rule added", "dst_ip", metadataIP.String(), "dst_mac", vethMAC.String())
 	return nil
 }
 
@@ -392,19 +397,32 @@ type nftRules interface {
 	Flush() error
 }
 
-// nftAddIMDSRule adds the MAC rewrite rule for IMDS traffic.
+// nftAddIMDSRule reconciles the destination MAC rewrite for one address family.
 // Equivalent to: nft add rule bridge nat PREROUTING ip daddr 169.254.169.254 ether daddr set <mac>
-func nftAddIMDSRule(conn nftRules, table *nftables.Table, chain *nftables.Chain, vethMAC net.HardwareAddr) error {
-	imdsIPParsed := net.ParseIP(imdsIP).To4()
-	if imdsIPParsed == nil {
-		return fmt.Errorf("invalid IMDS IP: %s", imdsIP)
+// IPv6 equivalent: nft add rule bridge nat PREROUTING ip6 daddr fd00:76b9::254 ether daddr set <mac>
+func nftAddIMDSRule(conn nftRules, table *nftables.Table, chain *nftables.Chain, vethMAC net.HardwareAddr, metadataIP net.IP) error {
+	protocol, offset, length := uint16(unix.ETH_P_IP), uint32(ipv4DstAddrOffset), uint32(ipv4AddrLen)
+	ip := metadataIP.To4()
+	if ip == nil {
+		protocol, offset, length = unix.ETH_P_IPV6, ipv6DstAddrOffset, net.IPv6len
+		ip = metadataIP.To16()
 	}
-
+	if ip == nil {
+		return fmt.Errorf("invalid IMDS IP: %s", metadataIP)
+	}
 	// Add the rule - matching shell command bytecode exactly:
+	// IPv4:
 	// [ meta load protocol => reg 1 ]
 	// [ cmp eq reg 1 0x0800 ]  (ETH_P_IP = IPv4 ethertype)
 	// [ payload load 4b @ network header + 16 => reg 1 ]
 	// [ cmp eq reg 1 <imdsIP> ]
+	// [ immediate reg 1 <mac> ]
+	// [ payload write reg 1 => 6b @ link header + 0 ]
+	// IPv6:
+	// [ meta load protocol => reg 1 ]
+	// [ cmp eq reg 1 0x86dd ]  (ETH_P_IPV6 = IPv6 ethertype)
+	// [ payload load 16b @ network header + 24 => reg 1 ]
+	// [ cmp eq reg 1 <imdsIPv6> ]
 	// [ immediate reg 1 <mac> ]
 	// [ payload write reg 1 => 6b @ link header + 0 ]
 	rule := &nftables.Rule{
@@ -416,24 +434,25 @@ func nftAddIMDSRule(conn nftRules, table *nftables.Table, chain *nftables.Chain,
 				Key:      expr.MetaKeyPROTOCOL,
 				Register: 1,
 			},
-			// cmp eq reg 1 ETH_P_IP (0x0800)
+			// cmp eq reg 1 ETH_P_IP (0x0800) or ETH_P_IPV6 (0x86dd)
 			&expr.Cmp{
 				Op:       expr.CmpOpEq,
 				Register: 1,
-				Data:     binaryutil.BigEndian.PutUint16(unix.ETH_P_IP),
+				Data:     binaryutil.BigEndian.PutUint16(protocol),
 			},
-			// payload load 4b @ network header + ipv4DstAddrOffset => reg 1
+			// payload load 4b @ network header + ipv4DstAddrOffset => reg 1 (IPv4)
+			// payload load 16b @ network header + ipv6DstAddrOffset => reg 1 (IPv6)
 			&expr.Payload{
 				DestRegister: 1,
 				Base:         expr.PayloadBaseNetworkHeader,
-				Offset:       ipv4DstAddrOffset,
-				Len:          ipv4AddrLen,
+				Offset:       offset,
+				Len:          length,
 			},
-			// cmp eq reg 1 <imdsIP>
+			// cmp eq reg 1 <metadataIP>
 			&expr.Cmp{
 				Op:       expr.CmpOpEq,
 				Register: 1,
-				Data:     imdsIPParsed,
+				Data:     ip,
 			},
 			// immediate reg 1 <mac>
 			&expr.Immediate{
@@ -457,7 +476,7 @@ func nftAddIMDSRule(conn nftRules, table *nftables.Table, chain *nftables.Chain,
 	}
 	matched := false
 	for _, existing := range rules {
-		// Match our complete IPv4 destination test and MAC write. A comparison
+		// Match our complete destination test and MAC write. A comparison
 		// to the IMDS address alone may belong to another rule in this chain.
 		if len(existing.Exprs) != len(rule.Exprs) ||
 			!reflect.DeepEqual(existing.Exprs[:4], rule.Exprs[:4]) ||
@@ -486,14 +505,14 @@ func nftAddIMDSRule(conn nftRules, table *nftables.Table, chain *nftables.Chain,
 	}
 
 	if err := conn.Flush(); err != nil {
-		return fmt.Errorf("reconcile IMDS MAC rewrite for %s to %s: %w", imdsIP, vethMAC, err)
+		return fmt.Errorf("reconcile IMDS MAC rewrite for %s to %s: %w", metadataIP, vethMAC, err)
 	}
 	return nil
 }
 
 // tap0 attaches the primary network. OVN preserves its allocation across
 // KubeVirt's handoff, including when eth0 belongs to the infrastructure network.
-func readVMNetwork(path string) (net.IP, net.HardwareAddr, error) {
+func readVMNetwork(path string) ([]net.IP, net.HardwareAddr, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open OVN pod networks: %w", err)
@@ -508,7 +527,7 @@ func readVMNetwork(path string) (net.IP, net.HardwareAddr, error) {
 	if err := json.NewDecoder(file).Decode(&networks); err != nil {
 		return nil, nil, fmt.Errorf("decode OVN pod networks: %w", err)
 	}
-	var vmIP net.IP
+	var vmIPs []net.IP
 	var vmMAC net.HardwareAddr
 	matched := false
 	for name, network := range networks {
@@ -532,29 +551,47 @@ func readVMNetwork(path string) (net.IP, net.HardwareAddr, error) {
 				return nil, nil, fmt.Errorf("parse guest CIDR %q for %s: %w", address, name, err)
 			}
 			if ipv4 := ip.To4(); ipv4 != nil {
-				if vmIP != nil {
-					return nil, nil, fmt.Errorf("multiple guest IPv4 addresses for %s", name)
-				}
-				vmIP = ipv4
+				ip = ipv4
 			}
+			for _, existing := range vmIPs {
+				if (existing.To4() != nil) == (ip.To4() != nil) {
+					return nil, nil, fmt.Errorf("multiple guest addresses in one IP family for %s", name)
+				}
+			}
+			vmIPs = append(vmIPs, ip)
 		}
 	}
-	if vmIP == nil {
-		return nil, nil, fmt.Errorf("no guest IPv4 address in primary OVN network")
+	if len(vmIPs) == 0 {
+		return nil, nil, fmt.Errorf("no guest address in primary OVN network")
 	}
-	return vmIP, vmMAC, nil
+	return vmIPs, vmMAC, nil
 }
 
-// deleteLocalRouteForIP deletes the local route for an IP address.
-// Equivalent to: ip route del local <ip> table local
-func deleteLocalRouteForIP(nl *netlink.Handle, ip net.IP) error {
-	ip4 := ip.To4()
-	if ip4 == nil {
-		return fmt.Errorf("pod IP must be IPv4: %s", ip.String())
-	}
+type routeWriter interface {
+	RouteListFiltered(int, *netlink.Route, uint64) ([]netlink.Route, error)
+	RouteDel(*netlink.Route) error
+	RouteReplace(*netlink.Route) error
+}
 
+func hostPrefix(ip net.IP) *net.IPNet {
+	bits := net.IPv6len * 8
+	if ip.To4() != nil {
+		ip = ip.To4()
+		bits = net.IPv4len * 8
+	}
+	return &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)}
+}
+
+// deleteLocalRouteForIP deletes the guest's local route for one family.
+// Equivalent to: ip route del local <ip> table local
+// IPv6 equivalent: ip -6 route del local <ip> table local
+func deleteLocalRouteForIP(nl routeWriter, ip net.IP) error {
+	family := netlink.FAMILY_V6
+	if ip.To4() != nil {
+		family = netlink.FAMILY_V4
+	}
 	filter := &netlink.Route{Table: unix.RT_TABLE_LOCAL}
-	routes, err := nl.RouteListFiltered(netlink.FAMILY_V4, filter, netlink.RT_FILTER_TABLE)
+	routes, err := nl.RouteListFiltered(family, filter, netlink.RT_FILTER_TABLE)
 	if err != nil {
 		return fmt.Errorf("listing local routes: %w", err)
 	}
@@ -569,28 +606,29 @@ func deleteLocalRouteForIP(nl *netlink.Handle, ip net.IP) error {
 			continue
 		}
 
-		if r.Dst.IP.Equal(ip4) {
+		ones, bits := r.Dst.Mask.Size()
+		if r.Type == unix.RTN_LOCAL && ones == bits && r.Dst.IP.Equal(ip) {
 			slog.Debug("Deleting local route", "dst", r.Dst.String())
 			rr := r // copy
 			if err := nl.RouteDel(&rr); err != nil {
-				slog.Warn("Failed to delete local route (continuing)", "dst", rr.Dst.String(), "error", err)
-				continue
+				return fmt.Errorf("deleting local route %s: %w", rr.Dst, err)
 			}
 			deleted++
 		}
 	}
 	if deleted > 0 {
-		slog.Info("Deleted local route(s)", "ip", ip4.String(), "count", deleted)
+		slog.Info("Deleted local route(s)", "ip", ip.String(), "count", deleted)
 	}
 	return nil
 }
 
 // addVMRoute adds a host route for the VM IP via the veth interface.
 // Equivalent to: ip route replace <vmIP>/32 dev imds-ctr
-func addVMRoute(nlHandle *netlink.Handle, link netlink.Link, vmIP net.IP) error {
+// IPv6 equivalent: ip -6 route replace <vmIP>/128 dev imds-ctr
+func addVMRoute(nlHandle routeWriter, link netlink.Link, vmIP net.IP) error {
 	slog.Debug("Adding explicit route for VM IP", "vm_ip", vmIP.String())
 	vmRoute := &netlink.Route{
-		Dst:       &net.IPNet{IP: vmIP, Mask: net.CIDRMask(32, 32)},
+		Dst:       hostPrefix(vmIP),
 		LinkIndex: link.Attrs().Index,
 	}
 	if err := nlHandle.RouteReplace(vmRoute); err != nil {
@@ -599,9 +637,14 @@ func addVMRoute(nlHandle *netlink.Handle, link netlink.Link, vmIP net.IP) error 
 	return nil
 }
 
-// addVMNeighbor adds a static ARP entry for the VM.
+type neighborWriter interface {
+	NeighSet(*netlink.Neigh) error
+}
+
+// addVMNeighbor adds a permanent ARP or IPv6 neighbor entry for the VM.
 // Equivalent to: ip neigh replace <vmIP> lladdr <vmMAC> dev imds-ctr nud permanent
-func addVMNeighbor(nlHandle *netlink.Handle, link netlink.Link, vmIP net.IP, vmMAC net.HardwareAddr) error {
+// IPv6 equivalent: ip -6 neigh replace <vmIP> lladdr <vmMAC> dev imds-ctr nud permanent
+func addVMNeighbor(nlHandle neighborWriter, link netlink.Link, vmIP net.IP, vmMAC net.HardwareAddr) error {
 	slog.Debug("Adding neighbor entry for VM", "vm_ip", vmIP.String(), "vm_mac", vmMAC.String())
 	neigh := &netlink.Neigh{
 		LinkIndex:    link.Attrs().Index,

@@ -2,31 +2,42 @@
 
 - Kubernetes and DPUService Pods use the
   [token-fetcher sidecar](token-fetcher/README.md).
-- Paired bare-metal hosts and KubeVirt VMs use the link-local DSX IMDS
-  endpoint.
+- Paired bare-metal hosts and KubeVirt VMs use DSX IMDS.
 - Relying parties validate DSX JWTs with the NVIDIA Workload Identity Keys JWKS endpoint.
 
-## Acquire a token from link-local IMDS
+## Acquire a token from DSX IMDS
 
-```text
-http://169.254.169.254/latest/meta-data/identity
-```
+| Consumer | Endpoint |
+| --- | --- |
+| Paired bare-metal host | `http://169.254.169.254/latest/meta-data/identity` |
+| KubeVirt VM over IPv4 | `http://169.254.169.254/latest/meta-data/identity` |
+| KubeVirt VM over IPv6 | `http://[fd00:76b9::254]/latest/meta-data/identity` |
 
 Paired bare-metal hosts reach DPU-hosted DSX IMDS through NICo. The host
 `dsx_imds` NodeAttestor uses the returned host token to attest its SPIRE agent.
 KubeVirt VMs reach a DSX IMDS sidecar in the virt-launcher Pod and receive their
-VM identity.
+VM identity. The VM network setup sidecar enables IPv4, IPv6, or both from the
+primary OVN allocation. See
+[VM network requirements](../cmd/dsx-imds-network-setup/README.md#vm-bindings).
 
-Both paths use the same request:
+Request a token over IPv4:
 
 ```bash
-audience=spiffe://ds9.dsx.nvid.id/openbao
-response=$(curl --fail-with-body --silent --show-error --noproxy '*' --get \
+curl --fail-with-body --silent --show-error --noproxy '*' --get \
   --header 'Metadata: true' \
   --header 'Accept: application/json' \
-  --data-urlencode "aud=${audience}" \
-  http://169.254.169.254/latest/meta-data/identity)
-token=$(jq -er '.token' <<<"${response}")
+  --data-urlencode 'aud=spiffe://ds9.dsx.nvid.id/openbao' \
+  http://169.254.169.254/latest/meta-data/identity
+```
+
+For a VM with IPv6, use the same request with the IPv6 endpoint:
+
+```bash
+curl --fail-with-body --silent --show-error --noproxy '*' --globoff --get \
+  --header 'Metadata: true' \
+  --header 'Accept: application/json' \
+  --data-urlencode 'aud=spiffe://ds9.dsx.nvid.id/openbao' \
+  'http://[fd00:76b9::254]/latest/meta-data/identity'
 ```
 
 Example response:
@@ -45,7 +56,7 @@ Plain-text request:
 curl --fail-with-body --silent --show-error --noproxy '*' --get \
   --header 'Metadata: true' \
   --header 'Accept: text/plain' \
-  --data-urlencode "aud=${audience}" \
+  --data-urlencode 'aud=spiffe://ds9.dsx.nvid.id/openbao' \
   http://169.254.169.254/latest/meta-data/identity
 ```
 
@@ -62,11 +73,11 @@ plain-text response option.
 
 ## Consume a DSX JWT
 
-Present the token to the relying party as a bearer credential:
+Use the returned `token` value as the relying party bearer credential:
 
 ```bash
 curl --fail-with-body \
-  --header "Authorization: Bearer ${token}" \
+  --header 'Authorization: Bearer <dsx-jwt>' \
   https://relying-party.example/v1/resource
 ```
 

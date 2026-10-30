@@ -78,6 +78,7 @@ spec:
       networks:
         - name: default
           multus:
+            # Multus default-network references require an explicit namespace.
             networkName: tenant-tenant1/tenant-tenant1-network
             default: true
       volumes:

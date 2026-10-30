@@ -153,6 +153,10 @@ setup and `50m` / `64Mi` for metadata-service. Set both `requests` and `limits`
 when overriding them. Equal CPU and memory requests and limits preserve the
 Guaranteed QoS required for dedicated CPU placement.
 
+VM IMDS networking follows the primary OVN allocation and supports IPv4-only,
+IPv6-only, and dual-stack guests. See the [guest network requirements](../../cmd/dsx-imds-network-setup/README.md#vm-bindings)
+for supported bindings, addresses, and MAC requirements.
+
 Each Pod selected for token-fetcher injection must set both
 `spiffe.nvidia.com/inject-dsx-token-fetcher: "true"` and its relying-party
 audience in `spiffe.nvidia.com/token-audience`. The

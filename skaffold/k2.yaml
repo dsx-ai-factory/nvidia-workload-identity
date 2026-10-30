@@ -55,6 +55,7 @@ deploy:
         upgradeOnChange: false
         valuesFiles:
           - ../third-party/ovn-kubernetes/helm/ovn-kubernetes/values-no-ic.yaml
+          - ../local-e2e-tests/k2/network/ovn-values.yaml
         setValues:
           k8sAPIServer: https://k2-control-plane:6443
           ovnkube-identity.replicas: 1
@@ -381,6 +382,8 @@ manifests:
   kustomize:
     paths:
       - ../local-e2e-tests/k2/vm
+      - ../local-e2e-tests/k2/vm-ipv4
+      - ../local-e2e-tests/k2/vm-ipv6
 deploy:
   kubeContext: kind-k2
   statusCheckDeadlineSeconds: 300

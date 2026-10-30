@@ -12,11 +12,15 @@ spec:
         operations: [CREATE]
         resources: [pods]
     namespaceSelector:
-      matchLabels:
-        kubernetes.io/metadata.name: tenant-tenant1
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values: [tenant-tenant1, tenant-tenant1-ipv4, tenant-tenant1-ipv6]
     objectSelector:
-      matchLabels:
-        kubevirt.io/domain: e2e-debian-vm-l2bridge
+      matchExpressions:
+        - key: kubevirt.io/domain
+          operator: In
+          values: [e2e-debian-vm, e2e-debian-vm-l2bridge]
   matchConditions:
     - name: has-cloud-init-hook
       expression: object.spec.containers.exists(container, container.name == "hook-sidecar-0")

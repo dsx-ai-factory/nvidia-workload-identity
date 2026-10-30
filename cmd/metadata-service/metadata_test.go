@@ -465,46 +465,56 @@ func TestAcceptHeaderParsing(t *testing.T) {
 }
 
 func TestTTLListenerSetsResponseTTL(t *testing.T) {
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer listener.Close()
+	for _, test := range []struct {
+		name, network, address string
+		level, option          int
+	}{
+		{"IPv4 TTL", "tcp4", "127.0.0.1:0", syscall.IPPROTO_IP, syscall.IP_TTL},
+		{"IPv6 hop limit", "tcp6", "[::1]:0", syscall.IPPROTO_IPV6, syscall.IPV6_UNICAST_HOPS},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			listener, err := (&net.ListenConfig{}).Listen(t.Context(), test.network, test.address)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
 
-	accepted := make(chan net.Conn, 1)
-	acceptErr := make(chan error, 1)
-	go func() {
-		conn, err := (ttlListener{Listener: listener}).Accept()
-		accepted <- conn
-		acceptErr <- err
-	}()
+			accepted := make(chan net.Conn, 1)
+			acceptErr := make(chan error, 1)
+			go func() {
+				conn, err := (ttlListener{Listener: listener}).Accept()
+				accepted <- conn
+				acceptErr <- err
+			}()
 
-	client, err := net.Dial("tcp4", listener.Addr().String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer client.Close()
+			client, err := (&net.Dialer{}).DialContext(t.Context(), test.network, listener.Addr().String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer client.Close()
 
-	server := <-accepted
-	if err := <-acceptErr; err != nil {
-		t.Fatal(err)
-	}
-	defer server.Close()
-	rawConn, err := server.(*net.TCPConn).SyscallConn()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var ttl int
-	if err := rawConn.Control(func(fd uintptr) {
-		ttl, err = syscall.GetsockoptInt(int(fd), syscall.IPPROTO_IP, syscall.IP_TTL)
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ttl != 1 {
-		t.Fatalf("TTL = %d, want 1", ttl)
+			server := <-accepted
+			if err := <-acceptErr; err != nil {
+				t.Fatal(err)
+			}
+			defer server.Close()
+			rawConn, err := server.(*net.TCPConn).SyscallConn()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var ttl int
+			if err := rawConn.Control(func(fd uintptr) {
+				ttl, err = syscall.GetsockoptInt(int(fd), test.level, test.option)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ttl != 1 {
+				t.Fatalf("TTL = %d, want 1", ttl)
+			}
+		})
 	}
 }
 
