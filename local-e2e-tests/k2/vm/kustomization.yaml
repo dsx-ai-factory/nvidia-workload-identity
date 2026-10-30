@@ -18,4 +18,3 @@ secretGenerator:
   - name: e2e-debian-vm-cloud-init
     files:
       - userdata=generated/userdata
-      - networkdata=networkdata

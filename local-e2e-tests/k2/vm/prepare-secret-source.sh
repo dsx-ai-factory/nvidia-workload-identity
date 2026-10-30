@@ -42,9 +42,11 @@ write_cloud_init() {
 ssh_pwauth: false
 users:
   - name: debian
-    sudo: ALL=(ALL) NOPASSWD:ALL
-    lock_passwd: true
-    shell: /bin/bash
+    # Alpine's sshd rejects locked accounts before checking SSH keys.
+    # An unusable hash keeps password login disabled.
+    lock_passwd: false
+    passwd: "*"
+    shell: /bin/sh
     ssh_authorized_keys:
       - ${public_key}
 EOF

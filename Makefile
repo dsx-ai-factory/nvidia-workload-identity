@@ -4,7 +4,7 @@
 # NVIDIA Workload Identity Makefile
 
 .PHONY: preflight local-registry
-.PHONY: help install install-skaffold preload-vm-disk clean
+.PHONY: help install clean
 .PHONY: test test-k2-identity test-cross-shard status
 .PHONY: k1-cluster k2-cluster
 .PHONY: validate test-go test-rust test-shell test-chart test-skaffold chart-dependencies
@@ -134,25 +134,9 @@ chart-dependencies:
 # NVIDIA Workload Identity Keys shards
 # ============================================================
 
-# The documented parallel make invocation overlaps the VM disk pull with the
-# root Skaffold workflow.
-install: install-skaffold preload-vm-disk ## Install the complete local environment
-
-install-skaffold: k1-cluster k2-cluster
+install: k1-cluster k2-cluster ## Install the complete local environment
 	@trap '$(MISE_EXEC) ./local-e2e-tests/cleanup-secret-sources.sh' EXIT INT TERM; \
 		$(SKAFFOLD_RUN)
-
-preload-vm-disk: k2-cluster
-	@image="$$( $(MISE_EXEC) yq -er \
-		'select(.kind == "VirtualMachine") | .spec.template.spec.volumes[] | select(has("containerDisk")) | .containerDisk.image' \
-		local-e2e-tests/k2/vm/vm.yaml )"; \
-		started="$$(date +%s)"; \
-		echo "[INFO] Ensuring VM container disk is present on k2-worker..."; \
-		if ! docker exec k2-worker crictl inspecti "$$image" >/dev/null 2>&1; then \
-			docker exec k2-worker crictl pull "$$image" >/dev/null || \
-				echo "[WARNING] VM container disk preload failed. The VM will use its normal image pull."; \
-		fi; \
-		echo "[INFO] Timing: k2 VM container disk preload: $$(($$(date +%s) - started))s"
 
 clean: ## Clean up: Remove both Kind clusters
 	@echo "Cleaning up..."
