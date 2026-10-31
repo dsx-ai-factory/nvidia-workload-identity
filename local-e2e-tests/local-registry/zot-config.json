@@ -24,7 +24,7 @@
           "maxRetries": 6,
           "retryDelay": "5m",
           "preserveDigest": true,
-          "content": [{"prefix": "**"}]
+          "content": [{"prefix": "**", "destination": "docker.io"}]
         },
         {
           "urls": ["https://gcr.io"],
@@ -33,7 +33,7 @@
           "maxRetries": 6,
           "retryDelay": "5m",
           "preserveDigest": true,
-          "content": [{"prefix": "**"}]
+          "content": [{"prefix": "**", "destination": "gcr.io"}]
         },
         {
           "urls": ["https://ghcr.io"],
@@ -42,7 +42,7 @@
           "maxRetries": 6,
           "retryDelay": "5m",
           "preserveDigest": true,
-          "content": [{"prefix": "**"}]
+          "content": [{"prefix": "**", "destination": "ghcr.io"}]
         },
         {
           "urls": ["https://quay.io"],
@@ -51,7 +51,7 @@
           "maxRetries": 6,
           "retryDelay": "5m",
           "preserveDigest": true,
-          "content": [{"prefix": "**"}]
+          "content": [{"prefix": "**", "destination": "quay.io"}]
         },
         {
           "urls": ["https://registry.k8s.io"],
@@ -60,7 +60,7 @@
           "maxRetries": 6,
           "retryDelay": "5m",
           "preserveDigest": true,
-          "content": [{"prefix": "**"}]
+          "content": [{"prefix": "**", "destination": "registry.k8s.io"}]
         },
         {
           "urls": ["https://cgr.dev"],
@@ -69,7 +69,7 @@
           "maxRetries": 6,
           "retryDelay": "5m",
           "preserveDigest": true,
-          "content": [{"prefix": "**"}]
+          "content": [{"prefix": "**", "destination": "cgr.dev"}]
         },
         {
           "urls": ["https://public.ecr.aws"],
@@ -78,7 +78,7 @@
           "maxRetries": 6,
           "retryDelay": "5m",
           "preserveDigest": true,
-          "content": [{"prefix": "**"}]
+          "content": [{"prefix": "**", "destination": "public.ecr.aws"}]
         },
         {
           "urls": ["https://nvcr.io"],
@@ -87,7 +87,7 @@
           "maxRetries": 6,
           "retryDelay": "5m",
           "preserveDigest": true,
-          "content": [{"prefix": "**"}]
+          "content": [{"prefix": "**", "destination": "nvcr.io"}]
         }
       ]
     }

@@ -16,9 +16,11 @@ directly. The local Zot registry caches image pulls for both Kind clusters and
 local builds through `mirror.gcr.io`. Set `KIND_DOCKERHUB_MIRROR` to an HTTPS
 registry origin to route Docker Hub pulls from Kind directly through that mirror.
 If the mirror is unavailable, the pull fails. Leave it unset to use Zot.
-Other registries keep using Zot. CI uses the NVIDIA mirror for Kind and as Zot's
-preferred Docker Hub mirror, with Docker Hub as Zot's fallback. CI preserves Zot's
-`library` cache between runs through GitHub Actions cache restore and save steps.
+Zot stores each upstream under its registry hostname so pulls select the
+matching source. CI uses the NVIDIA mirror for Kind and as Zot's preferred
+Docker Hub mirror, with Docker Hub as Zot's fallback. CI preserves the
+`docker.io/library` cache between runs through GitHub Actions cache restore
+and save steps.
 
 The identity chart is installed independently in both clusters. The remaining
 components are separate Skaffold modules. Shared fixture settings and the

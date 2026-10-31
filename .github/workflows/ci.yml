@@ -83,7 +83,7 @@ jobs:
         id: zot-cache
         with:
           # The full Zot storage exceeds GitHub's 10 GB per-entry limit.
-          path: ${{ env.ZOT_DATA_DIR }}/library
+          path: ${{ env.ZOT_DATA_DIR }}/docker.io/library
           key: zot-dockerhub-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('local-e2e-tests/local-registry/zot-config.json') }}
       - name: Prepare host networking and virtualization
         run: |
@@ -183,12 +183,12 @@ jobs:
         id: stop-zot
         run: |
           docker stop dsx-identity-registry
-          sudo chown -R "$(id -u):$(id -g)" "$ZOT_DATA_DIR/library"
-          du -sh "$ZOT_DATA_DIR/library"
+          sudo chown -R "$(id -u):$(id -g)" "$ZOT_DATA_DIR/docker.io/library"
+          du -sh "$ZOT_DATA_DIR/docker.io/library"
       - uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         if: always() && steps.stop-zot.outcome == 'success'
         with:
-          path: ${{ env.ZOT_DATA_DIR }}/library
+          path: ${{ env.ZOT_DATA_DIR }}/docker.io/library
           key: ${{ steps.zot-cache.outputs.cache-primary-key }}
 
   secret-detection:
