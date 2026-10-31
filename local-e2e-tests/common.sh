@@ -112,7 +112,7 @@ kind_kubeconfig_path() {
 
 kind_configure_registry() {
     local cluster_name="$1"
-    local node nodes registry_dir=/etc/containerd/certs.d
+    local node nodes registry registry_dir=/etc/containerd/certs.d
     local mirror="${KIND_DOCKERHUB_MIRROR:-}"
     if [[ -n "${mirror}" && ! "${mirror}" =~ ^https://[a-zA-Z0-9.-]+(:[0-9]+)?$ ]]; then
         log_error "KIND_DOCKERHUB_MIRROR must be an HTTPS hostname with an optional port"
@@ -124,16 +124,19 @@ kind_configure_registry() {
         return 1
     fi
     while IFS= read -r node; do
-        docker exec "${node}" mkdir -p "${registry_dir}/_default" "${registry_dir}/docker.io"
+        docker exec "${node}" mkdir -p "${registry_dir}/_default"
         docker cp "${PROJECT_ROOT}/local-e2e-tests/local-registry/_default/hosts.toml" \
             "${node}:${registry_dir}/_default/hosts.toml"
+        # Preserve the source registry so Zot selects its matching upstream.
+        for registry in docker.io gcr.io ghcr.io quay.io registry.k8s.io cgr.dev public.ecr.aws nvcr.io; do
+            docker exec "${node}" mkdir -p "${registry_dir}/${registry}"
+            printf '[host."http://dsx-identity-registry:5000/v2/%s"]\n  capabilities = ["pull", "resolve"]\n  # The URL includes the API root.\n  override_path = true\n' \
+                "${registry}" | docker exec -i "${node}" tee "${registry_dir}/${registry}/hosts.toml" >/dev/null
+        done
         if [[ -n "${mirror}" ]]; then
             # An explicit server prevents silent fallback to rate-limited Docker Hub.
             printf 'server = "%s"\n' \
                 "${mirror}" | docker exec -i "${node}" tee "${registry_dir}/docker.io/hosts.toml" >/dev/null
-        else
-            docker cp "${PROJECT_ROOT}/local-e2e-tests/local-registry/_default/hosts.toml" \
-                "${node}:${registry_dir}/docker.io/hosts.toml"
         fi
     done <<< "${nodes}"
 }
