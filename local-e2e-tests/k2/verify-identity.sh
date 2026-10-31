@@ -49,8 +49,6 @@ external_curl() {
 
 initialize_external_test_process() {
     GATEWAY_ADDRESS=$(get_gateway_address kind-k1 envoy-gateway-system k1-gateway)
-    kubectl wait --for=condition=Ready "pod/${EXTERNAL_CLIENT_NAME}" \
-        --namespace "${NAMESPACE}" --context "${CONTEXT}" --timeout=120s >/dev/null
     E2E_PROBE_IMAGE=$(kubectl get pod e2e-spire-client \
         --namespace dsx-identity-spire-e2e --context "${CONTEXT}" \
         -o jsonpath='{.spec.containers[?(@.name=="identity-probe")].image}')
@@ -404,7 +402,7 @@ verify_vm_identities() {
                 ;;
         esac
         kubectl wait --for=condition=Ready "pod/${EXTERNAL_CLIENT_NAME}" \
-            --namespace "${NAMESPACE}" --context "${CONTEXT}" --timeout=120s >/dev/null || return 1
+            --namespace "${NAMESPACE}" --context "${CONTEXT}" --timeout=300s >/dev/null || return 1
         for VM_NAME in "${VM_NAMES[@]}"; do
             EXPECTED_SPIFFE_ID="spiffe://tenant-2.ds9.dsx.nvid.id/vm/${VM_NAME}${identity_suffix}"
             if ! run_timed "${VM_TENANT} ${VM_NAME} identity and OpenBao" verify_metadata_access; then

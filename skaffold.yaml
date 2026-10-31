@@ -3,6 +3,10 @@ kind: Config
 metadata:
   name: identity-e2e
 requires:
+  # Overlap KubeVirt startup with identity rollout.
+  - path: skaffold/k2.yaml
+    configs:
+      - kubevirt-k2-release
   - path: skaffold/k1.yaml
     configs:
       - k1-fixture

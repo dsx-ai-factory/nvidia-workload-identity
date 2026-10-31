@@ -214,6 +214,8 @@ deploy:
               - endpoints/dsx-identity-controller-manager-webhook
     releases:
       - name: dsx-identity
+        # Complete identity rollout before deploying dependent fixtures.
+        wait: true
         chartPath: ../charts/dsx-identity
         namespace: dsx-identity
         createNamespace: true

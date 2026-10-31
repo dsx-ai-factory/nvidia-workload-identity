@@ -105,21 +105,9 @@ manifests:
       - ../local-e2e-tests/k2/kubevirt/release
 deploy:
   kubeContext: kind-k2
-  # KubeVirt pulls several large upstream images in sequence before reporting Available.
   statusCheckDeadlineSeconds: 600
   tolerateFailuresUntilDeadline: true
-  kubectl:
-    hooks:
-      after:
-        - host:
-            command:
-              - kubectl
-              - wait
-              - --for=condition=Available
-              - --namespace=kubevirt
-              - --context=kind-k2
-              - --timeout=600s
-              - kubevirt/kubevirt
+  kubectl: {}
 ---
 apiVersion: skaffold/v4beta14
 kind: Config
@@ -216,6 +204,8 @@ deploy:
               - endpoints/dsx-identity-controller-manager-webhook
     releases:
       - name: dsx-identity
+        # Complete identity rollout before deploying dependent fixtures.
+        wait: true
         chartPath: ../charts/dsx-identity
         namespace: dsx-identity
         createNamespace: true
@@ -278,6 +268,8 @@ deploy:
   helm:
     releases:
       - name: dsx-imds-host-agent
+        # VM sidecars use this agent's Workload API.
+        wait: true
         remoteChart: spire
         repo: https://spiffe.github.io/helm-charts-hardened/
         version: 0.27.1
@@ -370,6 +362,9 @@ requires:
   - path: images.yaml
     configs:
       - images
+  - path: k1.yaml
+    configs:
+      - identity-k1
   - configs:
       - kubevirt-k2-release
       - worker-host-k2
@@ -388,4 +383,16 @@ deploy:
   kubeContext: kind-k2
   statusCheckDeadlineSeconds: 300
   tolerateFailuresUntilDeadline: true
-  kubectl: {}
+  kubectl:
+    hooks:
+      before:
+        # KubeVirt pulls several large upstream images in sequence before reporting Available.
+        - host:
+            command:
+              - kubectl
+              - wait
+              - --for=condition=Available
+              - --namespace=kubevirt
+              - --context=kind-k2
+              - --timeout=600s
+              - kubevirt/kubevirt
