@@ -167,6 +167,8 @@ repository is a legacy mirror.
 - Put a supplied Jira reference in the scope, for example
   `fix(VMAAS-1586): use BM identity resource type`. Use `NO-REF` when none was supplied.
 - Wrap commit body lines at 72 characters and keep all lines within 100.
+- Keep pull request descriptions concise and easy to understand at a glance.
+  Include only information relevant to the change.
 - Keep each pull request focused and its description current. Verify branch,
   title, description, complete commit range, and clean worktree before handoff.
 - Open pull requests ready for review unless the user requests Draft status.

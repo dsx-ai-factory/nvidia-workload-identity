@@ -162,17 +162,18 @@ Add the rule for each allocated family:
 
 | Family | Command |
 | --- | --- |
-| IPv4 | `nft add rule bridge nat PREROUTING ip daddr 169.254.169.254 ether daddr set <imds-mac>` |
-| IPv6 | `nft add rule bridge nat PREROUTING ip6 daddr fd00:76b9::254 ether daddr set <imds-mac>` |
+| IPv4 | `nft add rule bridge nat PREROUTING iifname tap0 ip daddr 169.254.169.254 ether daddr set <imds-mac>` |
+| IPv6 | `nft add rule bridge nat PREROUTING iifname tap0 ip6 daddr fd00:76b9::254 ether daddr set <imds-mac>` |
 
 The VM treats the IMDS address as a routed destination and sends the packet to
 its default gateway MAC. A bridge forwards by destination MAC, so without this
 rule it selects the uplink instead of `imds-vm`.
 
 The `bridge` nftables family sees the Ethernet frame before the bridge makes
-that forwarding decision. The `PREROUTING` rule replaces the gateway MAC with
-the `imds-ctr` MAC. The bridge then forwards the frame through `imds-vm`, and
-the peer delivers it on `imds-ctr` to metadata-service.
+that forwarding decision. The `PREROUTING` rule matches IMDS frames arriving
+from the guest tap and replaces the gateway MAC with the `imds-ctr` MAC. The
+bridge then forwards the frame through `imds-vm`, and the peer delivers it on
+`imds-ctr` to metadata-service.
 
 ### Remove the conflicting local route
 
