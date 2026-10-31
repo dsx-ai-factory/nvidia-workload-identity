@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
@@ -195,31 +194,53 @@ func TestRemoteVerifierRefreshesUnknownKID(t *testing.T) {
 	}
 	var current atomic.Pointer[publication]
 	current.Store(&publication{key: first, kid: "first-key"})
-	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		requests.Add(1)
 		published := current.Load()
 		writeJWKSWithKID(t, w, published.key, published.kid)
 	}))
 	t.Cleanup(server.Close)
 
-	ctx := oidc.ClientContext(context.Background(), server.Client())
-	keys := oidc.NewRemoteKeySet(ctx, server.URL)
-	claims := jwt.Claims{Expiry: jwt.NewNumericDate(time.Now().Add(time.Minute))}
-	firstToken := signTokenWithKID(t, first, "first-key", claims)
-	if _, err := keys.VerifySignature(context.Background(), firstToken); err != nil {
+	verifier, err := NewVerifier(context.Background(), testIssuer, "spire-server",
+		spiffeid.RequireTrustDomainFromString("k2.internal"), server.URL, time.Second)
+	if err != nil {
 		t.Fatal(err)
+	}
+	claims := jwt.Claims{
+		Issuer:   testIssuer,
+		Subject:  "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7",
+		Audience: jwt.Audience{"spire-server"},
+		Expiry:   jwt.NewNumericDate(time.Now().Add(time.Minute)),
+	}
+	firstToken := signTokenWithKID(t, first, "first-key", claims)
+	firstID, err := verifier.Verify(context.Background(), firstToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := firstID.String(), "spiffe://k2.internal/spire/agent/dsx_imds/tenant/operator-1/bm/host-7"; got != want {
+		t.Fatalf("agent ID = %q, want %q", got, want)
+	}
+
+	secondToken := signTokenWithKID(t, second, "second-key", claims)
+	if _, err := verifier.Verify(context.Background(), secondToken); err == nil {
+		t.Fatal("unpublished signing key was accepted")
 	}
 
 	current.Store(&publication{key: second, kid: "second-key"})
-	secondToken := signTokenWithKID(t, second, "second-key", claims)
-	if _, err := keys.VerifySignature(context.Background(), secondToken); err != nil {
-		t.Fatalf("unknown kid did not refresh: %v", err)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	// A verification may join an in-flight fetch of the previous publication.
+	for {
+		got, err := verifier.Verify(ctx, secondToken)
+		if err == nil {
+			if got != firstID {
+				t.Fatalf("agent ID after key rotation = %q, want %q", got, firstID)
+			}
+			break
+		}
+		if ctx.Err() != nil {
+			t.Fatalf("unknown kid did not refresh: %v", err)
+		}
 	}
-	if requests.Load() != 2 {
-		t.Fatalf("JWKS requests = %d, want 2", requests.Load())
-	}
-
 }
 
 func TestRemoteVerifierTimeoutRecovers(t *testing.T) {
