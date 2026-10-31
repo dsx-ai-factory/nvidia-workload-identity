@@ -56,7 +56,7 @@ func (p *Plugin) Configure(_ context.Context, req *configv1.ConfigureRequest) (*
 	}
 	// The verifier and its JWKS cache outlive this Configure RPC.
 	verifier, err := dsximds.NewVerifier(
-		config.Issuer, config.Audience, trustDomain, config.JWKSURL, jwksRequestTimeout,
+		context.Background(), config.Issuer, config.Audience, trustDomain, config.JWKSURL, jwksRequestTimeout,
 	)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid configuration: %v", err)

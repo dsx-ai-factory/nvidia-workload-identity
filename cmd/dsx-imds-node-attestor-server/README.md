@@ -45,5 +45,5 @@ plugin_data {
 
 All three fields are required. SPIRE supplies the trust domain through its core
 configuration. `issuer` sets the expected `iss` claim because `jwks_url` does
-not. Signing keys are cached and refreshed when a token uses an unknown key.
+not. The standard OIDC remote key set caches and refreshes keys.
 `Dockerfile.spire` embeds the plugin in the DSX SPIRE server image.
