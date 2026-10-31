@@ -29,7 +29,7 @@ func TestAgentServerIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifier, err := NewVerifier(context.Background(), testIssuer, "spire-server",
+	verifier, err := NewVerifier(testIssuer, "spire-server",
 		spiffeid.RequireTrustDomainFromString("k2.internal"), jwksServer(t, key).URL, time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +71,7 @@ func TestVerifyHostAttestation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifier, err := NewVerifier(context.Background(), testIssuer, "spire-server",
+	verifier, err := NewVerifier(testIssuer, "spire-server",
 		spiffeid.RequireTrustDomainFromString("k2.internal"), jwksServer(t, key).URL, time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -136,7 +136,7 @@ func TestRemoteVerifierRejectsWrongSignature(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := jwksServer(t, wrongKey)
-	verifier, err := NewVerifier(context.Background(), testIssuer, "spire-server",
+	verifier, err := NewVerifier(testIssuer, "spire-server",
 		spiffeid.RequireTrustDomainFromString("k2.internal"), server.URL, time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -162,7 +162,7 @@ func TestRemoteVerifierVerifiesTLSCertificate(t *testing.T) {
 		writeJWKS(t, w, key)
 	}))
 	t.Cleanup(server.Close)
-	verifier, err := NewVerifier(context.Background(), testIssuer, "spire-server",
+	verifier, err := NewVerifier(testIssuer, "spire-server",
 		spiffeid.RequireTrustDomainFromString("k2.internal"), server.URL, time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -194,13 +194,15 @@ func TestRemoteVerifierRefreshesUnknownKID(t *testing.T) {
 	}
 	var current atomic.Pointer[publication]
 	current.Store(&publication{key: first, kid: "first-key"})
+	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
 		published := current.Load()
 		writeJWKSWithKID(t, w, published.key, published.kid)
 	}))
 	t.Cleanup(server.Close)
 
-	verifier, err := NewVerifier(context.Background(), testIssuer, "spire-server",
+	verifier, err := NewVerifier(testIssuer, "spire-server",
 		spiffeid.RequireTrustDomainFromString("k2.internal"), server.URL, time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -212,34 +214,27 @@ func TestRemoteVerifierRefreshesUnknownKID(t *testing.T) {
 		Expiry:   jwt.NewNumericDate(time.Now().Add(time.Minute)),
 	}
 	firstToken := signTokenWithKID(t, first, "first-key", claims)
-	firstID, err := verifier.Verify(context.Background(), firstToken)
+	firstID, err := verifier.Verify(t.Context(), firstToken)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := firstID.String(), "spiffe://k2.internal/spire/agent/dsx_imds/tenant/operator-1/bm/host-7"; got != want {
-		t.Fatalf("agent ID = %q, want %q", got, want)
-	}
-
-	secondToken := signTokenWithKID(t, second, "second-key", claims)
-	if _, err := verifier.Verify(context.Background(), secondToken); err == nil {
-		t.Fatal("unpublished signing key was accepted")
-	}
-
 	current.Store(&publication{key: second, kid: "second-key"})
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	// A verification may join an in-flight fetch of the previous publication.
-	for {
-		got, err := verifier.Verify(ctx, secondToken)
-		if err == nil {
-			if got != firstID {
-				t.Fatalf("agent ID after key rotation = %q, want %q", got, firstID)
-			}
-			break
-		}
-		if ctx.Err() != nil {
-			t.Fatalf("unknown kid did not refresh: %v", err)
-		}
+	secondToken := signTokenWithKID(t, second, "second-key", claims)
+	got, err := verifier.Verify(t.Context(), secondToken)
+	if err != nil {
+		t.Fatalf("first verification after rotation failed: %v", err)
+	}
+	if want := "spiffe://k2.internal/spire/agent/dsx_imds/tenant/operator-1/bm/host-7"; got != firstID || got.String() != want {
+		t.Fatalf("agent IDs = %q, %q, want %q", firstID, got, want)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("JWKS requests = %d, want 2", got)
+	}
+	if _, err := verifier.Verify(t.Context(), secondToken); err != nil {
+		t.Fatalf("cached verification failed: %v", err)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("cached verification fetched JWKS: requests = %d, want 2", got)
 	}
 }
 
@@ -262,7 +257,7 @@ func TestRemoteVerifierTimeoutRecovers(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	verifier, err := NewVerifier(context.Background(), testIssuer, "spire-server",
+	verifier, err := NewVerifier(testIssuer, "spire-server",
 		spiffeid.RequireTrustDomainFromString("k2.internal"), server.URL, 50*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
