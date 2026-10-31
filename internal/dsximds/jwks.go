@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"sync/atomic"
 
 	"github.com/go-jose/go-jose/v4"
@@ -22,6 +23,7 @@ type remoteKeySet struct {
 	algorithms []jose.SignatureAlgorithm
 	keys       atomic.Pointer[jose.JSONWebKeySet]
 	fetch      singleflight.Group
+	mu         sync.Mutex
 }
 
 func (r *remoteKeySet) VerifySignature(ctx context.Context, rawToken string) ([]byte, error) {
@@ -34,17 +36,24 @@ func (r *remoteKeySet) VerifySignature(ctx context.Context, rawToken string) ([]
 		return payload, nil
 	}
 
+	r.mu.Lock()
+	if current := r.keys.Load(); current != cached {
+		r.mu.Unlock()
+		return verifyWithKeys(token, current)
+	}
 	result := r.fetch.DoChan("", func() (any, error) {
-		if current := r.keys.Load(); current != cached {
-			return current, nil
-		}
 		keys, err := r.fetchKeys()
+		r.mu.Lock()
+		// Cache hits can return before waiting callers wake. Retire this fetch
+		// before publishing its keys so later misses cannot join it.
+		r.fetch.Forget("")
 		if err == nil {
-			// Publish the immutable snapshot before singleflight releases callers.
 			r.keys.Store(keys)
 		}
+		r.mu.Unlock()
 		return keys, err
 	})
+	r.mu.Unlock()
 	// The shared fetch uses the HTTP timeout. Each caller can cancel its wait.
 	select {
 	case <-ctx.Done():

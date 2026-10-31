@@ -23,12 +23,17 @@ import (
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 )
 
-func TestRemoteKeySetConcurrentRefreshAndCancellation(t *testing.T) {
+func TestRemoteKeySetConcurrentRotationAndCancellation(t *testing.T) {
 	t.Parallel()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
+	second, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rotated atomic.Bool
 	started := make(chan struct{})
 	release := make(chan struct{})
 	var requests atomic.Int32
@@ -40,6 +45,15 @@ func TestRemoteKeySetConcurrentRefreshAndCancellation(t *testing.T) {
 			case <-r.Context().Done():
 				return
 			}
+		}
+		if rotated.Load() {
+			if err := json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{
+				{Key: &key.PublicKey, KeyID: "test-key"},
+				{Key: &second.PublicKey, KeyID: "rotated"},
+			}}); err != nil {
+				t.Error(err)
+			}
+			return
 		}
 		writeJWKS(t, w, key)
 	}))
@@ -71,7 +85,20 @@ func TestRemoteKeySetConcurrentRefreshAndCancellation(t *testing.T) {
 		}()
 	}
 	close(release)
-	for range callers {
+	select {
+	case err := <-results:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("initial verification did not finish")
+	}
+	rotated.Store(true)
+	rotatedToken := signTokenWithKID(t, second, "rotated", jwt.Claims{Subject: "host"})
+	if _, err := keys.VerifySignature(ctx, rotatedToken); err != nil {
+		t.Fatalf("first verification after concurrent rotation failed: %v", err)
+	}
+	for range callers - 1 {
 		select {
 		case err := <-results:
 			if err != nil {
@@ -81,8 +108,8 @@ func TestRemoteKeySetConcurrentRefreshAndCancellation(t *testing.T) {
 			t.Fatal("concurrent verification did not finish")
 		}
 	}
-	if got := requests.Load(); got != 1 {
-		t.Fatalf("JWKS requests = %d, want 1", got)
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("JWKS requests = %d, want 2", got)
 	}
 }
 

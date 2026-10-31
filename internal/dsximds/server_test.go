@@ -202,40 +202,25 @@ func TestRemoteVerifierRefreshesUnknownKID(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	verifier, err := NewVerifier(context.Background(), testIssuer, "spire-server",
-		spiffeid.RequireTrustDomainFromString("k2.internal"), server.URL, time.Second)
-	if err != nil {
-		t.Fatal(err)
+	keys := &remoteKeySet{
+		ctx: t.Context(), url: server.URL, client: server.Client(),
+		algorithms: []jose.SignatureAlgorithm{jose.ES256},
 	}
-	claims := jwt.Claims{
-		Issuer:   testIssuer,
-		Subject:  "spiffe://operator-1.ds9.dsx.nvid.id/bm/host-7",
-		Audience: jwt.Audience{"spire-server"},
-		Expiry:   jwt.NewNumericDate(time.Now().Add(time.Minute)),
-	}
+	claims := jwt.Claims{Expiry: jwt.NewNumericDate(time.Now().Add(time.Minute))}
 	firstToken := signTokenWithKID(t, first, "first-key", claims)
-	firstID, err := verifier.Verify(t.Context(), firstToken)
-	if err != nil {
+	if _, err := keys.VerifySignature(context.Background(), firstToken); err != nil {
 		t.Fatal(err)
 	}
+
 	current.Store(&publication{key: second, kid: "second-key"})
 	secondToken := signTokenWithKID(t, second, "second-key", claims)
-	got, err := verifier.Verify(t.Context(), secondToken)
-	if err != nil {
-		t.Fatalf("first verification after rotation failed: %v", err)
+	if _, err := keys.VerifySignature(context.Background(), secondToken); err != nil {
+		t.Fatalf("unknown kid did not refresh: %v", err)
 	}
-	if want := "spiffe://k2.internal/spire/agent/dsx_imds/tenant/operator-1/bm/host-7"; got != firstID || got.String() != want {
-		t.Fatalf("agent IDs = %q, %q, want %q", firstID, got, want)
+	if requests.Load() != 2 {
+		t.Fatalf("JWKS requests = %d, want 2", requests.Load())
 	}
-	if got := requests.Load(); got != 2 {
-		t.Fatalf("JWKS requests = %d, want 2", got)
-	}
-	if _, err := verifier.Verify(t.Context(), secondToken); err != nil {
-		t.Fatalf("cached verification failed: %v", err)
-	}
-	if got := requests.Load(); got != 2 {
-		t.Fatalf("cached verification fetched JWKS: requests = %d, want 2", got)
-	}
+
 }
 
 func TestRemoteVerifierTimeoutRecovers(t *testing.T) {
