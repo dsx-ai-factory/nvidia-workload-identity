@@ -18,9 +18,10 @@ registry origin to route Docker Hub pulls from Kind directly through that mirror
 If the mirror is unavailable, the pull fails. Leave it unset to use Zot.
 Zot stores each upstream under its registry hostname so pulls select the
 matching source. CI uses the NVIDIA mirror for Kind and as Zot's preferred
-Docker Hub mirror, with Docker Hub as Zot's fallback. CI preserves the
-`docker.io/library` cache between runs through GitHub Actions cache restore
-and save steps.
+Docker Hub mirror, with Docker Hub as Zot's fallback. CI preserves runtime
+image caches across these registries within a 10 GB budget. The Go toolchain
+image is excluded to leave room for the runtime images. Cache keys track the
+pinned image inputs.
 
 The identity chart is installed independently in both clusters. The remaining
 components are separate Skaffold modules. Shared fixture settings and the
