@@ -77,7 +77,9 @@ spec:
           limits:
             cpu: "1"
             # Replace the 32 MiB graphics allowance KubeVirt omits for headless VMs.
-            memory: 192Mi
+            # Reserve 20 MiB of extra QEMU headroom for this fixture.
+            # Follow the upstream estimate increase in kubevirt/kubevirt#18388.
+            memory: 212Mi
       networks:
         - name: default
           multus:

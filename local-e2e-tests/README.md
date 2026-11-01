@@ -108,8 +108,9 @@ Each network mode runs both VM bindings with real DSX IMDS sidecars. The binding
 name describes the guest's Ethernet attachment, not the UDN topology.
 Both guests use the [KubeVirt Alpine image with test tooling](k2/vm/vm.yaml).
 Each guest has one vCPU and 160 MiB of RAM, a virtual RNG, and no graphics
-device. The memory request is 160 MiB and the limit is 192 MiB before KubeVirt
-adds runtime overhead.
+device. The memory request is 160 MiB and the limit is 212 MiB before KubeVirt
+adds runtime overhead. These fixtures reserve 20 MiB of extra QEMU headroom,
+following the [upstream overhead estimate increase](https://github.com/kubevirt/kubevirt/pull/18388).
 
 | Namespace | Primary UDN | Identity suffix | IMDS endpoints |
 | --- | --- | --- | --- |

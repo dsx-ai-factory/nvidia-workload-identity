@@ -72,6 +72,8 @@ repository is a legacy mirror.
 - Prefer existing code, standard libraries, native Kubernetes and Helm features,
   maintained dependencies, and upstream APIs. Do not add speculative abstractions,
   compatibility paths, wrappers, or configuration.
+- Keep Makefile targets as command entry points. Express deployment conditions
+  in Skaffold and test prerequisites in the consuming tests.
 - Compose independent components around immutable state. Prefer atomic pointer
   swaps for shared snapshots.
 - Keep runtime ownership separate from shared data. Use consumer-owned interfaces

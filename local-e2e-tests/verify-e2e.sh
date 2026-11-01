@@ -62,6 +62,11 @@ external_probe() {
 
 initialize_external_test_process() {
     local k1_node_address k2_node_address
+    # Start token lifetime checks after both client containers can read their files.
+    kubectl wait --for=condition=Ready "pod/${K1_POD}" \
+        --namespace "${FIXTURE_NAMESPACE}" --context "${K1_CONTEXT}" --timeout=300s >/dev/null
+    kubectl wait --for=condition=Ready "pod/${K2_POD}" \
+        --namespace "${FIXTURE_NAMESPACE}" --context "${K2_CONTEXT}" --timeout=300s >/dev/null
     GATEWAY_ADDRESS=$(get_gateway_address \
         "${K1_CONTEXT}" envoy-gateway-system k1-gateway)
     E2E_PROBE_IMAGE=$(kubectl get pod "${K2_SPIRE_POD}" \
