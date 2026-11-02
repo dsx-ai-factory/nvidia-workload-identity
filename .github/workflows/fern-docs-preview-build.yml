@@ -3,9 +3,10 @@
 # Collects the navigation, the pages it lists, and PR metadata, then uploads them
 # as an artifact. No secrets are used here.
 #
-# The comment workflow builds the preview with a temporary Fern guest session.
-# copy-pr-bot vets a PR before mirroring it to pull-request/<n>. The comment
-# workflow still treats the artifact as untrusted data.
+# The comment workflow builds the preview with FERN_TOKEN, and the Fern CLI reads
+# any local file a page names. The copy-pr-bot mirrors a PR to pull-request/<n>
+# only after vetting it, and that vetting is what keeps untrusted page content
+# out. The comment workflow still treats the artifact as untrusted data.
 
 name: "Preview Fern Docs: Build"
 
