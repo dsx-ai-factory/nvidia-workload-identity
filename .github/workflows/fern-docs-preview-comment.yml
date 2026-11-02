@@ -1,19 +1,22 @@
 # Workflow 2 of 2 for Fern doc previews.
 #
-# Runs after "Preview Fern Docs: Build" completes. Builds a guest preview and
-# posts a stable PR comment with the preview link.
+# Runs after "Preview Fern Docs: Build" completes. Builds a preview with
+# FERN_TOKEN and posts a stable PR comment with the preview link.
 #
-# Fern reads local files named by PR pages. Guest sessions keep the repository's
-# FERN_TOKEN out of that process. Each run creates a temporary guest organization,
-# so the preview URL changes between runs and expires with the guest session.
-# copy-pr-bot vetting and tools/check-docs-paths provide defense in depth.
+# This job runs the Fern CLI with FERN_TOKEN in its environment against page
+# content written by the PR author. Fern reads any local file a page names, so an
+# author who controls those pages could print the token on a preview page. The
+# copy-pr-bot vets a PR before it creates pull-request/<n>, and that vetting is the
+# control. tools/check-docs-paths runs as defense in depth and is a deny-list.
 #
 # The artifact is still untrusted. The Fern CLI runs against fern/ and tools/
 # from the default branch. Only the pages that the PR's index.yml lists are copied
 # in from the artifact. stage-fern-site refuses paths under fern/, tools/, and
 # .github/, so the artifact cannot replace trusted files. Frozen version content
-# is extracted here from the trusted registry and tags. A PR that edits fern/ or
-# tools/ is not previewed with those edits until it merges.
+# is extracted here from the trusted registry and tags. A PR that edits fern/ or tools/ is not previewed with those edits
+# until it merges.
+#
+# Required configuration: repository or organization secret FERN_TOKEN.
 
 name: "Preview Fern Docs: Comment"
 
@@ -102,7 +105,7 @@ jobs:
             python3 tools/fern-frozen-content "$version" "fern/versions/${version}-content" "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
           done
 
-      - name: Check docs paths
+      - name: Check docs paths before using FERN_TOKEN
         # Runs the checker from the default branch, not from the PR.
         run: |
           stage="$(mktemp -d)"
@@ -110,7 +113,7 @@ jobs:
           python3 trusted/tools/stage-fern-site --with-fern trusted "$stage"
           python3 trusted/tools/check-docs-paths --allow '../index.yml' "$stage"
 
-      # This job has write access for PR comments. It needs no package cache.
+      # This job holds FERN_TOKEN. It needs no package cache.
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: '22'
@@ -123,11 +126,12 @@ jobs:
       - name: Generate preview URL
         id: generate-docs
         env:
+          FERN_TOKEN: ${{ secrets.FERN_TOKEN }}
           PR_NUMBER: ${{ steps.metadata.outputs.pr_number }}
         working-directory: ./trusted/fern
         run: |
           set -o pipefail
-          fern generate --docs --preview --guest --id "pr-${PR_NUMBER}" 2>&1 | tee "$RUNNER_TEMP/fern-output.log"
+          fern generate --docs --preview --id "pr-${PR_NUMBER}" 2>&1 | tee "$RUNNER_TEMP/fern-output.log"
           # Fern prints "Published docs to URL", sometimes followed by " (URL)".
           URL=$(sed -n 's/.*Published docs to \(https:[^[:space:]]*\).*/\1/p' "$RUNNER_TEMP/fern-output.log" | tail -1)
           if [ -z "$URL" ]; then
@@ -140,6 +144,7 @@ jobs:
           fi
           echo "preview_url=$URL" >> "$GITHUB_OUTPUT"
 
+      # The page-links request does not send FERN_TOKEN.
       - name: Build page links for changed files
         id: page-links
         env:
@@ -176,9 +181,7 @@ jobs:
           PREVIEW_URL: ${{ steps.generate-docs.outputs.preview_url }}
           PAGE_LINKS: ${{ steps.page-links.outputs.page_links }}
         run: |
-          BODY=":herb: **Preview your docs:** <${PREVIEW_URL}>
-
-          This temporary guest preview expires and is replaced on each run."
+          BODY=":herb: **Preview your docs:** <${PREVIEW_URL}>"
           if [ -n "${PAGE_LINKS}" ]; then
             BODY="${BODY}
 
