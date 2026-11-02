@@ -23,8 +23,7 @@
     },
     {"name": "dsx-imds", "version_value_paths": []},
     {"name": "dsx-token-fetcher", "version_value_paths": []},
-    {"name": "dsx-token-fetcher-example", "version_value_paths": []},
-    {"name": "dsx-spiffe-csi", "version_value_paths": []}
+    {"name": "dsx-token-fetcher-example", "version_value_paths": []}
   ],
   "competing_workflows": []
 }
