@@ -244,7 +244,7 @@ does not consume that subject itself.
 
 Set the remaining DPF SPIFFE fields, provide the trust bundle, and configure
 Kubernetes API authentication as described in the
-[DPF SPIFFE guide](https://github.com/NVIDIA/doca-platform/blob/f1b50e85122a3df6047708e41a8203f8cdce03a1/docs/public/advanced-configuration/spiffe-identity.md).
+[DPF SPIFFE guide](https://github.com/NVIDIA/doca-platform/blob/545320feb894f20577fa0abf6885c6aafc4fb2eb/docs/public/advanced-configuration/spiffe-identity.md).
 
 ### Secrets
 
