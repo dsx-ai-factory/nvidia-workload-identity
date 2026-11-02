@@ -24,25 +24,7 @@ tests:
           path: spec.helmChart.values.metadataService.identityKeysURL
           value: https://identity.example.com/v1/exchange
 
-  - it: renders SPIFFE CSI independently of DSX IMDS
-    set:
-      dpuService.imds.enabled: false
-      dpuService.spiffeCsi.enabled: true
-    template: templates/dpu-service.yaml
-    asserts:
-      - hasDocuments:
-          count: 1
-      - equal:
-          path: metadata.name
-          value: dsx-spiffe-csi
-      - equal:
-          path: spec.security.privileged
-          value: true
-      - equal:
-          path: spec.helmChart.source.version
-          value: 0.1.0
-
-  - it: passes the ordered shared pull secrets to IMDS and SPIFFE CSI
+  - it: passes the ordered shared pull secrets to IMDS
     set:
       dpuService:
         imds:
@@ -50,18 +32,13 @@ tests:
           helmChart:
             repoURL: https://helm.example.com
             version: 2.0.0
-        spiffeCsi:
-          enabled: true
-          helmChart:
-            repoURL: https://helm.example.com
-            version: 3.0.0
       imagePullSecrets:
         - name: registry-one
         - name: registry-two
     template: templates/dpu-service.yaml
     asserts:
       - hasDocuments:
-          count: 2
+          count: 1
       - equal:
           path: spec.helmChart.source.version
           value: 2.0.0
@@ -72,30 +49,14 @@ tests:
             - name: registry-one
             - name: registry-two
         documentIndex: 0
-      - equal:
-          path: spec.helmChart.source.version
-          value: 3.0.0
-        documentIndex: 1
-      - equal:
-          path: spec.helmChart.values.imagePullSecrets
-          value:
-            - name: registry-one
-            - name: registry-two
-        documentIndex: 1
 
-  - it: passes an empty shared pull secret list to IMDS and SPIFFE CSI
-    set:
-      dpuService.spiffeCsi.enabled: true
+  - it: passes an empty shared pull secret list to IMDS
     template: templates/dpu-service.yaml
     asserts:
       - equal:
           path: spec.helmChart.values.imagePullSecrets
           value: []
         documentIndex: 0
-      - equal:
-          path: spec.helmChart.values.imagePullSecrets
-          value: []
-        documentIndex: 1
 
   - it: omits the optional IMDS socket override when empty
     set:
@@ -106,10 +67,9 @@ tests:
       - notExists:
           path: spec.helmChart.values.metadataService.spireSocketPath
 
-  - it: omits all DPU workload resources when both are disabled
+  - it: omits DSX IMDS when disabled
     set:
       dpuService.imds.enabled: false
-      dpuService.spiffeCsi.enabled: false
     template: templates/dpu-service.yaml
     asserts:
       - hasDocuments:

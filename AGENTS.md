@@ -82,8 +82,8 @@ repository is a legacy mirror.
 - Consume DPF source and dependency changes through upstream releases. Do not
   patch DPF source or override its dependencies in this repository.
 - `charts/dsx-identity` installs each management-cluster shard.
-- `charts/dsx-imds` and `charts/dsx-spiffe-csi` are DPUService payloads. Keep external
-  systems and secret-source resources outside these charts.
+- `charts/dsx-imds` and `charts/dsx-token-fetcher` are DPUService payloads. Keep
+  external systems and secret-source resources outside these charts.
 - Put deployment configuration in Helm values. Use command-line overrides only
   for dynamic values.
 - Prefer upstream defaults. Document every required nondefault setting next to it.

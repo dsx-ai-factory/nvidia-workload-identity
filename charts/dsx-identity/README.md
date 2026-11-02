@@ -140,9 +140,6 @@ dpuService:
   imds:
     # Deploy the DSX IMDS child chart to selected DPU clusters.
     enabled: true
-  spiffeCsi:
-    # Enable only when the DPU platform does not provide csi.spiffe.io.
-    enabled: false
   # Token-exchange endpoint reachable from those DPU clusters.
   identityKeysURL: https://identity-keys.shard.example.com/v1/exchange
 ```

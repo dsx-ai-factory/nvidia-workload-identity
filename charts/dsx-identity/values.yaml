@@ -286,21 +286,6 @@ dpuService:
       repository: nvcr.io/0837451325059433/components-dev/metadata-service
       tag: ""
       pullPolicy: IfNotPresent
-  spiffeCsi:
-    # DPF provides csi.spiffe.io. Enable only when another deployment does not.
-    enabled: false
-    helmChart:
-      repoURL: https://helm.ngc.nvidia.com/0837451325059433/components-dev/
-      version: ""
-    image:
-      repository: ghcr.io/spiffe/spiffe-csi-driver
-      tag: 0.2.7@sha256:9dfe4f0caff096164fd921aa7f15319804df2fc0325f1d90bc793ef3256ab1cd
-      pullPolicy: IfNotPresent
-    nodeDriverRegistrar:
-      image:
-        repository: registry.k8s.io/sig-storage/csi-node-driver-registrar
-        tag: v2.9.4@sha256:ab6c4603d8da43d9f33361a5716552080e3f72badfad099d76fcf4b59e547d80
-        pullPolicy: IfNotPresent
   # Defaults used by both the child chart and the controller's DPU entry.
   workload:
     serviceAccountName: dsx-imds
