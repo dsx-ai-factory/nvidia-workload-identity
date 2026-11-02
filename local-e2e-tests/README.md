@@ -11,6 +11,10 @@ Controller, OVN-Kubernetes layer-3 UDN, and KubeVirt VMs using `bridge` and
 describe only this fixture and do not define a trust hierarchy. Local identity
 components use one replica and SPIRE uses its SQLite default.
 
+OVN-Kubernetes uses single-node zone interconnect. Each Kind node runs its own
+OVN databases and network controller. The chart and image pins are in
+[`skaffold/k2.yaml`](../skaffold/k2.yaml).
+
 Local fixtures configure NVIDIA Workload Identity Keys HTTP endpoints
 directly. The local Zot registry caches image pulls for both Kind clusters and
 local builds through `mirror.gcr.io`. Set `KIND_DOCKERHUB_MIRROR` to an HTTPS

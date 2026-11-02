@@ -54,13 +54,13 @@ deploy:
         # into the OVN bridge, which makes the replacement unable to initialize.
         upgradeOnChange: false
         valuesFiles:
-          - ../third-party/ovn-kubernetes/helm/ovn-kubernetes/values-no-ic.yaml
+          - ../third-party/ovn-kubernetes/helm/ovn-kubernetes/values-single-node-zone.yaml
           - ../local-e2e-tests/k2/network/ovn-values.yaml
         setValues:
           k8sAPIServer: https://k2-control-plane:6443
           ovnkube-identity.replicas: 1
           global.image.repository: ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-fedora
-          global.image.tag: release-1.2@sha256:a960f93ab6a910ab6ef9ad7ac2afc84ea5399151964c4e85c765554aa3442b0b
+          global.image.tag: master@sha256:5037bf3c08eed03c772850bd4c408489bbd2205cc55eba5f3f1c8864c88c5072
           mtu: 1300
           global.enableMultiNetwork: true
           global.enableNetworkSegmentation: true

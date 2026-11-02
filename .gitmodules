@@ -4,4 +4,4 @@
 [submodule "third-party/doca-platform-foundation"]
 	path = third-party/doca-platform-foundation
 	url = https://github.com/NVIDIA/doca-platform.git
-	branch = public-release-v26.8
+	branch = public-main
