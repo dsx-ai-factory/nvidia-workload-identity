@@ -60,7 +60,7 @@ deploy:
           k8sAPIServer: https://k2-control-plane:6443
           ovnkube-identity.replicas: 1
           global.image.repository: ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-fedora
-          global.image.tag: release-1.3@sha256:d788bc2db3defae570cb36257443f0ed23aa199f23bb00fd9ed69b59cae93bde
+          global.image.tag: release-1.2@sha256:a960f93ab6a910ab6ef9ad7ac2afc84ea5399151964c4e85c765554aa3442b0b
           mtu: 1300
           global.enableMultiNetwork: true
           global.enableNetworkSegmentation: true

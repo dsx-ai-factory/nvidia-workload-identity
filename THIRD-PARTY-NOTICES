@@ -11180,7 +11180,7 @@ https://github.com/kubernetes-csi/external-attacher.git
    See the License for the specific language governing permissions and
    limitations under the License.
 
-third-party/ovn-kubernetes (417f639aa9e6fd1e0cd5a54e5a244f7e702b307b)
+third-party/ovn-kubernetes (912839c0e40f580838b5fa5bc825a5e225c70bc9)
 https://github.com/ovn-org/ovn-kubernetes.git
 
                                  Apache License
