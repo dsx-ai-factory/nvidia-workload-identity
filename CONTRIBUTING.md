@@ -2,7 +2,9 @@
 
 ## Before you start
 
-Open an issue to discuss the proposed change before writing it.
+Reference the relevant Jira or NVBugs ticket when applicable. Otherwise, open a
+GitHub issue to discuss the proposed change before writing it. Link the ticket
+or issue in the pull request.
 
 ## Developer Certificate of Origin
 

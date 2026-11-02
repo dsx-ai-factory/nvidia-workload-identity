@@ -81,4 +81,4 @@ build:
         dockerfile: Dockerfile.e2e
         buildArgs:
           BUILDER_IMG: 127.0.0.1:5002/docker.io/library/golang:1.26.10
-          RUNTIME_IMG: 127.0.0.1:5002/docker.io/curlimages/curl:8.10.1
+          RUNTIME_IMG: 127.0.0.1:5002/docker.io/curlimages/curl:8.23.0

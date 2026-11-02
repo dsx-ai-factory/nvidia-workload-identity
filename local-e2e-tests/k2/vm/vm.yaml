@@ -142,7 +142,7 @@ spec:
       serviceAccountName: e2e-launch-layer-status
       containers:
         - name: status-publisher
-          image: docker.io/alpine/k8s:1.32.2@sha256:15cfdf84d6de3559bc54d7479eb4e8aadbf71f6d7f08782cb1e91f3446f4b2d8
+          image: docker.io/alpine/k8s:1.36.6@sha256:d9cb78be55e6e47c54e8a77bbf35ef87e98e5a03fbe5db7654d28bb78cc7d57e
           command: ["/bin/sh", "-c"]
           args:
             - |
