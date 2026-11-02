@@ -398,8 +398,8 @@ type nftRules interface {
 }
 
 // nftAddIMDSRule reconciles the destination MAC rewrite for one address family.
-// Equivalent to: nft add rule bridge nat PREROUTING ip daddr 169.254.169.254 ether daddr set <mac>
-// IPv6 equivalent: nft add rule bridge nat PREROUTING ip6 daddr fd00:76b9::254 ether daddr set <mac>
+// Equivalent to: nft add rule bridge nat PREROUTING iifname tap0 ip daddr 169.254.169.254 ether daddr set <mac>
+// IPv6 equivalent: nft add rule bridge nat PREROUTING iifname tap0 ip6 daddr fd00:76b9::254 ether daddr set <mac>
 func nftAddIMDSRule(conn nftRules, table *nftables.Table, chain *nftables.Chain, vethMAC net.HardwareAddr, metadataIP net.IP) error {
 	protocol, offset, length := uint16(unix.ETH_P_IP), uint32(ipv4DstAddrOffset), uint32(ipv4AddrLen)
 	ip := metadataIP.To4()
@@ -412,6 +412,8 @@ func nftAddIMDSRule(conn nftRules, table *nftables.Table, chain *nftables.Chain,
 	}
 	// Add the rule - matching shell command bytecode exactly:
 	// IPv4:
+	// [ meta load iifname => reg 1 ]
+	// [ cmp eq reg 1 "tap0" padded with zeros to 16 bytes ]
 	// [ meta load protocol => reg 1 ]
 	// [ cmp eq reg 1 0x0800 ]  (ETH_P_IP = IPv4 ethertype)
 	// [ payload load 4b @ network header + 16 => reg 1 ]
@@ -419,16 +421,23 @@ func nftAddIMDSRule(conn nftRules, table *nftables.Table, chain *nftables.Chain,
 	// [ immediate reg 1 <mac> ]
 	// [ payload write reg 1 => 6b @ link header + 0 ]
 	// IPv6:
+	// [ meta load iifname => reg 1 ]
+	// [ cmp eq reg 1 "tap0" padded with zeros to 16 bytes ]
 	// [ meta load protocol => reg 1 ]
 	// [ cmp eq reg 1 0x86dd ]  (ETH_P_IPV6 = IPv6 ethertype)
 	// [ payload load 16b @ network header + 24 => reg 1 ]
 	// [ cmp eq reg 1 <imdsIPv6> ]
 	// [ immediate reg 1 <mac> ]
 	// [ payload write reg 1 => 6b @ link header + 0 ]
+	ingress := make([]byte, unix.IFNAMSIZ)
+	copy(ingress, defaultTapIfName)
 	rule := &nftables.Rule{
 		Table: table,
 		Chain: chain,
 		Exprs: []expr.Any{
+			// Both bridge and l2bridge use tap0 for the primary guest network.
+			&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: ingress},
 			// meta load protocol => reg 1
 			&expr.Meta{
 				Key:      expr.MetaKeyPROTOCOL,
@@ -476,14 +485,19 @@ func nftAddIMDSRule(conn nftRules, table *nftables.Table, chain *nftables.Chain,
 	}
 	matched := false
 	for _, existing := range rules {
-		// Match our complete destination test and MAC write. A comparison
-		// to the IMDS address alone may belong to another rule in this chain.
-		if len(existing.Exprs) != len(rule.Exprs) ||
-			!reflect.DeepEqual(existing.Exprs[:4], rule.Exprs[:4]) ||
-			!reflect.DeepEqual(existing.Exprs[5:], rule.Exprs[5:]) {
+		// Match the full destination IP check and MAC write. A comparison to
+		// the IMDS address alone may belong to another rule in this chain.
+		// Include rules without an ingress check so they can be restricted to tap0.
+		exprs := existing.Exprs
+		if len(exprs) == len(rule.Exprs) && reflect.DeepEqual(exprs[:2], rule.Exprs[:2]) {
+			exprs = exprs[2:]
+		}
+		if len(exprs) != 6 ||
+			!reflect.DeepEqual(exprs[:4], rule.Exprs[2:6]) ||
+			!reflect.DeepEqual(exprs[5:], rule.Exprs[7:]) {
 			continue
 		}
-		rewrite, ok := existing.Exprs[4].(*expr.Immediate)
+		rewrite, ok := exprs[4].(*expr.Immediate)
 		if !ok || rewrite.Register != 1 || len(rewrite.Data) != ethAddrLen {
 			continue
 		}
@@ -494,8 +508,8 @@ func nftAddIMDSRule(conn nftRules, table *nftables.Table, chain *nftables.Chain,
 			continue
 		}
 		matched = true
-		if !bytes.Equal(rewrite.Data, vethMAC) {
-			// Recreating the veth changes its MAC. Replace the stale rule in place.
+		if len(existing.Exprs) != len(rule.Exprs) || !bytes.Equal(rewrite.Data, vethMAC) {
+			// Recreating the veth changes its MAC. Replace the rule in place.
 			existing.Exprs = rule.Exprs
 			conn.ReplaceRule(existing)
 		}
