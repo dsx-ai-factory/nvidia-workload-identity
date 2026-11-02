@@ -14,6 +14,7 @@ repository is a legacy mirror.
 - Preserve unrelated changes. Do not use destructive Git or filesystem commands
   without explicit authorization.
 - Update this guide when the user gives a durable repository-wide instruction.
+  Keep component behavior and deployment requirements in the relevant README.
 
 ## Prose, comments, and documentation
 
@@ -31,12 +32,10 @@ repository is a legacy mirror.
   semicolons in prose or comments.
 - Comments should explain non-obvious behavior, ordering, ownership, security
   constraints, or workarounds. Do not restate the code.
-- Preserve command equivalents and packet-rule bytecode explanations. Update
-  them for each supported address family when changing network code.
+- Preserve useful command equivalents and bytecode explanations in comments.
+  Keep them accurate when changing the implementation.
 - In Helm templates and YAML, explain non-obvious templating, merge semantics,
   ordering, compatibility, and cross-resource behavior inline.
-- Explain supported VM network modes beside the sidecar code and E2E fixtures
-  that depend on them, and in the relevant READMEs.
 - Root and component READMEs describe the chart and applications users run.
   Keep special test setup, fixtures, and E2E workflow instructions in
   `local-e2e-tests/README.md`. Link there when those instructions are needed.
@@ -60,10 +59,8 @@ repository is a legacy mirror.
 - Keep `docs/identity-contract.md` focused on subject formats and identity
   ownership. Put deployment configuration in the relevant chart README.
 - Show user-facing API contracts with concrete request and response examples.
-- Finish prose and comment updates before editing diagrams. Use simple, readable
-  diagrams that retain the relevant components and connections. The network
-  setup sidecar diagram must explain both VM bindings. Choose the diagram that
-  best explains the setup instead of expanding it with test details.
+- Finish prose and comment updates before editing diagrams. Keep diagrams
+  readable and consistent with the documented behavior.
 
 ## Implementation
 
@@ -74,14 +71,9 @@ repository is a legacy mirror.
   compatibility paths, wrappers, or configuration.
 - Keep Makefile targets as command entry points. Express deployment conditions
   in Skaffold and test prerequisites in the consuming tests.
-- Compose independent components around immutable state. Prefer atomic pointer
-  swaps for shared snapshots.
-- Keep runtime ownership separate from shared data. Use consumer-owned interfaces
-  for dependency boundaries and test control. Cover acceptance and rejection.
 - Keep supplied values exact. Do not trim, normalize, case-fold, or coerce input.
 - Consume DPF source and dependency changes through upstream releases. Do not
   patch DPF source or override its dependencies in this repository.
-- `charts/dsx-identity` installs each management-cluster shard.
 - Put deployment configuration in Helm values. Use command-line overrides only
   for dynamic values.
 - Prefer upstream defaults. Document every required nondefault setting next to it.
@@ -91,8 +83,8 @@ repository is a legacy mirror.
   use `latest`.
 - Pin the Fern CLI to the same version in `fern/fern.config.json` and in every
   `fern-api@` install in `.github/workflows/`.
-- Use Go 1.26+, standard formatting, structured `slog` logging, context cancellation,
-  and the shared telemetry package.
+- Use the pinned Go toolchain, standard formatting, structured `slog` logging,
+  context cancellation, and the shared telemetry package.
 - Never call `os.Exit` outside `main`. Keep cleanup in an error-returning function
   and let `main` translate its result to an exit code.
 - Use `http.Header` methods and standard-library parsers for structured headers.
