@@ -6,6 +6,7 @@ repository is a legacy mirror.
 
 ## Before starting
 
+- Read [CONTRIBUTING.md](CONTRIBUTING.md).
 - Read the relevant root or component README and any linked local test guide.
 - Inspect repository code, active CI workflows, and pinned shared CI templates
   before relying on prior branches, chat history, or generic defaults.
@@ -74,6 +75,10 @@ repository is a legacy mirror.
 - Keep supplied values exact. Do not trim, normalize, case-fold, or coerce input.
 - Consume DPF source and dependency changes through upstream releases. Do not
   patch DPF source or override its dependencies in this repository.
+- Use published upstream images for external components. Do not add repository
+  builds that rebuild or repackage their binaries.
+- Consume upstream Helm chart releases with their bundled image defaults. Do
+  not override their image pins to apply security fixes.
 - Put deployment configuration in Helm values. Use command-line overrides only
   for dynamic values.
 - Prefer upstream defaults. Document every required nondefault setting next to it.
@@ -81,6 +86,7 @@ repository is a legacy mirror.
   shared when a component bypasses it.
 - Use repository-pinned tools and dependencies. Pin container images and never
   use `latest`.
+- Upgrade only the packages required by the change.
 - Pin the Fern CLI to the same version in `fern/fern.config.json` and in every
   `fern-api@` install in `.github/workflows/`.
 - Use the pinned Go toolchain, standard formatting, structured `slog` logging,
@@ -154,8 +160,9 @@ repository is a legacy mirror.
 - Use a `feat/` or `fix/` branch for release-producing changes.
 - Use a Conventional Commit title. Use `feat` for a capability and `fix` for
   corrections, reliability, performance, or maintenance.
-- Put a supplied Jira reference in the scope, for example
-  `fix(VMAAS-1586): use BM identity resource type`. Use `NO-REF` when none was supplied.
+- Use a one-word component scope in pull request titles, for example
+  `fix(images): update distroless`. Put Jira, NVBugs, and GitHub issue references
+  in the pull request body.
 - Wrap commit body lines at 72 characters and keep all lines within 100.
 - Keep pull request descriptions concise and easy to understand at a glance.
   Include only information relevant to the change.

@@ -7,6 +7,8 @@ ARG RUNTIME_IMG=alpine:3.24.2
 FROM --platform=$BUILDPLATFORM ${BUILDER_IMG} AS builder
 
 WORKDIR /src
+# Refresh the builder's CA store before downloading Rust dependencies.
+RUN apk upgrade --no-cache ca-certificates ca-certificates-bundle
 COPY kata-uds-proxy/Cargo.toml kata-uds-proxy/Cargo.lock ./
 COPY kata-uds-proxy/src ./src
 
