@@ -1,0 +1,19 @@
+# The worker host agent runs in a separate release. This release supplies only
+# the CSI mount used by the local DPU IMDS fixture.
+spire-server:
+  enabled: false
+spire-agent:
+  enabled: false
+spiffe-oidc-discovery-provider:
+  enabled: false
+
+spiffe-csi-driver:
+  # Keep this fixture's mounts separate from the shard CSI driver.
+  pluginName: dpu.csi.spiffe.io
+  nodeSelector:
+    kubernetes.io/hostname: k2-worker
+  # Match the worker host agent's upstream Workload API socket.
+  agentSocketPath: /run/spire/agent-sockets/spire-agent.sock
+  resources:
+    requests: {cpu: 20m, memory: 32Mi}
+    limits: {cpu: 100m, memory: 64Mi}

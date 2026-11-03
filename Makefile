@@ -88,7 +88,7 @@ test-shell:
 
 test-chart: chart-dependencies
 	@$(MISE_EXEC) untt --strict charts/dsx-identity charts/dsx-imds \
-		charts/dsx-token-fetcher charts/dsx-token-fetcher-example charts/dsx-spiffe-csi
+		charts/dsx-token-fetcher charts/dsx-token-fetcher-example
 	@$(MISE_EXEC) helm lint charts/dsx-identity $(IDENTITY_E2E_VALUES) -f local-e2e-tests/k1-values.yaml
 	@$(MISE_EXEC) helm lint charts/dsx-identity $(IDENTITY_E2E_VALUES) -f local-e2e-tests/k2-values.yaml \
 		--set podTokenFetcher.enabled=false \
@@ -103,7 +103,6 @@ test-chart: chart-dependencies
 		--set tokenFetcher.identityKeysURL=http://identity-keys.example/v1/exchange
 	@$(MISE_EXEC) helm lint charts/dsx-token-fetcher-example \
 		--set audience=spiffe://ds9.dsx.nvid.id/openbao
-	@$(MISE_EXEC) helm lint charts/dsx-spiffe-csi
 	@$(MISE_EXEC) helm lint charts/nats-2.14.2.tgz -f local-e2e-tests/k1/nats/values.yaml
 	@# Normal E2E values disable metrics, so lint the optional ServiceMonitor resources separately.
 	@$(MISE_EXEC) helm lint charts/dsx-identity $(IDENTITY_E2E_VALUES) -f local-e2e-tests/k2-values.yaml \
@@ -112,9 +111,6 @@ test-chart: chart-dependencies
 		--set observability.metrics.enabled=true \
 		--set observability.metrics.port=19464 \
 		--set observability.metrics.serviceMonitor.enabled=true
-	@$(MISE_EXEC) helm lint charts/dsx-identity $(IDENTITY_E2E_VALUES) -f local-e2e-tests/k2-values.yaml \
-		--set dpuService.imds.enabled=false \
-		--set dpuService.spiffeCsi.enabled=true
 	@$(MISE_EXEC) helm lint charts/dsx-identity $(IDENTITY_E2E_VALUES) -f local-e2e-tests/k2-values.yaml \
 		--set dpuService.imds.enabled=false \
 		--set dpuService.tokenFetcher.enabled=true \

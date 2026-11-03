@@ -47,7 +47,6 @@ This repository is primarily a Go service and Kubernetes Helm chart repository. 
 - `cmd/dsx-identity-keys-proxy-csi`: CSI node plugin exposing a local socket path used by VM metadata sidecars to reach NVIDIA Workload Identity Keys.
 - `charts/dsx-identity`: Helm chart for the management-cluster identity shard and DPF DPUService registration.
 - `charts/dsx-imds`: DPUService payload for DSX IMDS on DPU nodes.
-- `charts/dsx-spiffe-csi`: DPUService payload for SPIFFE CSI on DPU nodes.
 
 Primary security responsibilities:
 

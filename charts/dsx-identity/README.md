@@ -13,7 +13,7 @@ the Identity Controller, Kata support, and DPF child-chart resources.
 | Pod tokens or VM support | KubeVirt for VM support | Native sidecar injection and VM identity |
 | DPU Pod tokens | DPF `DPUService` CRD and controller | Native token-fetcher injection in DPU clusters |
 | Service monitors (default) | Prometheus Operator CRDs | `ServiceMonitor` and `PodMonitor` |
-| DPU services | DPF `DPUService` CRD and controller | IMDS and optional CSI child charts |
+| DPU services | DPF `DPUService` CRD and controller | IMDS and token-fetcher child charts |
 | Identity controller | DPU, LaunchLayer, and SPIRE CRDs | Source-to-SPIRE reconciliation |
 | Kata support | Kata nodes, cgroup v2, systemd cgroups | Host-to-guest Workload API proxy |
 
@@ -140,9 +140,6 @@ dpuService:
   imds:
     # Deploy the DSX IMDS child chart to selected DPU clusters.
     enabled: true
-  spiffeCsi:
-    # Enable only when the DPU platform does not provide csi.spiffe.io.
-    enabled: false
   # Token-exchange endpoint reachable from those DPU clusters.
   identityKeysURL: https://identity-keys.shard.example.com/v1/exchange
 ```
@@ -214,6 +211,9 @@ enforces operator Pod service and role label formats.
 ## Deploy
 
 ### DPF identity configuration
+
+Setting `spec.security.spiffe` in `DPFOperatorConfig` enables DPF's
+`csi.spiffe.io` driver for DPU workloads.
 
 Configure DPF's identity templates in the external `DPFOperatorConfig` before
 provisioning DPUs. The local templates must include the tenant and service

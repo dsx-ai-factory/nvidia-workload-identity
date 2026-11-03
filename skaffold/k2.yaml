@@ -298,11 +298,13 @@ deploy:
   tolerateFailuresUntilDeadline: true
   helm:
     releases:
-      - name: dsx-spiffe-csi
-        chartPath: ../charts/dsx-spiffe-csi
+      - name: dpu-spiffe-csi
+        remoteChart: spire
+        repo: https://spiffe.github.io/helm-charts-hardened/
+        version: 0.27.1
         namespace: dsx-identity
         valuesFiles:
-          - ../local-e2e-tests/k2/dsx-spiffe-csi-values.yaml
+          - ../local-e2e-tests/k2/spiffe-csi-values.yaml
 ---
 apiVersion: skaffold/v4beta14
 kind: Config

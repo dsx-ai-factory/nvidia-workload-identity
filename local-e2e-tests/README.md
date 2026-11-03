@@ -102,6 +102,15 @@ The KubeVirt VM contains no SPIRE agent. SPIFFE CSI exposes the attested second
 agent's Workload API socket to the virt-launcher Pod, and DSX IMDS uses that
 socket to fetch the VM SPIRE JWT-SVID.
 
+## DPU SPIFFE CSI fixture
+
+DPF provides `csi.spiffe.io` in DPU clusters. Local E2E installs the published
+SPIRE chart with only SPIFFE CSI enabled on `k2-worker`. The fixture uses
+`dpu.csi.spiffe.io` to keep its mounts separate from the shard CSI driver. It
+exposes the worker host agent socket to the DSX IMDS fixture. Settings live in
+[`k2/spiffe-csi-values.yaml`](k2/spiffe-csi-values.yaml), and the chart release
+is pinned in [`skaffold/k2.yaml`](../skaffold/k2.yaml).
+
 ## VM network bindings
 
 Each network mode runs both VM bindings with real DSX IMDS sidecars. The binding

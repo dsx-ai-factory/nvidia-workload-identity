@@ -41,8 +41,6 @@ navigation:
         path: charts/dsx-identity/README.md
       - page: dsx-imds
         path: charts/dsx-imds/README.md
-      - page: dsx-spiffe-csi
-        path: charts/dsx-spiffe-csi/README.md
       - page: dsx-token-fetcher
         path: charts/dsx-token-fetcher/README.md
       - page: dsx-token-fetcher-example

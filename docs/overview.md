@@ -41,6 +41,5 @@ for supported version skew, upgrade order, and configuration changes.
 
 Install [`charts/dsx-identity`](../charts/dsx-identity/README.md) once per identity
 shard with Helm. When enabled, the parent chart creates DPF DPUService resources
-that reference the [DSX IMDS](../charts/dsx-imds/README.md), [DSX SPIFFE
-CSI](../charts/dsx-spiffe-csi/README.md), and [DPU token-fetcher
-admission](../charts/dsx-token-fetcher/README.md) child charts.
+that reference the [DSX IMDS](../charts/dsx-imds/README.md) and
+[DPU token-fetcher admission](../charts/dsx-token-fetcher/README.md) child charts.
