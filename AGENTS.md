@@ -136,6 +136,8 @@ repository is a legacy mirror.
   test signers, directly signed tokens, or test-only authentication paths.
 - Run `make validate` for code or configuration changes and complete required CI
   gates. CI-required validation and E2E jobs must not be manual or allowed to fail.
+- GitLab Pulse and SonarQube scans are advisory. Keep failures visible as warnings
+  without blocking the pipeline.
 - Run the full E2E lifecycle after implementation and review work is complete
   when deployed behavior needs verification. Report exactly what ran and what
   remains unverified.
@@ -154,6 +156,8 @@ repository is a legacy mirror.
 
 ## Git and pull requests
 
+- GitHub creates release tags. GitLab consumes mirrored tags and does not create
+  or push release tags.
 - Do not post comments as the user, except to trigger CI when needed.
 - Read active GitHub Actions and release workflows before creating or updating a
   pull request. Search for an equivalent open pull request or branch first.
