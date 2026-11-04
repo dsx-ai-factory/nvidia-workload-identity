@@ -159,6 +159,8 @@ mirror runs analysis and can publish artifacts from protected RC tags.
 - GitHub creates release tags. GitLab consumes mirrored tags and does not create
   or push release tags.
 - Do not post comments as the user, except to trigger CI when needed.
+- Keep product validation and E2E in GitHub before RC tag creation. GitLab
+  builds and publishes the tagged source and runs advisory analysis.
 - Read active GitHub Actions and release workflows before creating or updating a
   pull request. Search for an equivalent open pull request or branch first.
 - Use a `feat/` or `fix/` branch for release-producing changes.
