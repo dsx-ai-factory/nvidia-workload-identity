@@ -14,7 +14,10 @@ components use one replica and SPIRE uses its SQLite default.
 Local fixtures configure NVIDIA Workload Identity Keys HTTP endpoints
 directly. The local Zot registry caches image pulls for both Kind clusters and
 local builds through `mirror.gcr.io`. CI uses the NVIDIA Docker Hub mirror
-instead.
+instead. Zot stores each upstream under its registry hostname so pulls select
+the matching source. CI preserves runtime image caches across these registries
+within a 10 GB budget. The Go toolchain image is excluded to leave room for the
+runtime images. Cache keys track the pinned image inputs.
 
 The identity chart is installed independently in both clusters. The remaining
 components are separate Skaffold modules. Shared fixture settings and the

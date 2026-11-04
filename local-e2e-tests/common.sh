@@ -112,11 +112,17 @@ kind_kubeconfig_path() {
 
 kind_configure_registry() {
     local cluster_name="$1"
-    local node registry_dir=/etc/containerd/certs.d/_default
+    local node registry registry_dir=/etc/containerd/certs.d
     while IFS= read -r node; do
-        docker exec "${node}" mkdir -p "${registry_dir}"
+        docker exec "${node}" mkdir -p "${registry_dir}/_default"
         docker cp "${PROJECT_ROOT}/local-e2e-tests/local-registry/_default/hosts.toml" \
-            "${node}:${registry_dir}/hosts.toml"
+            "${node}:${registry_dir}/_default/hosts.toml"
+        # Preserve the source registry so Zot selects its matching upstream.
+        for registry in docker.io gcr.io ghcr.io quay.io registry.k8s.io cgr.dev public.ecr.aws nvcr.io; do
+            docker exec "${node}" mkdir -p "${registry_dir}/${registry}"
+            printf '[host."http://dsx-identity-registry:5000/v2/%s"]\n  capabilities = ["pull", "resolve"]\n  # The URL includes the API root.\n  override_path = true\n' \
+                "${registry}" | docker exec -i "${node}" tee "${registry_dir}/${registry}/hosts.toml" >/dev/null
+        done
     done < <(kind get nodes --name "${cluster_name}")
 }
 
