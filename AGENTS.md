@@ -2,7 +2,7 @@
 
 The source repository is `https://github.com/dsx-ai-factory/nvidia-workload-identity`.
 Use `gh` for pull requests, GitHub Actions, and release status. The GitLab
-repository is a legacy mirror.
+mirror runs analysis and can publish artifacts from protected RC tags.
 
 ## Before starting
 

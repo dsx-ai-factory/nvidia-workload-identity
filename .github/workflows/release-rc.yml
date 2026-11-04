@@ -18,9 +18,10 @@ jobs:
       startsWith(github.ref, 'refs/heads/release/')
     permissions:
       contents: write
-    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-publish.yml@ffda391352e541765da48946f9807a9c2bc17e73
+    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-publish.yml@29a2dd8dfd1d9ba54cc5ca756e0a708596fe61a6
     secrets: inherit
     with:
+      artifact-publisher: ${{ vars.DSX_RC_ARTIFACT_PUBLISHER || 'github' }}
       promotion-manifest: true
       runner: ubuntu-latest
       buildkit-config: ""
