@@ -69,6 +69,21 @@ without release secrets. The RC workflow calls product CI once and waits on
 and publishing. See the [local E2E guide](local-e2e-tests/README.md#workflow) for runner
 requirements.
 
+### GitLab analysis
+
+The GitLab mirror runs SonarQube analysis against the existing
+[project](https://sonar.nvidia.com/dashboard?id=NBUSW_DSX_DSX_nvidia-workload-identity).
+Its analysis token comes from Vault. This job does not register releases in nSpect.
+Pulse and SonarQube failures appear as warnings and do not block GitLab pipelines.
+
+NGC publication is off by default. The artifact pipeline is loaded only when
+`GITLAB_PUBLISH_ARTIFACTS=true` and the pipeline targets a protected
+`vX.Y.Z` or `vX.Y.Z-rc.N` tag. It uses that existing tag and waits for validation
+and E2E. GitLab does not create release tags. Coordinate publication ownership
+with the GitHub release workflows before enabling it.
+
+Enable mirror-triggered pipelines only after this configuration is merged.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development and DCO sign-off,
