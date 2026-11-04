@@ -26,12 +26,16 @@ instance.
 2. When ready for QA, cut protected `release/X.Y.Z` from a tested `master` commit.
 3. Send release fixes to that branch, then cherry-pick them back to `master` through PRs.
 
-Release-worthy merges create `vX.Y.Z-rc.N`. The [RC workflow](.github/workflows/release-rc.yml)
-publishes matching images and charts directly to NGC, without a GitLab mirror.
+Release-worthy merges create `vX.Y.Z-rc.N` on GitHub. With
+`DSX_RC_ARTIFACT_PUBLISHER=external`, GitLab publishes the matching images and charts
+to NGC. The [RC workflow](.github/workflows/release-rc.yml) verifies those artifacts
+and records their digests for promotion. The default publisher is GitHub.
 PRs only run validation. This workflow does not publish from `master` or promote RCs to stable.
 
 [One-time setup](https://github.com/dsx-ai-factory/dsx-github-actions/blob/main/docs/release-candidate-publishing.md#prerequisites-and-scope):
 configure the runner, protected release environment, NGC key, and release permissions.
+External publishing also needs GitLab mirror pipelines, protected RC tags, and
+the protected GitLab variable `GITLAB_PUBLISH_ARTIFACTS=true`.
 
 ### Promote an RC
 
@@ -39,8 +43,8 @@ Promotion requires the protected `stable-release` environment and repository var
 `DSX_RELEASE_MODE=rc-promotion`. Administrators must complete the
 [release setup](https://github.com/dsx-ai-factory/dsx-github-actions/blob/main/docs/promote-rc.md)
 before the first run.
-Keep the promotion workflow and policy on `master`. The selected RC must use the
-publisher revision recorded in `.github/rc-promotion.json`, with
+Keep the promotion workflow and policy on `master`. The selected RC must use
+an approved publisher revision recorded in `.github/rc-promotion.json`, with
 `promotion-manifest: true`. Older RCs without that manifest cannot be promoted.
 
 1. Have QA validate a published RC with a successful manifest capture.
@@ -69,7 +73,7 @@ without release secrets. The RC workflow calls product CI once and waits on
 and publishing. See the [local E2E guide](local-e2e-tests/README.md#workflow) for runner
 requirements.
 
-### GitLab analysis
+### GitLab CI
 
 The GitLab mirror runs SonarQube analysis against the existing
 [project](https://sonar.nvidia.com/dashboard?id=NBUSW_DSX_DSX_nvidia-workload-identity).
@@ -78,9 +82,10 @@ Pulse and SonarQube failures appear as warnings and do not block GitLab pipeline
 
 NGC publication is off by default. The artifact pipeline is loaded only when
 `GITLAB_PUBLISH_ARTIFACTS=true` and the pipeline targets a protected
-`vX.Y.Z` or `vX.Y.Z-rc.N` tag. It uses that existing tag and waits for validation
-and E2E. GitLab does not create release tags. Coordinate publication ownership
-with the GitHub release workflows before enabling it.
+`vX.Y.Z-rc.N` tag. It uses that existing tag and waits for validation and E2E.
+GitLab does not create release tags. Switch the GitHub publisher to `external`
+before enabling GitLab publication. Stable promotion still copies the verified
+RC artifacts through GitHub.
 
 Enable mirror-triggered pipelines only after this configuration is merged.
 

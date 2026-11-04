@@ -21,7 +21,7 @@ jobs:
       contents: read
       actions: read
       deployments: read
-    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/promote-rc.yml@ffda391352e541765da48946f9807a9c2bc17e73
+    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/promote-rc.yml@29a2dd8dfd1d9ba54cc5ca756e0a708596fe61a6
     with:
       rc_version: ${{ inputs.rc_version }}
     secrets:
