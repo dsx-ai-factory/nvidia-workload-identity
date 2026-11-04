@@ -108,7 +108,7 @@ compute-next-release-version:
     - |
       test "$GITLAB_PUBLISH_ARTIFACTS" = true
       test "$CI_COMMIT_REF_PROTECTED" = true
-      [[ "$CI_COMMIT_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]
+      [[ "$CI_COMMIT_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-rc\.[1-9][0-9]*$ ]]
       printf 'NEXT_VERSION=%s\nSKIP_SEMANTIC_RELEASE=false\n' "${CI_COMMIT_TAG#v}" > release.env
   artifacts:
     reports:
@@ -141,19 +141,16 @@ commitlint:
     - e2e
   before_script:
     - |
-      if [[ "${NEXT_VERSION:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-        HELM_CHART_VERSION="${NEXT_VERSION}"
-      else
-        HELM_CHART_VERSION="0.0.0-$(git rev-parse --short HEAD)"
+      test "${NEXT_VERSION:?}" = "${CI_COMMIT_TAG#v}"
+      export HELM_CHART_VERSION="$NEXT_VERSION"
+      yq -i '
+        .version = strenv(HELM_CHART_VERSION) |
+        .appVersion = strenv(HELM_CHART_VERSION) |
+        .annotations."dsx.nvidia.com/source-revision" = strenv(CI_COMMIT_SHA)
+      ' "${CC_HELM_CHART_PATH}/Chart.yaml"
+      if [[ "$CC_HELM_CHART_PATH" == charts/dsx-identity ]]; then
+        yq -i '.spire."spire-server".image.tag = strenv(HELM_CHART_VERSION)' "${CC_HELM_CHART_PATH}/values.yaml"
       fi
-      export HELM_CHART_VERSION
-      yq -i '.appVersion = strenv(HELM_CHART_VERSION)' charts/dsx-identity/Chart.yaml
-      yq -i '.spire."spire-server".image.tag = strenv(HELM_CHART_VERSION)' charts/dsx-identity/values.yaml
-      yq -i '.appVersion = strenv(HELM_CHART_VERSION)' charts/dsx-imds/Chart.yaml
-      # The DPUService installs this chart independently of dsx-identity.
-      yq -i '.appVersion = strenv(HELM_CHART_VERSION)' charts/dsx-token-fetcher/Chart.yaml
-      yq -i '.appVersion = strenv(HELM_CHART_VERSION)' charts/dsx-token-fetcher-example/Chart.yaml
-      yq -i '.appVersion = strenv(HELM_CHART_VERSION)' charts/dsx-spiffe-csi/Chart.yaml
 
 .helm-package-rule:
   rules:
@@ -165,14 +162,58 @@ commitlint:
 
 .helm-push-ngc:
   stage: publish
+  resource_group: ngc-chart-${CI_JOB_NAME}-${CI_COMMIT_TAG}
   extends:
     - .nvcf-cds-runner-tags
   variables:
     NGC_DSX_COMPONENTS_PUSH_KEY: $NGC_REGISTRY_TOKEN
 
 .docker-publish:
+  # Serialize this project's check and copy for each immutable RC image.
+  resource_group: ngc-image-${DOCKER_IMAGE_NAME}-${CI_COMMIT_TAG}
+  allow_failure: false
   variables:
     PUSH_TO_NGC: "true"
+    PUSH_LATEST_TAG: "false"
+  script:
+    - |
+      set -euo pipefail
+      test "$NGC_REGISTRY_REQUIRE_STG" = false
+      test "$PUSH_LATEST_TAG" = false
+      test -z "${SKIP_PUSH_TO_NGC_PROD:-}"
+      test "$IMAGE_TAG" = "${CI_COMMIT_TAG#v}"
+      source_image="${CI_REGISTRY_IMAGE}/${DOCKER_IMAGE_NAME}:${IMAGE_TAG}"
+      target_image="${NGC_IMAGE_PATH}/${DOCKER_IMAGE_NAME}:${IMAGE_TAG}"
+      source_digest="$(regctl manifest head "$source_image")"
+      [[ "$source_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+      echo "$NGC_REGISTRY_TOKEN" | docker login -u '$oauthtoken' --password-stdin "$NGC_REGISTRY"
+      lookup_error="$(mktemp)"
+      trap 'rm -f "$lookup_error"' EXIT
+      if docker buildx imagetools inspect --raw "$target_image" > /dev/null 2> "$lookup_error"; then
+        target_digest="$(regctl manifest head "$target_image")"
+        if [[ "$target_digest" != "$source_digest" ]]; then
+          echo "RC image already exists with a different digest. Refusing to overwrite."
+          exit 1
+        fi
+      else
+        # Match the shared promotion verifier's confirmed-absence responses only.
+        message="$(<"$lookup_error")"
+        message="${message#ERROR: }"
+        case "$message" in
+          "$target_image: not found" | "$target_image: manifest unknown" | \
+          "$target_image: manifest unknown: manifest unknown" | \
+          'manifest unknown' | 'manifest unknown: manifest unknown' | \
+          'MANIFEST_UNKNOWN: manifest unknown')
+            ;;
+          *)
+            echo "Unable to verify RC image absence. Refusing to publish."
+            exit 1
+            ;;
+        esac
+        regctl image copy "${CI_REGISTRY_IMAGE}/${DOCKER_IMAGE_NAME}@${source_digest}" "$target_image"
+      fi
+      test "$(regctl manifest head "$target_image")" = "$source_digest"
+      echo "Verified $target_image at $source_digest"
 
 validate:
   stage: test
@@ -262,11 +303,15 @@ e2e:
 
 .container-build:
   stage: build
+  resource_group: gitlab-image-${DOCKER_IMAGE_NAME}-${CI_COMMIT_TAG}
   extends:
     - .build-image-dind
   variables:
     # The GitLab registry rejects BuildKit's default provenance manifest.
     BUILDX_NO_DEFAULT_ATTESTATIONS: "1"
+  script:
+    - export EXTRA_BUILD_ARGS="${EXTRA_BUILD_ARGS:-} --label org.opencontainers.image.revision=${CI_COMMIT_SHA}"
+    - !reference [.build-image-dind, script]
   needs:
     - compute-next-release-version
     - validate

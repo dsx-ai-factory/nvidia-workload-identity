@@ -15,12 +15,13 @@ jobs:
     needs: dsx-component-ci
     if: >-
       github.repository == 'dsx-ai-factory/nvidia-workload-identity' &&
-      github.ref == 'refs/heads/release/1.15.0'
+      startsWith(github.ref, 'refs/heads/release/')
     permissions:
       contents: write
-    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-publish.yml@7b112249381ed536acbfb1d72294b104cce8ffad
+    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-publish.yml@29a2dd8dfd1d9ba54cc5ca756e0a708596fe61a6
     secrets: inherit
     with:
+      artifact-publisher: ${{ vars.DSX_RC_ARTIFACT_PUBLISHER || 'github' }}
       promotion-manifest: true
       runner: ubuntu-latest
       buildkit-config: ""
