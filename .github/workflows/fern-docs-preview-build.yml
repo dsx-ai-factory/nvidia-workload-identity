@@ -1,14 +1,4 @@
-# Workflow 1 of 2 for Fern doc previews.
-#
-# Collects the navigation, the pages it lists, and PR metadata, then uploads them
-# as an artifact. No secrets are used here.
-#
-# The comment workflow builds the preview with FERN_TOKEN, and the Fern CLI reads
-# any local file a page names. The copy-pr-bot mirrors a PR to pull-request/<n>
-# only after vetting it, and that vetting is what keeps untrusted page content
-# out. The comment workflow still treats the artifact as untrusted data.
-
-name: "Preview Fern Docs: Build"
+name: "Fern Docs Preview: Build"
 
 on:
   push:
@@ -18,8 +8,9 @@ on:
       - 'docs/**'
       - 'fern/**'
       - 'tools/**'
-      - '**/README.md'
-      - '.github/workflows/fern-docs-preview-build.yml'
+      - '**/*.md'
+      - '**/*.mdx'
+      - '.github/workflows/fern-docs-preview-*.yml'
 
 permissions:
   contents: read
@@ -28,40 +19,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-defaults:
-  run:
-    shell: bash
-
 jobs:
   collect:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Save PR metadata
-        env:
-          BRANCH_NAME: ${{ github.ref_name }}
-        run: |
-          mkdir -p preview-metadata
-          echo "${BRANCH_NAME#pull-request/}" > preview-metadata/pr_number
-          git diff --name-only "origin/master...HEAD" -- '*.md' > preview-metadata/changed_md_files || true
-
-      # Stage only the pages the navigation lists. stage-fern-site fails on a
-      # path that leaves the repository, so nothing else reaches the artifact.
-      - name: Stage published pages
-        run: python3 tools/stage-fern-site . site
-
-      - name: Upload pages and metadata
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: fern-preview
-          path: |
-            site/
-            preview-metadata/
-          retention-days: 1
-          if-no-files-found: error
+    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/fern-docs-preview-build.yml@b81a8d1962e689667bcd83d9bacf51aff05f6e59
+    with:
+      runner: ubuntu-24.04
+      navigation_file: index.yml
