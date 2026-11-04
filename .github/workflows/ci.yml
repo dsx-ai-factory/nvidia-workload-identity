@@ -262,4 +262,4 @@ jobs:
 
   release-checks:
     name: RC contract checks
-    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-checks.yml@db3780bff4b2cbf90ba9117a63e41ddea066791b
+    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-checks.yml@3e5f9c2ec52fa34dc0c183b19a7e09a7fcc22780
