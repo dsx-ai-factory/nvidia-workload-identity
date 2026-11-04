@@ -38,7 +38,6 @@ sonarqube:
       -Dsonar.projectKey="$SONAR_PROJECT_KEY"
       -Dsonar.projectVersion="${CI_COMMIT_TAG:-$CI_COMMIT_SHORT_SHA}"
       -Dsonar.scm.revision="$CI_COMMIT_SHA"
-      -Dsonar.branch.name="$CI_COMMIT_BRANCH"
       -Dsonar.sources=cmd,internal,kata-uds-proxy/src
       -Dsonar.tests=cmd,internal
       '-Dsonar.test.inclusions=**/*_test.go'
