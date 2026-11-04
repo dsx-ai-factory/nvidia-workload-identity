@@ -81,13 +81,10 @@ existing Secrets or ConfigMaps into Identity Keys. Each referenced object must
 exist in the release namespace. Use unique volume names and mount paths that
 preserve the signing-key, active-key, NATS credentials, and SPIFFE mounts.
 
-For a private OAuth2 or NATS TLS CA, mount a PEM bundle and configure Go's
-system roots through the existing `observability.env` map:
+For a private OAuth2 or NATS TLS CA, mount a PEM bundle as one file in Go's
+default trust directory. The ConfigMap must contain a `ca.crt` key:
 
 ```yaml
-observability:
-  env:
-    SSL_CERT_DIR: /etc/ssl/certs:/etc/dsx-ca
 identityKeys:
   extraVolumes:
     - name: identity-ca
@@ -95,16 +92,15 @@ identityKeys:
         name: identity-ca
   extraVolumeMounts:
     - name: identity-ca
-      mountPath: /etc/dsx-ca
+      mountPath: /etc/ssl/certs/identity-ca.pem
+      subPath: ca.crt
       readOnly: true
 ```
 
-This preserves the image's default certificate file and directory. Keep existing
-custom trust directories in `SSL_CERT_DIR` when extending that list. An
-`SSL_CERT_FILE` override replaces the default certificate file, so that file
-must include all required trust anchors. Roll out Identity Keys after changing
-the bundle because running Go processes may cache their root pool. The extra
-mounts apply to Identity Keys. Other consumers need their own trust mounts.
+This preserves the image's existing trust files. Recreate the Identity Keys Pods
+after changing the bundle because subPath mounts do not receive ConfigMap
+updates and Go processes may cache their root pool. The extra mounts apply to
+Identity Keys. Other consumers need their own trust mounts.
 
 The JWT issuer is independent of exchanged SPIFFE IDs, which use
 `<tenant>.<region>.<service>.<partition>`. Identities without a service label use

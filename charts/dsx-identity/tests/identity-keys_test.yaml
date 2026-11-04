@@ -176,21 +176,15 @@ tests:
                 path: ca.crt
       identityKeys.extraVolumeMounts:
         - name: identity-ca
-          mountPath: /etc/dsx-ca
+          mountPath: /etc/ssl/certs/identity-ca.pem
+          subPath: ca.crt
           readOnly: true
-      observability.env:
-        SSL_CERT_DIR: /etc/ssl/certs:/etc/dsx-ca
     template: templates/identity-keys-deployment.yaml
     documentIndex: 0
     asserts:
       - equal:
           path: spec.template.spec.containers[0].name
           value: dsx-identity-keys
-      - contains:
-          path: spec.template.spec.containers[0].env
-          content:
-            name: SSL_CERT_DIR
-            value: /etc/ssl/certs:/etc/dsx-ca
       - equal:
           path: spec.template.spec.volumes[4].secret.secretName
           value: identity-ca
@@ -201,7 +195,8 @@ tests:
           path: spec.template.spec.containers[0].volumeMounts
           content:
             name: identity-ca
-            mountPath: /etc/dsx-ca
+            mountPath: /etc/ssl/certs/identity-ca.pem
+            subPath: ca.crt
             readOnly: true
       - equal:
           path: spec.template.spec.volumes[0].csi.driver
@@ -225,10 +220,9 @@ tests:
             name: combined-ca
       identityKeys.extraVolumeMounts:
         - name: combined-ca
-          mountPath: /etc/combined-ca
+          mountPath: /etc/ssl/certs/identity-ca.pem
+          subPath: ca.crt
           readOnly: true
-      observability.env:
-        SSL_CERT_FILE: /etc/combined-ca/ca-bundle.crt
     template: templates/identity-keys-deployment.yaml
     documentIndex: 0
     asserts:
@@ -242,13 +236,9 @@ tests:
           path: spec.template.spec.containers[0].volumeMounts
           content:
             name: combined-ca
-            mountPath: /etc/combined-ca
+            mountPath: /etc/ssl/certs/identity-ca.pem
+            subPath: ca.crt
             readOnly: true
-      - contains:
-          path: spec.template.spec.containers[0].env
-          content:
-            name: SSL_CERT_FILE
-            value: /etc/combined-ca/ca-bundle.crt
       - contains:
           path: spec.template.spec.containers[0].args
           content: --disable-nats
