@@ -109,7 +109,7 @@ spire:
 observability:
   # One level configures every chart-owned first-party Go process.
   logLevel: info
-  # Standard OTel environment settings shared by first-party applications.
+  # Environment settings shared by first-party applications.
   # IPv4 loopback avoids the unsupported IPv6 localhost resolved by the SDK.
   env:
     OTEL_EXPORTER_OTLP_ENDPOINT: http://127.0.0.1:4318
@@ -157,6 +157,9 @@ identityKeys:
   # Existing Opaque Secret. active-kid.json must contain
   # {"active_kid":"<RFC 7638 public JWK thumbprint>","alg":"<JOSE algorithm>"}.
   activeKIDSecret: dsx-identity-keys-active-kid
+  # Existing Secret or ConfigMap volumes and mounts for the Identity Keys process.
+  extraVolumes: []
+  extraVolumeMounts: []
   nats:
     enabled: true
     serverURL: ""
