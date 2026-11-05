@@ -46,7 +46,7 @@ GitHub owns RC-to-stable tagging and release notes.
   Adding or changing an ordinary test does not require a README update.
 - Keep current documentation in these READMEs and in `docs/`, which holds the
   operator pages the root README links to. Fern publishes operator documentation
-  only, through the navigation in `index.yml` and the config in `fern/`. Keep
+  only, through `index.yml` and `.github/fern-docs.yml`. Keep
   developer material such as releases, CI, and E2E out of the Fern navigation.
   Do not add standalone implementation plans unless the user explicitly requests one.
 - Prevent documentation drift. When a change affects behavior, configuration, an
@@ -88,8 +88,8 @@ GitHub owns RC-to-stable tagging and release notes.
 - Use repository-pinned tools and dependencies. Pin container images and never
   use `latest`.
 - Upgrade only the packages required by the change.
-- Pin the Fern CLI to the same version in `fern/fern.config.json` and in every
-  `fern-api@` install in `.github/workflows/`.
+- Keep `fern_cli_version` consistent across the shared Fern workflow callers.
+  The shared action generates `fern/fern.config.json` from the workflow inputs.
 - Use the pinned Go toolchain, standard formatting, structured `slog` logging,
   context cancellation, and the shared telemetry package.
 - Never call `os.Exit` outside `main`. Keep cleanup in an error-returning function
