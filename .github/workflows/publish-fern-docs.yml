@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   publish:
-    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/publish-fern-docs.yml@54d113e4894393dbf0b26aacc1c65ca4b54ee7a6
+    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/publish-fern-docs.yml@6e3c06c515ea369a0d505adce0b74629be79dff4
     with:
       fern_docs_path: .github/fern-docs.yml
       fern_organization: nvidia
