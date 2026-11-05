@@ -17,9 +17,9 @@
       apt-get install -y --no-install-recommends gh skopeo
       git init .release-tools
       git -C .release-tools remote add origin https://github.com/dsx-ai-factory/dsx-github-actions.git
-      git -C .release-tools fetch --depth=1 origin d9857cde40fa75d457446ef344123daf029393f9
+      git -C .release-tools fetch --depth=1 origin be29428a696f1f1be890602895acefc8ebc762e8
       git -C .release-tools checkout --detach FETCH_HEAD
-      test "$(git -C .release-tools rev-parse HEAD)" = d9857cde40fa75d457446ef344123daf029393f9
+      test "$(git -C .release-tools rev-parse HEAD)" = be29428a696f1f1be890602895acefc8ebc762e8
       npm ci --ignore-scripts --legacy-peer-deps --prefix .release-tools/.github/actions/promote-rc
   after_script:
     - rm -rf -- "$PROMOTION_AUTH_ROOT" "$HELM_CONFIG_HOME" "$HELM_CACHE_HOME" "$HELM_DATA_HOME"
@@ -27,7 +27,7 @@
 promote-rc:
   extends: [.release-tools]
   stage: release
-  timeout: 60m
+  timeout: 45m
   needs: []
   environment:
     name: stable-release
