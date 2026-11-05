@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   preview:
-    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/fern-docs-preview-comment.yml@b81a8d1962e689667bcd83d9bacf51aff05f6e59
+    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/fern-docs-preview-comment.yml@3193ddf344c5ff4854863061ac95685728bbcfdd
     with:
       runner: ubuntu-24.04
       navigation_file: index.yml
