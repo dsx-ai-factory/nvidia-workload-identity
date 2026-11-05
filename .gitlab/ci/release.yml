@@ -50,6 +50,8 @@ release-tools-check:
     - ngc --version
     - skopeo --version
     - yq --version
+    - test "$(yq eval-all -n -o=json '[.]' | tr -d '[:space:]')" = '[null]'
+    - openssl version
     - python3 .release-tools/.github/actions/promote-rc/gitlab.py --help
   rules:
     - if: '$CI_PIPELINE_SOURCE =~ /^(web|api)$/ && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true" && $RELEASE_PREFLIGHT == "true" && $RC_VERSION == ""'
