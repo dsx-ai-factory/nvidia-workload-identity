@@ -15,8 +15,11 @@ concurrency:
 jobs:
   fern-check:
     name: Fern Check
-    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/fern-docs-ci.yml@3193ddf344c5ff4854863061ac95685728bbcfdd
+    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/fern-docs-ci.yml@81eb7c69680d2b3eca9142e73fcd2fe311949cf5
     with:
+      fern_docs_path: .github/fern-docs.yml
+      fern_organization: nvidia
+      fern_cli_version: '5.65.2'
       runner: ubuntu-24.04
       navigation_file: index.yml
       docs_paths: |
