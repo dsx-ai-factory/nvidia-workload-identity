@@ -1,5 +1,6 @@
 .release-tools:
   extends: [.nvcf-cicd-image, .nvcf-cds-runner-tags]
+  image: gitlab-master.nvidia.com:5005/cds/cds-containers/tools:2.1.2@sha256:9dda83dc265c198bac7d3e49bcb2aa8f68d9478e69882a08d2d8346ddcc61bff
   timeout: 30m
   variables:
     GIT_SUBMODULE_STRATEGY: none
@@ -13,16 +14,48 @@
     - |
       set +x
       set -euo pipefail
+      umask 077
+      mkdir -p "$PROMOTION_AUTH_ROOT"
+      if [[ -n "${RC_VERIFICATION_APP_PRIVATE_KEY_B64:-}" ]]; then
+        printf '%s' "$RC_VERIFICATION_APP_PRIVATE_KEY_B64" | base64 --decode > "$PROMOTION_AUTH_ROOT/verification.pem"
+        export RC_VERIFICATION_APP_PRIVATE_KEY_FILE="$PROMOTION_AUTH_ROOT/verification.pem"
+        unset RC_VERIFICATION_APP_PRIVATE_KEY_B64
+      fi
+      if [[ -n "${RC_PROMOTION_APP_PRIVATE_KEY_B64:-}" ]]; then
+        printf '%s' "$RC_PROMOTION_APP_PRIVATE_KEY_B64" | base64 --decode > "$PROMOTION_AUTH_ROOT/promotion.pem"
+        export RC_PROMOTION_APP_PRIVATE_KEY_FILE="$PROMOTION_AUTH_ROOT/promotion.pem"
+        unset RC_PROMOTION_APP_PRIVATE_KEY_B64
+      fi
       apt-get update
       apt-get install -y --no-install-recommends gh skopeo
       git init .release-tools
       git -C .release-tools remote add origin https://github.com/dsx-ai-factory/dsx-github-actions.git
-      git -C .release-tools fetch --depth=1 origin be29428a696f1f1be890602895acefc8ebc762e8
+      git -C .release-tools fetch --depth=1 origin 30d4a4b90c091eb7f28697950531c5250888d8a1
       git -C .release-tools checkout --detach FETCH_HEAD
-      test "$(git -C .release-tools rev-parse HEAD)" = be29428a696f1f1be890602895acefc8ebc762e8
+      test "$(git -C .release-tools rev-parse HEAD)" = 30d4a4b90c091eb7f28697950531c5250888d8a1
       npm ci --ignore-scripts --legacy-peer-deps --prefix .release-tools/.github/actions/promote-rc
   after_script:
     - rm -rf -- "$PROMOTION_AUTH_ROOT" "$HELM_CONFIG_HOME" "$HELM_CACHE_HOME" "$HELM_DATA_HOME"
+
+release-tools-check:
+  extends: [.release-tools]
+  stage: release
+  needs: []
+  script:
+    - python3 --version
+    - node --version
+    - node -e 'const [major, minor, patch] = process.versions.node.split(".").map(Number); if (major < 20 || (major === 20 && (minor < 8 || (minor === 8 && patch < 1)))) process.exit(1)'
+    - gh --version
+    - docker buildx version
+    - helm version --short
+    - ngc version info
+    - skopeo --version
+    - yq --version
+    - test "$(yq eval-all -n -o=json '[.]' | tr -d '[:space:]')" = '[null]'
+    - openssl version
+    - python3 .release-tools/.github/actions/promote-rc/gitlab.py --help
+  rules:
+    - if: '$CI_PIPELINE_SOURCE =~ /^(web|api)$/ && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true" && $RELEASE_PREFLIGHT == "true" && $RC_VERSION == ""'
 
 promote-rc:
   extends: [.release-tools]

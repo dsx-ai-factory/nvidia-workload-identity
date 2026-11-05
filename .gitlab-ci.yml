@@ -16,6 +16,10 @@ variables:
   RC_VERSION:
     value: ""
     description: "QA-approved X.Y.Z-rc.N to promote from the protected default branch."
+  RELEASE_PREFLIGHT:
+    value: "false"
+    options: ["false", "true"]
+    description: "Check the GitLab release runner tools without publishing artifacts."
 
 workflow:
   rules:

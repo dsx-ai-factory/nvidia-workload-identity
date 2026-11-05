@@ -18,7 +18,7 @@ jobs:
       startsWith(github.ref, 'refs/heads/release/')
     permissions:
       contents: write
-    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-publish.yml@be29428a696f1f1be890602895acefc8ebc762e8
+    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/release-candidate-publish.yml@30d4a4b90c091eb7f28697950531c5250888d8a1
     with:
       artifact-publisher: external
       promotion-manifest: false
