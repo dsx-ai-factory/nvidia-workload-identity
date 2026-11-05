@@ -26,35 +26,32 @@ instance.
 2. When ready for QA, cut protected `release/X.Y.Z` from a tested `master` commit.
 3. Send release fixes to that branch, then cherry-pick them back to `master` through PRs.
 
-Release-worthy merges create `vX.Y.Z-rc.N` on GitHub. With
-`DSX_RC_ARTIFACT_PUBLISHER=external`, GitLab publishes the matching images and charts
-to NGC. The [RC workflow](.github/workflows/release-rc.yml) verifies those artifacts
-and records their digests for promotion. The default publisher is GitHub.
-PRs only run validation. This workflow does not publish from `master` or promote RCs to stable.
+Release-worthy merges create `vX.Y.Z-rc.N` after GitHub CI passes.
+GitLab picks up the mirrored tag, publishes the images and charts to NGC,
+and verifies them. The [RC workflow](.github/workflows/release-rc.yml) ends
+after tagging and does not use NGC credentials. PRs only run validation.
 
 [One-time setup](https://github.com/dsx-ai-factory/dsx-github-actions/blob/main/docs/release-candidate-publishing.md#prerequisites-and-scope):
-configure the runner, protected release environment, NGC key, and release permissions.
-External publishing also needs GitLab mirror pipelines, protected RC tags, and
-the protected GitLab variable `GITLAB_PUBLISH_ARTIFACTS=true`.
+configure the GitHub runner and RC tag permissions. GitLab needs mirror
+pipelines, protected RC tags, registry credentials, and the protected variable
+`GITLAB_PUBLISH_ARTIFACTS=true`.
 
 ### Promote an RC
 
-Promotion requires the protected `stable-release` environment and repository variable
-`DSX_RELEASE_MODE=rc-promotion`. Administrators must complete the
-[release setup](https://github.com/dsx-ai-factory/dsx-github-actions/blob/main/docs/promote-rc.md)
-before the first run.
-Keep the promotion workflow and policy on `master`. The selected RC must use
-an approved publisher revision recorded in `.github/rc-promotion.json`, with
-`promotion-manifest: true`. Older RCs without that manifest cannot be promoted.
+Promotion runs in GitLab's protected `stable-release` environment.
+Administrators must configure the allowed release groups and required approvals
+and complete the [GitLab release setup](https://github.com/dsx-ai-factory/dsx-github-actions/blob/main/docs/gitlab-rc-promotion.md)
+before enabling it. The [promotion policy](.gitlab/rc-promotion.json) defines
+the artifact inventory and accepted RC workflow.
 
-1. Have QA validate a published RC with a successful manifest capture.
-2. Open **Actions > Promote RC > Run workflow**. Select `master` and enter `X.Y.Z-rc.N`.
-3. Confirm the RC version and source commit with the configured release reviewers.
-4. After approval, the workflow publishes `X.Y.Z` using the tested image digests.
+1. Have QA validate an RC whose GitLab `verify-rc` job passed.
+2. In GitLab, run a pipeline on `master` with `RC_VERSION=X.Y.Z-rc.N`.
+3. Select the manual `promote-rc` job and have the configured reviewers approve it.
+4. GitLab promotes the verified artifacts, then creates `vX.Y.Z` and its release on GitHub.
 
-The [promotion workflow](.github/workflows/promote-rc.yml) calls the shared publisher.
-Images keep their tested bytes. Charts update release metadata and declared image
-tags while preserving templates and vendored dependencies.
+Images keep their tested digests. Charts update release metadata and declared
+image tags while preserving templates and vendored dependencies.
+Missing verification records or conflicting stable artifacts stop promotion.
 
 ## CI
 
@@ -84,9 +81,8 @@ NGC publication is off by default. The artifact pipeline is loaded only when
 `GITLAB_PUBLISH_ARTIFACTS=true` and the pipeline targets a protected
 `vX.Y.Z-rc.N` tag. GitHub validation and E2E must pass before creating the tag.
 GitLab builds and publishes the tagged source without repeating those tests.
-GitLab does not create release tags. Switch the GitHub publisher to `external`
-before enabling GitLab publication. Stable promotion still copies the verified
-RC artifacts through GitHub.
+GitLab owns NGC publication, verification, and stable promotion. Its promotion
+job creates the final GitHub tag only after verifying the promoted artifacts.
 
 Enable mirror-triggered pipelines only after this configuration is merged.
 
