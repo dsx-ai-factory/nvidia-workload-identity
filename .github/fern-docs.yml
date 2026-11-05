@@ -2,24 +2,23 @@ instances:
   - url: nvidia-workload-identity.docs.buildwithfern.com/workload-identity
     custom-domain: docs.nvidia.com/workload-identity
     multi-source: true
-
 redirects:
   - source: /workload-identity/index.html
     destination: /workload-identity
-
 title: NVIDIA Workload Identity
-
 global-theme: nvidia
-
 logo:
   href: /workload-identity
   right-text: Workload Identity
-
 navbar-links:
   - type: github
     value: https://github.com/dsx-ai-factory/nvidia-workload-identity
-
 products:
   - display-name: Workload Identity
     path: ../index.yml
     slug: /
+    versions:
+      - display-name: v1.16.0-rc.5
+        path: versions/v1.16.0-rc.5.yml
+        slug: v1.16.0-rc.5
+        availability: stable
