@@ -82,7 +82,8 @@ Pulse and SonarQube failures appear as warnings and do not block GitLab pipeline
 
 NGC publication is off by default. The artifact pipeline is loaded only when
 `GITLAB_PUBLISH_ARTIFACTS=true` and the pipeline targets a protected
-`vX.Y.Z-rc.N` tag. It uses that existing tag and waits for validation and E2E.
+`vX.Y.Z-rc.N` tag. GitHub validation and E2E must pass before creating the tag.
+GitLab builds and publishes the tagged source without repeating those tests.
 GitLab does not create release tags. Switch the GitHub publisher to `external`
 before enabling GitLab publication. Stable promotion still copies the verified
 RC artifacts through GitHub.

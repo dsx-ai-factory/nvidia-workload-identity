@@ -78,12 +78,7 @@ variables:
     Commit: `${CI_COMMIT_TITLE}`
   PIPELINE_TRIGGER: "13"
   GIT_SUBMODULE_STRATEGY: recursive
-  KIND_DIND_SERVICE_HOST: docker
-  KUBECONFIG: "$CI_PROJECT_DIR/.kube/kind-k1:$CI_PROJECT_DIR/.kube/kind-k2"
-  AL2023_KERNEL_IMAGE: public.ecr.aws/amazonlinux/amazonlinux:2023.9.20251110.1
   DOCKER_PLATFORMS: "linux/amd64,linux/arm64"
-  MISE_VERSION: 2026.4.28
-  MISE_SHA256: ef2502a93bd3e30aea906c683b0cb410695e910ea1ca51a00f24d8ad1a7c95d5
 
 compute-next-release-version:
   stage: init
@@ -123,8 +118,6 @@ commitlint:
 .helm-package:
   needs:
     - compute-next-release-version
-    - validate
-    - e2e
   before_script:
     - |
       test "${NEXT_VERSION:?}" = "${CI_COMMIT_TAG#v}"
@@ -201,92 +194,6 @@ commitlint:
       test "$(regctl manifest head "$target_image")" = "$source_digest"
       echo "Verified $target_image at $source_digest"
 
-validate:
-  stage: test
-  image: golang:1.26.4-alpine
-  extends:
-    - .nvcf-cds-runner-tags
-  variables:
-    MISE_DATA_DIR: "$CI_PROJECT_DIR/.mise/mise-data"
-  cache:
-    - key:
-        prefix: mise-
-        files:
-          - mise.toml
-          - mise.lock
-      paths:
-        - "$MISE_DATA_DIR"
-  before_script:
-    - apk add --no-cache bash build-base ca-certificates curl git make
-    - curl -fsSL "https://github.com/jdx/mise/releases/download/v${MISE_VERSION}/mise-v${MISE_VERSION}-linux-x64-musl" -o /usr/local/bin/mise
-    - echo "${MISE_SHA256}  /usr/local/bin/mise" | sha256sum -c -
-    - chmod +x /usr/local/bin/mise
-    - mise install --locked
-  script:
-    - make validate
-  rules:
-    - !reference [.rules-push-or-mr, rules]
-
-e2e:
-  stage: test
-  image: golang:1.26.4-alpine
-  extends:
-    - .nvcf-cds-runner-large-dind-tags
-    - .dind-service
-  timeout: 4h
-  needs:
-    - validate
-  variables:
-    MISE_DATA_DIR: "$CI_PROJECT_DIR/.mise/mise-data"
-  cache:
-    - key:
-        prefix: mise-
-        files:
-          - mise.toml
-          - mise.lock
-      paths:
-        - "$MISE_DATA_DIR"
-  before_script:
-    - apk add --no-cache bash ca-certificates curl docker-cli docker-cli-buildx git make openssh-client openssl python3 util-linux
-    - curl -fsSL "https://github.com/jdx/mise/releases/download/v${MISE_VERSION}/mise-v${MISE_VERSION}-linux-x64-musl" -o /usr/local/bin/mise
-    - echo "${MISE_SHA256}  /usr/local/bin/mise" | sha256sum -c -
-    - chmod +x /usr/local/bin/mise
-    - mise install --locked
-    # Preload matching AL2023 modules into the host kernel shared by DinD and
-    # Kind before creating clusters.
-    - |
-      docker run --rm --privileged "${AL2023_KERNEL_IMAGE}" sh -ceu '
-        dnf -y -q install kmod "kernel-$(uname -r)"
-        depmod -a "$(uname -r)"
-        modprobe openvswitch
-        modprobe vport-geneve
-        modprobe nft_socket
-        modprobe tun
-        modprobe vhost_net
-        test -d /sys/module/openvswitch
-        test -d /sys/module/nft_socket
-      '
-  script:
-    - make -j install
-    - make test
-  after_script:
-    - |
-      if [ "${CI_JOB_STATUS}" != "success" ]; then
-        mise exec -- kubectl get kubevirt kubevirt --namespace kubevirt \
-          --context kind-k2 --request-timeout=10s -o yaml || true
-        mise exec -- kubectl get pods --namespace kubevirt \
-          --context kind-k2 --request-timeout=10s -o wide || true
-        mise exec -- kubectl get events --namespace kubevirt \
-          --context kind-k2 --request-timeout=10s --sort-by=.lastTimestamp || true
-        mise exec -- kubectl get vm,vmi,pods --namespace tenant-tenant1 \
-          --context kind-k2 --request-timeout=10s -o wide || true
-        mise exec -- kubectl get events --namespace tenant-tenant1 \
-          --context kind-k2 --request-timeout=10s --sort-by=.lastTimestamp || true
-      fi
-    - make clean
-  rules:
-    - !reference [.rules-push-or-mr, rules]
-
 .container-build:
   stage: build
   resource_group: gitlab-image-${DOCKER_IMAGE_NAME}-${CI_COMMIT_TAG}
@@ -300,8 +207,6 @@ e2e:
     - !reference [.build-image-dind, script]
   needs:
     - compute-next-release-version
-    - validate
-    - e2e
 
 docker-build:dsx-token-fetcher:
   extends: [.container-build]
