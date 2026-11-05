@@ -1,5 +1,6 @@
 .release-tools:
   extends: [.nvcf-cicd-image, .nvcf-cds-runner-tags]
+  image: gitlab-master.nvidia.com:5005/cds/cds-containers/tools:2.1.2@sha256:9dda83dc265c198bac7d3e49bcb2aa8f68d9478e69882a08d2d8346ddcc61bff
   timeout: 30m
   variables:
     GIT_SUBMODULE_STRATEGY: none
@@ -47,7 +48,7 @@ release-tools-check:
     - gh --version
     - docker buildx version
     - helm version --short
-    - ngc --version
+    - ngc version info
     - skopeo --version
     - yq --version
     - test "$(yq eval-all -n -o=json '[.]' | tr -d '[:space:]')" = '[null]'
