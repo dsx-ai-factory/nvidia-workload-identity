@@ -80,6 +80,31 @@ variables:
   GIT_SUBMODULE_STRATEGY: recursive
   DOCKER_PLATFORMS: "linux/amd64,linux/arm64"
 
+verify-rc:
+  extends: [.release-tools]
+  stage: release
+  needs:
+    - {job: "docker-push-ngc:dsx-token-fetcher", artifacts: false}
+    - {job: "docker-push-ngc:dsx-identity-keys", artifacts: false}
+    - {job: "docker-push-ngc:metadata-service", artifacts: false}
+    - {job: "docker-push-ngc:dsx-imds-network-setup", artifacts: false}
+    - {job: "docker-push-ngc:dsx-identity-keys-proxy-csi", artifacts: false}
+    - {job: "docker-push-ngc:dsx-identity-controller", artifacts: false}
+    - {job: "docker-push-ngc:dsx-spire-server", artifacts: false}
+    - {job: "docker-push-ngc:dsx-spire-agent", artifacts: false}
+    - {job: "docker-push-ngc:dsx-kata-uds-proxy", artifacts: false}
+    - {job: helm-push-ngc-dsx-identity, artifacts: false}
+    - {job: helm-push-ngc-dsx-imds, artifacts: false}
+    - {job: helm-push-ngc-dsx-token-fetcher, artifacts: false}
+    - {job: helm-push-ngc-dsx-token-fetcher-example, artifacts: false}
+  script:
+    - python3 .release-tools/.github/actions/promote-rc/gitlab.py verify --policy .gitlab/rc-promotion.json
+  artifacts:
+    paths: [rc-promotion-manifest.json]
+    expire_in: 2 years
+  rules:
+    - if: '$CI_COMMIT_TAG'
+
 compute-next-release-version:
   stage: init
   extends: [.nvcf-cds-runner-tags]
