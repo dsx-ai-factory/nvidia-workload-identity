@@ -2,7 +2,8 @@
   "schema": 1,
   "enabled": true,
   "source_workflow": ".github/workflows/release-rc.yml",
-  "source_publisher_sha": "db3780bff4b2cbf90ba9117a63e41ddea066791b",
+  "source_publisher_sha": "8f86443b897becd89c82a4b0ac448af640d11238",
+  "previous_source_publisher_shas": [],
   "source_ngc_path": "0837451325059433/components-dev",
   "destination_ngc_path": "0837451325059433/components-dev",
   "images": [
@@ -25,5 +26,13 @@
     {"name": "dsx-token-fetcher", "version_value_paths": []},
     {"name": "dsx-token-fetcher-example", "version_value_paths": []}
   ],
-  "competing_workflows": []
+  "competing_workflows": [],
+  "gitlab": {
+    "api_url": "https://gitlab-master.nvidia.com/api/v4",
+    "project_id": 196382,
+    "repository": "dsx-ai-factory/nvidia-workload-identity",
+    "authorization": "maintainer",
+    "deploy_group_ids": [],
+    "approver_group_ids": []
+  }
 }

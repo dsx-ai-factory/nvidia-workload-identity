@@ -2,7 +2,7 @@
 
 The source repository is `https://github.com/dsx-ai-factory/nvidia-workload-identity`.
 Use `gh` for pull requests, GitHub Actions, and release status. The GitLab
-repository is a legacy mirror.
+mirror owns NGC publication, artifact verification, and stable promotion.
 
 ## Before starting
 
@@ -136,6 +136,8 @@ repository is a legacy mirror.
   test signers, directly signed tokens, or test-only authentication paths.
 - Run `make validate` for code or configuration changes and complete required CI
   gates. CI-required validation and E2E jobs must not be manual or allowed to fail.
+- GitLab Pulse and SonarQube scans are advisory. Keep failures visible as warnings
+  without blocking the pipeline.
 - Run the full E2E lifecycle after implementation and review work is complete
   when deployed behavior needs verification. Report exactly what ran and what
   remains unverified.
@@ -155,6 +157,14 @@ repository is a legacy mirror.
 ## Git and pull requests
 
 - Do not post comments as the user, except to trigger CI when needed.
+- GitHub runs product CI and creates RC tags, without NGC credentials or
+  registry operations in release workflows. GitLab consumes mirrored RC tags,
+  publishes and verifies artifacts, and promotes QA-approved RCs to stable.
+- Stable promotion runs in GitLab's protected `stable-release` environment.
+  Preserve image digests and create the canonical GitHub stable tag only after
+  all promoted artifacts are verified.
+- Keep product validation and E2E in GitHub before RC tag creation. GitLab
+  builds and publishes the tagged source and runs advisory analysis.
 - Read active GitHub Actions and release workflows before creating or updating a
   pull request. Search for an equivalent open pull request or branch first.
 - Use a `feat/` or `fix/` branch for release-producing changes.
