@@ -1,0 +1,47 @@
+.release-tools:
+  extends: [.nvcf-cicd-image, .nvcf-cds-runner-tags]
+  timeout: 30m
+  variables:
+    GIT_SUBMODULE_STRATEGY: none
+    GH_TOKEN: "$GITHUB_RELEASE_READ_TOKEN"
+    PROMOTION_AUTH_ROOT: "$CI_PROJECT_DIR/.release-auth"
+    HELM_CONFIG_HOME: "$CI_PROJECT_DIR/.release-helm/config"
+    HELM_CACHE_HOME: "$CI_PROJECT_DIR/.release-helm/cache"
+    HELM_DATA_HOME: "$CI_PROJECT_DIR/.release-helm/data"
+    RC_PROMOTION_SOURCE_NGC_KEY: "$NGC_REGISTRY_TOKEN"
+  before_script:
+    - |
+      set +x
+      set -euo pipefail
+      apt-get update
+      apt-get install -y --no-install-recommends gh skopeo
+      git init .release-tools
+      git -C .release-tools remote add origin https://github.com/dsx-ai-factory/dsx-github-actions.git
+      git -C .release-tools fetch --depth=1 origin be29428a696f1f1be890602895acefc8ebc762e8
+      git -C .release-tools checkout --detach FETCH_HEAD
+      test "$(git -C .release-tools rev-parse HEAD)" = be29428a696f1f1be890602895acefc8ebc762e8
+      npm ci --ignore-scripts --legacy-peer-deps --prefix .release-tools/.github/actions/promote-rc
+  after_script:
+    - rm -rf -- "$PROMOTION_AUTH_ROOT" "$HELM_CONFIG_HOME" "$HELM_CACHE_HOME" "$HELM_DATA_HOME"
+
+promote-rc:
+  extends: [.release-tools]
+  stage: release
+  timeout: 45m
+  needs: []
+  environment:
+    name: stable-release
+    deployment_tier: production
+  resource_group: dsx-stable-release
+  variables:
+    RC_PROMOTION_DESTINATION_NGC_KEY: "$NGC_REGISTRY_TOKEN"
+  script:
+    - python3 .release-tools/.github/actions/promote-rc/gitlab.py promote --policy .gitlab/rc-promotion.json
+  artifacts:
+    when: always
+    paths: [promotion-result.json]
+    expire_in: 2 years
+  rules:
+    - if: '$CI_PIPELINE_SOURCE =~ /^(web|api)$/ && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true" && $RC_VERSION =~ /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-rc\.[1-9][0-9]*$/'
+      when: manual
+      allow_failure: false
