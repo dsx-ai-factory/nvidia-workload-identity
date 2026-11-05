@@ -31,7 +31,7 @@
     "api_url": "https://gitlab-master.nvidia.com/api/v4",
     "project_id": 196382,
     "repository": "dsx-ai-factory/nvidia-workload-identity",
-    "deploy_group_ids": [],
-    "approver_group_ids": []
+    "deploy_group_ids": [883211],
+    "approver_group_ids": [883211]
   }
 }

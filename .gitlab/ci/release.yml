@@ -13,6 +13,18 @@
     - |
       set +x
       set -euo pipefail
+      umask 077
+      mkdir -p "$PROMOTION_AUTH_ROOT"
+      if [[ -n "${RC_VERIFICATION_APP_PRIVATE_KEY_B64:-}" ]]; then
+        printf '%s' "$RC_VERIFICATION_APP_PRIVATE_KEY_B64" | base64 --decode > "$PROMOTION_AUTH_ROOT/verification.pem"
+        export RC_VERIFICATION_APP_PRIVATE_KEY_FILE="$PROMOTION_AUTH_ROOT/verification.pem"
+        unset RC_VERIFICATION_APP_PRIVATE_KEY_B64
+      fi
+      if [[ -n "${RC_PROMOTION_APP_PRIVATE_KEY_B64:-}" ]]; then
+        printf '%s' "$RC_PROMOTION_APP_PRIVATE_KEY_B64" | base64 --decode > "$PROMOTION_AUTH_ROOT/promotion.pem"
+        export RC_PROMOTION_APP_PRIVATE_KEY_FILE="$PROMOTION_AUTH_ROOT/promotion.pem"
+        unset RC_PROMOTION_APP_PRIVATE_KEY_B64
+      fi
       apt-get update
       apt-get install -y --no-install-recommends gh skopeo
       git init .release-tools
@@ -23,6 +35,24 @@
       npm ci --ignore-scripts --legacy-peer-deps --prefix .release-tools/.github/actions/promote-rc
   after_script:
     - rm -rf -- "$PROMOTION_AUTH_ROOT" "$HELM_CONFIG_HOME" "$HELM_CACHE_HOME" "$HELM_DATA_HOME"
+
+release-tools-check:
+  extends: [.release-tools]
+  stage: release
+  needs: []
+  script:
+    - python3 --version
+    - node --version
+    - node -e 'const [major, minor, patch] = process.versions.node.split(".").map(Number); if (major < 20 || (major === 20 && (minor < 8 || (minor === 8 && patch < 1)))) process.exit(1)'
+    - gh --version
+    - docker buildx version
+    - helm version --short
+    - ngc --version
+    - skopeo --version
+    - yq --version
+    - python3 .release-tools/.github/actions/promote-rc/gitlab.py --help
+  rules:
+    - if: '$CI_PIPELINE_SOURCE =~ /^(web|api)$/ && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true" && $RELEASE_PREFLIGHT == "true" && $RC_VERSION == ""'
 
 promote-rc:
   extends: [.release-tools]

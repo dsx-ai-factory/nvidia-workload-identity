@@ -85,6 +85,8 @@ GitLab owns NGC publication, verification, and stable promotion. Its promotion
 job creates the final GitHub tag only after verifying the promoted artifacts.
 
 Enable mirror-triggered pipelines only after this configuration is merged.
+To check the release runner tools without publishing, run a GitLab pipeline on
+`master` with `RELEASE_PREFLIGHT=true` and leave `RC_VERSION` empty.
 
 ## Contributing
 
