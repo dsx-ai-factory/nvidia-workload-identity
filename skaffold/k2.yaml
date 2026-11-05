@@ -45,6 +45,11 @@ deploy:
               - --context=kind-k2
               - --timeout=120s
               - crd/userdefinednetworks.k8s.ovn.org
+        # Multus needs OVN's CNI configuration before it can install its own.
+        # Wait here so dependent Pods use Multus for default-network selection.
+        - host:
+            command:
+              - local-e2e-tests/k2/network/wait-for-multus.sh
     releases:
       - name: ovn-kubernetes
         chartPath: ../third-party/ovn-kubernetes/helm/ovn-kubernetes
