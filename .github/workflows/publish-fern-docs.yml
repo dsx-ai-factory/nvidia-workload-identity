@@ -1,20 +1,21 @@
-# Publishes the Fern documentation site for a stable release.
+# Publishes the Fern documentation site for stable releases and manual version tags.
 #
-# Release candidates are not published. A pre-release or -rc tag ends the run
-# early. Each registered version serves frozen pages extracted from its release
-# tag, so the site shows exactly what shipped. The newest version is stamped
+# Automatic publication skips pre-releases and tags containing a hyphen. An
+# explicit manual version tag may include a pre-release or build suffix. Each
+# registered version serves frozen pages extracted from its tag. The newest is stamped
 # "Latest" at publish time. The stamp is not persisted.
 #
 # Triggers:
 #   release published: promotion creates the stable release with an App token or
 #     PAT, which starts this workflow. A release created with GITHUB_TOKEN would
 #     not.
-#   workflow_dispatch: publishes the given vX.Y.Z tag, or the latest release.
+#   workflow_dispatch: publishes the supplied version tag, or the latest stable
+#     release.
 #
-# For a stable vX.Y.Z tag the workflow also:
-#   1. Generates fern/versions/vX.Y.Z.yml from the tag's index.yml
-#   2. Adds a version entry to fern/docs.yml, sorted by semver descending
-#   3. Keeps only the MAX_VERSIONS newest versions
+# For each selected tag the workflow also:
+#   1. Generates fern/versions/<tag>.yml from the tag's index.yml
+#   2. Adds a version entry to fern/docs.yml, sorted by version descending
+#   3. Keeps the selected tag and the newest other versions, up to MAX_VERSIONS
 #   4. Opens a PR that saves the registry changes to master after publishing
 #
 # The tag must contain index.yml. Tags cut before the navigation existed cannot
@@ -31,7 +32,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Stable tag to publish, such as v1.15.0. Leave empty to use the latest release."
+        description: "Version tag to publish, such as v1.16.0-rc.5. Leave empty to use the latest stable release."
         required: false
         type: string
 
@@ -87,14 +88,19 @@ jobs:
             echo "::error::Could not determine the release tag"
             exit 1
           fi
-          # Release candidates are not published.
-          if [ "${RELEASE_PRERELEASE}" = "true" ] || [[ "$TAG" == *-* ]]; then
-            echo "::notice::Skipping ${TAG}. Only stable releases are published."
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Tag '${TAG}' is not a stable semver tag (expected vMAJOR.MINOR.PATCH)"
+          # Explicit manual inputs may select version tags with pre-release or build suffixes.
+          if [ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" ] || [ -z "${INPUT_TAG}" ]; then
+            if [ "${RELEASE_PRERELEASE}" = "true" ] || [[ "$TAG" == *-* ]]; then
+              echo "::notice::Skipping ${TAG}. Only stable releases are published automatically."
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Tag '${TAG}' is not a stable semver tag (expected vMAJOR.MINOR.PATCH)"
+              exit 1
+            fi
+          elif ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag '${TAG}' must be vMAJOR.MINOR.PATCH with an optional pre-release or build suffix"
             exit 1
           fi
           if ! git show-ref --verify --quiet "refs/tags/${TAG}"; then
@@ -148,6 +154,8 @@ jobs:
 
       - name: Prune old versions
         if: steps.resolve.outputs.publish == 'true'
+        env:
+          TAG_VERSION: ${{ steps.resolve.outputs.tag }}
         run: |
           set -eo pipefail
           TOTAL=$(yq '.products[0].versions | length' fern/docs.yml)
@@ -157,10 +165,12 @@ jobs:
             exit 0
           fi
 
-          PRUNED=$(yq ".products[0].versions[$MAX_VERSIONS:][].slug" fern/docs.yml)
-          yq -i ".products[0].versions |= .[:$MAX_VERSIONS]" fern/docs.yml
+          # Keep the selected tag even when a manual run selects an older version.
+          PRUNED=$(yq ".products[0].versions | map(select(.slug != strenv(TAG_VERSION))) | .[$((MAX_VERSIONS - 1)):][].slug" fern/docs.yml)
 
           for slug in $PRUNED; do
+            export slug
+            yq -i '.products[0].versions |= map(select(.slug != strenv(slug)))' fern/docs.yml
             rm -f "fern/versions/${slug}.yml"
             echo "Pruned $slug"
           done
@@ -244,7 +254,7 @@ jobs:
           commit-message: "docs(fern): register Fern docs ${{ steps.resolve.outputs.tag }}"
           title: "docs(fern): register Fern docs ${{ steps.resolve.outputs.tag }}"
           body: |
-            Registers `${{ steps.resolve.outputs.tag }}` in the Fern docs version registry, keeping the latest ${{ env.MAX_VERSIONS }} versions.
+            Registers `${{ steps.resolve.outputs.tag }}` in the Fern docs version registry, keeping up to ${{ env.MAX_VERSIONS }} versions including the selected tag.
 
             Generated by the `Publish Fern Docs` workflow.
           add-paths: |
