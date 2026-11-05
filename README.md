@@ -83,6 +83,9 @@ NGC publication is off by default. The artifact pipeline is loaded only when
 GitLab builds and publishes the tagged source without repeating those tests.
 GitLab owns NGC publication, verification, and stable promotion. Its promotion
 job creates the final GitHub tag only after verifying the promoted artifacts.
+Project Maintainers can run a pipeline on `master` with `RC_VERSION=X.Y.Z-rc.N`,
+then start `promote-rc` in the protected `stable-release` environment.
+No separate team approval is required.
 
 Enable mirror-triggered pipelines only after this configuration is merged.
 To check the release runner tools without publishing, run a GitLab pipeline on
