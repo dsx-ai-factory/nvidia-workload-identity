@@ -39,14 +39,14 @@ pipelines, protected RC tags, registry credentials, and the protected variable
 ### Promote an RC
 
 Promotion runs in GitLab's protected `stable-release` environment.
-Administrators must configure the allowed release groups and required approvals
+Allow project Maintainers and Owners to deploy, with no additional approval rules,
 and complete the [GitLab release setup](https://github.com/dsx-ai-factory/dsx-github-actions/blob/main/docs/gitlab-rc-promotion.md)
 before enabling it. The [promotion policy](.gitlab/rc-promotion.json) defines
 the artifact inventory and accepted RC workflow.
 
 1. Have QA validate an RC whose GitLab `verify-rc` job passed.
-2. In GitLab, run a pipeline on `master` with `RC_VERSION=X.Y.Z-rc.N`.
-3. Select the manual `promote-rc` job and have the configured reviewers approve it.
+2. As a project Maintainer or Owner, run a GitLab pipeline on `master` with `RC_VERSION=X.Y.Z-rc.N`.
+3. Start the manual `promote-rc` job. No separate team approval is required.
 4. GitLab promotes the verified artifacts, then creates `vX.Y.Z` and its release on GitHub.
 
 Images keep their tested digests. Charts update release metadata and declared
