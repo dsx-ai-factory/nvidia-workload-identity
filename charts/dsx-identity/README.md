@@ -76,6 +76,32 @@ Identity Keys defaults to two replicas. The Identity Controller uses two when
 enabled. SPIRE deployment and datastore settings pass through to the upstream
 chart.
 
+Use `identityKeys.extraVolumes` and `identityKeys.extraVolumeMounts` to mount
+existing Secrets or ConfigMaps into Identity Keys. Each referenced object must
+exist in the release namespace. Use unique volume names and mount paths that
+preserve the signing-key, active-key, NATS credentials, and SPIFFE mounts.
+
+For a private OAuth2 or NATS TLS CA, mount a PEM bundle as one file in Go's
+default trust directory. The ConfigMap must contain a `ca.crt` key:
+
+```yaml
+identityKeys:
+  extraVolumes:
+    - name: identity-ca
+      configMap:
+        name: identity-ca
+  extraVolumeMounts:
+    - name: identity-ca
+      mountPath: /etc/ssl/certs/identity-ca.pem
+      subPath: ca.crt
+      readOnly: true
+```
+
+This preserves the image's existing trust files. Recreate the Identity Keys Pods
+after changing the bundle because subPath mounts do not receive ConfigMap
+updates and Go processes may cache their root pool. The extra mounts apply to
+Identity Keys. Other consumers need their own trust mounts.
+
 The JWT issuer is independent of exchanged SPIFFE IDs, which use
 `<tenant>.<region>.<service>.<partition>`. Identities without a service label use
 `global.dsx.defaultServiceName`.

@@ -157,6 +157,9 @@ identityKeys:
   # Existing Opaque Secret. active-kid.json must contain
   # {"active_kid":"<RFC 7638 public JWK thumbprint>","alg":"<JOSE algorithm>"}.
   activeKIDSecret: dsx-identity-keys-active-kid
+  # Existing Secret or ConfigMap volumes and mounts for the Identity Keys process.
+  extraVolumes: []
+  extraVolumeMounts: []
   nats:
     enabled: true
     serverURL: ""
