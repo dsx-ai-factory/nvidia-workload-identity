@@ -21,19 +21,13 @@
         export RC_VERIFICATION_APP_PRIVATE_KEY_FILE="$PROMOTION_AUTH_ROOT/verification.pem"
         unset RC_VERIFICATION_APP_PRIVATE_KEY_B64
       fi
-      if [[ -n "${RC_PROMOTION_APP_PRIVATE_KEY_B64:-}" ]]; then
-        printf '%s' "$RC_PROMOTION_APP_PRIVATE_KEY_B64" | base64 --decode > "$PROMOTION_AUTH_ROOT/promotion.pem"
-        export RC_PROMOTION_APP_PRIVATE_KEY_FILE="$PROMOTION_AUTH_ROOT/promotion.pem"
-        unset RC_PROMOTION_APP_PRIVATE_KEY_B64
-      fi
       apt-get update
       apt-get install -y --no-install-recommends gh skopeo
       git init .release-tools
       git -C .release-tools remote add origin https://github.com/dsx-ai-factory/dsx-github-actions.git
-      git -C .release-tools fetch --depth=1 origin 8f86443b897becd89c82a4b0ac448af640d11238
+      git -C .release-tools fetch --depth=1 origin d55ac6eb7badadfcadf1197ed9a9244740dbbeb5
       git -C .release-tools checkout --detach FETCH_HEAD
-      test "$(git -C .release-tools rev-parse HEAD)" = 8f86443b897becd89c82a4b0ac448af640d11238
-      npm ci --ignore-scripts --legacy-peer-deps --prefix .release-tools/.github/actions/promote-rc
+      test "$(git -C .release-tools rev-parse HEAD)" = d55ac6eb7badadfcadf1197ed9a9244740dbbeb5
   after_script:
     - rm -rf -- "$PROMOTION_AUTH_ROOT" "$HELM_CONFIG_HOME" "$HELM_CACHE_HOME" "$HELM_DATA_HOME"
 
@@ -55,12 +49,13 @@ release-tools-check:
     - openssl version
     - python3 .release-tools/.github/actions/promote-rc/gitlab.py --help
   rules:
-    - if: '$CI_PIPELINE_SOURCE =~ /^(web|api)$/ && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true" && $RELEASE_PREFLIGHT == "true" && $RC_VERSION == ""'
+    - if: '$CI_PIPELINE_SOURCE =~ /^(web|api)$/ && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true" && $RELEASE_PREFLIGHT == "true"'
 
-promote-rc:
+promote-release:
   extends: [.release-tools]
   stage: release
   timeout: 45m
+  interruptible: false
   needs: []
   environment:
     name: stable-release
@@ -69,12 +64,10 @@ promote-rc:
   variables:
     RC_PROMOTION_DESTINATION_NGC_KEY: "$NGC_REGISTRY_TOKEN"
   script:
-    - python3 .release-tools/.github/actions/promote-rc/gitlab.py promote --policy .gitlab/rc-promotion.json
+    - python3 .release-tools/.github/actions/promote-rc/gitlab.py promote-tag --policy .gitlab/rc-promotion.json
   artifacts:
     when: always
     paths: [promotion-result.json]
     expire_in: 2 years
   rules:
-    - if: '$CI_PIPELINE_SOURCE =~ /^(web|api)$/ && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true" && $RC_VERSION =~ /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-rc\.[1-9][0-9]*$/'
-      when: manual
-      allow_failure: false
+    - if: '$GITLAB_PUBLISH_ARTIFACTS == "true" && $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_REF_PROTECTED == "true" && $CI_COMMIT_TAG =~ /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/'

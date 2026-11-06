@@ -2,7 +2,8 @@
 
 The source repository is `https://github.com/dsx-ai-factory/nvidia-workload-identity`.
 Use `gh` for pull requests, GitHub Actions, and release status. The GitLab
-mirror owns NGC publication, artifact verification, and stable promotion.
+mirror owns NGC publication, artifact verification, and stable artifact promotion.
+GitHub owns RC-to-stable tagging and release notes.
 
 ## Before starting
 
@@ -157,12 +158,12 @@ mirror owns NGC publication, artifact verification, and stable promotion.
 ## Git and pull requests
 
 - Do not post comments as the user, except to trigger CI when needed.
-- GitHub runs product CI and creates RC tags, without NGC credentials or
-  registry operations in release workflows. GitLab consumes mirrored RC tags,
-  publishes and verifies artifacts, and promotes QA-approved RCs to stable.
-- Stable promotion runs in GitLab's protected `stable-release` environment.
-  Preserve image digests and create the canonical GitHub stable tag only after
-  all promoted artifacts are verified.
+- GitHub runs product CI and creates RC tags. Its protected Promote RC workflow
+  creates the stable tag and release notes, without NGC credentials or registry
+  operations. Record the selected RC in the annotated stable tag.
+- GitLab publishes and verifies mirrored RC tags. Mirrored stable tags run
+  artifact promotion in its protected `stable-release` environment. Preserve
+  image digests and verify the promoted artifacts without changing GitHub tags.
 - Keep product validation and E2E in GitHub before RC tag creation. GitLab
   builds and publishes the tagged source and runs advisory analysis.
 - Read active GitHub Actions and release workflows before creating or updating a

@@ -13,9 +13,6 @@ variables:
   NEED_SEMANTIC_RELEASE: "false"
   SONAR_PROJECT_KEY: NBUSW_DSX_DSX_nvidia-workload-identity
   SONAR_PROJECT_VAULT_KEY: nvidia-workload-identity
-  RC_VERSION:
-    value: ""
-    description: "QA-approved X.Y.Z-rc.N to promote from the protected default branch."
   RELEASE_PREFLIGHT:
     value: "false"
     options: ["false", "true"]
@@ -28,6 +25,7 @@ workflow:
     - if: '$CI_MERGE_REQUEST_IID'
     - if: '$CI_PIPELINE_SOURCE =~ /^(web|api)$/ && $CI_COMMIT_BRANCH'
     - if: '$GITLAB_PUBLISH_ARTIFACTS == "true" && $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_REF_PROTECTED == "true" && $CI_COMMIT_TAG =~ /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-rc\.[1-9][0-9]*$/'
+    - if: '$GITLAB_PUBLISH_ARTIFACTS == "true" && $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_REF_PROTECTED == "true" && $CI_COMMIT_TAG =~ /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/'
 
 sonarqube:
   extends: [.sonarqube-scan]
