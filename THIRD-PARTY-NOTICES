@@ -4,8 +4,8 @@ Third-party notices
 
 Go dependencies
 ========================================================================
-github.com/go-jose/go-jose/v4 v4.1.4 (Apache-2.0)
-https://github.com/go-jose/go-jose/blob/v4.1.4/LICENSE
+github.com/go-jose/go-jose/v4 v4.1.9 (Apache-2.0)
+https://github.com/go-jose/go-jose/blob/v4.1.9/LICENSE
 github.com/go-openapi/jsonpointer v0.21.0 (Apache-2.0)
 https://github.com/go-openapi/jsonpointer/blob/v0.21.0/LICENSE
 github.com/go-openapi/jsonreference v0.21.0 (Apache-2.0)
@@ -18,8 +18,8 @@ github.com/google/gofuzz v1.2.0 (Apache-2.0)
 https://github.com/google/gofuzz/blob/v1.2.0/LICENSE
 github.com/google/nftables v0.3.0 (Apache-2.0)
 https://github.com/google/nftables/blob/v0.3.0/LICENSE
-github.com/minio/highwayhash v1.0.3 (Apache-2.0)
-https://github.com/minio/highwayhash/blob/v1.0.3/LICENSE
+github.com/minio/highwayhash v1.0.4 (Apache-2.0)
+https://github.com/minio/highwayhash/blob/v1.0.4/LICENSE
 google.golang.org/genproto/googleapis/api/httpbody v0.0.0-20260803160001-6ac0973c030d (Apache-2.0)
 https://github.com/googleapis/go-genproto/blob/6ac0973c030d/googleapis/api/LICENSE
 google.golang.org/genproto/googleapis/rpc v0.0.0-20260803160001-6ac0973c030d (Apache-2.0)
@@ -721,14 +721,14 @@ github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd (Apache-2.0)
 https://github.com/modern-go/concurrent/blob/bacd9c7ef1dd/LICENSE
 github.com/modern-go/reflect2 v1.0.2 (Apache-2.0)
 https://github.com/modern-go/reflect2/blob/v1.0.2/LICENSE
-github.com/nats-io/jwt/v2 v2.7.3 (Apache-2.0)
-https://github.com/nats-io/jwt/blob/v2.7.3/v2/LICENSE
-github.com/nats-io/nats-server/v2 v2.11.0 (Apache-2.0)
-https://github.com/nats-io/nats-server/blob/v2.11.0/LICENSE
-github.com/nats-io/nats.go v1.52.0 (Apache-2.0)
-https://github.com/nats-io/nats.go/blob/v1.52.0/LICENSE
-github.com/nats-io/nkeys v0.4.15 (Apache-2.0)
-https://github.com/nats-io/nkeys/blob/v0.4.15/LICENSE
+github.com/nats-io/jwt/v2 v2.8.2 (Apache-2.0)
+https://github.com/nats-io/jwt/blob/v2.8.2/v2/LICENSE
+github.com/nats-io/nats-server/v2 v2.15.2 (Apache-2.0)
+https://github.com/nats-io/nats-server/blob/v2.15.2/LICENSE
+github.com/nats-io/nats.go v1.53.1 (Apache-2.0)
+https://github.com/nats-io/nats.go/blob/v1.53.1/LICENSE
+github.com/nats-io/nkeys v0.4.16 (Apache-2.0)
+https://github.com/nats-io/nkeys/blob/v0.4.16/LICENSE
 github.com/nats-io/nuid v1.0.1 (Apache-2.0)
 https://github.com/nats-io/nuid/blob/v1.0.1/LICENSE
 github.com/oklog/run v1.0.0 (Apache-2.0)
@@ -2253,39 +2253,8 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ========================================================================
-github.com/nats-io/nats-server/v2/internal/fastrand v2.11.0 (BSD-3-Clause)
-https://github.com/nats-io/nats-server/blob/v2.11.0/internal/fastrand/LICENSE
-
-Copyright (c) 2011 The LevelDB-Go Authors. All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are
-met:
-
-   * Redistributions of source code must retain the above copyright
-notice, this list of conditions and the following disclaimer.
-   * Redistributions in binary form must reproduce the above
-copyright notice, this list of conditions and the following disclaimer
-in the documentation and/or other materials provided with the
-distribution.
-   * Neither the name of Google Inc. nor the names of its
-contributors may be used to endorse or promote products derived from
-this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-========================================================================
-github.com/klauspost/compress/s2 v1.19.1 (BSD-3-Clause)
-https://github.com/klauspost/compress/blob/v1.19.1/s2/LICENSE
+github.com/klauspost/compress/s2 v1.20.3 (BSD-3-Clause)
+https://github.com/klauspost/compress/blob/v1.20.3/s2/LICENSE
 
 Copyright (c) 2011 The Snappy-Go Authors. All rights reserved.
 Copyright (c) 2019 Klaus Post. All rights reserved.
@@ -2419,8 +2388,8 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ========================================================================
-github.com/go-jose/go-jose/v4/json v4.1.4 (BSD-3-Clause)
-https://github.com/go-jose/go-jose/blob/v4.1.4/json/LICENSE
+github.com/go-jose/go-jose/v4/json v4.1.9 (BSD-3-Clause)
+https://github.com/go-jose/go-jose/blob/v4.1.9/json/LICENSE
 k8s.io/utils/internal/third_party/forked/golang v0.0.0-20241104100929-3ea5e8cea738 (BSD-3-Clause)
 https://github.com/kubernetes/utils/blob/3ea5e8cea738/internal/third_party/forked/golang/LICENSE
 k8s.io/utils/internal/third_party/forked/golang/net v0.0.0-20251002143259-bc988d571ff4 (BSD-3-Clause)
@@ -2455,12 +2424,12 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ========================================================================
-github.com/klauspost/compress v1.19.1 (Apache-2.0)
-https://github.com/klauspost/compress/blob/v1.19.1/LICENSE
-github.com/klauspost/compress v1.19.1 (BSD-3-Clause)
-https://github.com/klauspost/compress/blob/v1.19.1/LICENSE
-github.com/klauspost/compress v1.19.1 (MIT)
-https://github.com/klauspost/compress/blob/v1.19.1/LICENSE
+github.com/klauspost/compress v1.20.3 (Apache-2.0)
+https://github.com/klauspost/compress/blob/v1.20.3/LICENSE
+github.com/klauspost/compress v1.20.3 (BSD-3-Clause)
+https://github.com/klauspost/compress/blob/v1.20.3/LICENSE
+github.com/klauspost/compress v1.20.3 (MIT)
+https://github.com/klauspost/compress/blob/v1.20.3/LICENSE
 
 Copyright (c) 2012 The Go Authors. All rights reserved.
 Copyright (c) 2019 Klaus Post. All rights reserved.
@@ -3909,28 +3878,26 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ========================================================================
-golang.org/x/crypto v0.57.0 (BSD-3-Clause)
-https://cs.opensource.google/go/x/crypto/+/v0.57.0:LICENSE
+golang.org/x/crypto v0.58.0 (BSD-3-Clause)
+https://cs.opensource.google/go/x/crypto/+/v0.58.0:LICENSE
 golang.org/x/net v0.60.0 (BSD-3-Clause)
 https://cs.opensource.google/go/x/net/+/v0.60.0:LICENSE
 golang.org/x/net v0.62.0 (BSD-3-Clause)
 https://cs.opensource.google/go/x/net/+/v0.62.0:LICENSE
 golang.org/x/oauth2 v0.36.0 (BSD-3-Clause)
 https://cs.opensource.google/go/x/oauth2/+/v0.36.0:LICENSE
-golang.org/x/sync v0.23.0 (BSD-3-Clause)
-https://cs.opensource.google/go/x/sync/+/v0.23.0:LICENSE
-golang.org/x/sys v0.48.0 (BSD-3-Clause)
-https://cs.opensource.google/go/x/sys/+/v0.48.0:LICENSE
+golang.org/x/sync v0.24.0 (BSD-3-Clause)
+https://cs.opensource.google/go/x/sync/+/v0.24.0:LICENSE
+golang.org/x/sys v0.49.0 (BSD-3-Clause)
+https://cs.opensource.google/go/x/sys/+/v0.49.0:LICENSE
 golang.org/x/sys/unix v0.49.0 (BSD-3-Clause)
 https://cs.opensource.google/go/x/sys/+/v0.49.0:LICENSE
-golang.org/x/term v0.46.0 (BSD-3-Clause)
-https://cs.opensource.google/go/x/term/+/v0.46.0:LICENSE
-golang.org/x/text v0.42.0 (BSD-3-Clause)
-https://cs.opensource.google/go/x/text/+/v0.42.0:LICENSE
+golang.org/x/term v0.47.0 (BSD-3-Clause)
+https://cs.opensource.google/go/x/term/+/v0.47.0:LICENSE
 golang.org/x/text v0.43.0 (BSD-3-Clause)
 https://cs.opensource.google/go/x/text/+/v0.43.0:LICENSE
-golang.org/x/time/rate v0.12.0 (BSD-3-Clause)
-https://cs.opensource.google/go/x/time/+/v0.12.0:LICENSE
+golang.org/x/time/rate v0.16.0 (BSD-3-Clause)
+https://cs.opensource.google/go/x/time/+/v0.16.0:LICENSE
 
 Copyright 2009 The Go Authors.
 
@@ -4399,6 +4366,32 @@ https://github.com/jellydator/ttlcache/blob/v3.4.1/LICENSE
 MIT License
 
 Copyright (c) 2022 Jellydator
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+========================================================================
+github.com/antithesishq/antithesis-sdk-go/assert v0.8.0-default-no-op (MIT)
+https://github.com/antithesishq/antithesis-sdk-go/blob/v0.8.0-default-no-op/LICENSE
+
+MIT License
+
+Copyright (c) 2024 Antithesis
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
