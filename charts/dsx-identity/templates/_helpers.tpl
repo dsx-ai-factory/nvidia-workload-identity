@@ -72,7 +72,7 @@ stack owns both referenced resources, as required by its onboarding guide.
 {{- end -}}
 
 {{/*
-Build the environment for one first-party process. Chart-owned
+Build the standard OTel environment for one first-party process. Chart-owned
 scrape targets use Prometheus so their bind address and port cannot drift from
 the Service. Injected processes do not open metrics listeners in shared Pods.
 */}}
@@ -81,7 +81,7 @@ the Service. Injected processes do not open metrics listeners in shared Pods.
 {{- $defaults := dict -}}
 {{- $_ := set $defaults "OTEL_SERVICE_NAME" .serviceName -}}
 {{- $_ := set $defaults "OTEL_METRICS_EXPORTER" .metricsExporter -}}
-{{- /* User environment settings override defaults before chart-owned metrics. */ -}}
+{{- /* Standard OTel settings override defaults before chart-owned metrics. */ -}}
 {{- $environment := mergeOverwrite $defaults (deepCopy $root.Values.observability.env) -}}
 {{- if eq .metricsExporter "prometheus" -}}
 {{- $_ := set $environment "OTEL_METRICS_EXPORTER" "prometheus" -}}

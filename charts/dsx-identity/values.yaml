@@ -109,7 +109,7 @@ spire:
 observability:
   # One level configures every chart-owned first-party Go process.
   logLevel: info
-  # Environment settings shared by first-party applications.
+  # Standard OTel environment settings shared by first-party applications.
   # IPv4 loopback avoids the unsupported IPv6 localhost resolved by the SDK.
   env:
     OTEL_EXPORTER_OTLP_ENDPOINT: http://127.0.0.1:4318
