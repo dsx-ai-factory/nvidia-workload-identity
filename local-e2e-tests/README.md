@@ -45,13 +45,13 @@ Each therefore runs an official SPIRE agent DaemonSet constrained to its worker
 as the external host-agent fixture. The ordinary shard agent remains on the
 control-plane node as the emulated external DPU boundary. One SPIFFE CSI driver
 exposes each node's canonical Workload API socket. The worker agent's
-`dsx_imds` plugin obtains a DSX JWT from DSX IMDS and submits it to the
+`dsx_imds` plugin obtains a DSX JWT-SVID from DSX IMDS and submits it to the
 repository-owned `dsx_imds` server plugin for node attestation. k2 then reuses
 that worker agent for its KubeVirt VM path.
 
 The local fixture exposes the real DSX IMDS implementation directly at the
 external intercept and passthrough boundary. E2E sends the IMDS request,
-exchanges the selected SPIRE JWT-SVID, and uses the returned DSX JWT for
+exchanges the selected SPIRE JWT-SVID, and uses the returned DSX JWT-SVID for
 `dsx_imds` node attestation. It does not test physical link-local routing or
 NICo integration.
 
@@ -69,12 +69,12 @@ flowchart TB
   DPUAgent -->|"Workload API socket"| CSI
   CSI -->|"host SPIRE JWT-SVID"| DPUMetadata
   DPUMetadata -->|"direct RFC 8693 exchange"| IdentityKeys
-  IdentityKeys -->|"host DSX JWT"| DPUMetadata
+  IdentityKeys -->|"host DSX JWT-SVID"| DPUMetadata
   Agent -->|"invokes"| Plugin
   Plugin -->|"IMDS identity request"| DPUMetadata
-  DPUMetadata -->|"host DSX JWT"| Plugin
+  DPUMetadata -->|"host DSX JWT-SVID"| Plugin
   Plugin -->|"attestation data"| Agent
-  Agent -->|"submit DSX JWT"| Server
+  Agent -->|"submit DSX JWT-SVID"| Server
   Server -->|"node SVID"| Agent
 
   DPUAgent["Ordinary k2 SPIRE agent process<br/>E2E DPU boundary"]
@@ -164,7 +164,7 @@ network modes.
 ## Cross-shard OpenBao validation
 
 The local E2E topology deploys OpenBao in k1 as an external relying party. A
-VM DSX JWT issued in k2 is accepted because the k2 NVIDIA Workload Identity
+VM DSX JWT-SVID issued in k2 is accepted because the k2 NVIDIA Workload Identity
 Keys public key propagates through the Event Bus and appears in the k1 NVIDIA
 Workload Identity Keys aggregate JWKS.
 
@@ -175,7 +175,7 @@ sequenceDiagram
   participant Bao as OpenBao Pod in k1
   participant JWKS as k1 NVIDIA Workload Identity Keys Pod<br/>aggregate JWKS endpoint
 
-  Test->>Gateway: JWT CEL login with k2 VM DSX JWT
+  Test->>Gateway: JWT CEL login with k2 VM DSX JWT-SVID
   Gateway->>Bao: Forward login request
   Bao->>JWKS: Fetch aggregate JWKS
   JWKS-->>Bao: Public keyset including the k2 kid

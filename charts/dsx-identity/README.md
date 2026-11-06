@@ -24,9 +24,9 @@ global:
   # Tenant encoded in identities for operator-owned DPUs, workers, and Pods.
   operatorTenant: operator-1
   dsx:
-    # Issuer placed in exchanged DSX JWTs.
+    # Issuer placed in exchanged DSX JWT-SVIDs.
     jwtIssuer: https://identity.example.com
-    # Deployment coordinates encoded in exchanged DSX JWT trust domains.
+    # Deployment coordinates encoded in exchanged DSX JWT-SVID trust domains.
     region: region-1
     partition: example.com
     # Service used when a source has no explicit service label.
@@ -46,6 +46,7 @@ spire:
         # Must match global.operatorTenant for operator Pod registrations.
         - name: OPERATOR_TENANT
           value: operator-1
+      parentIDTemplate: 'spiffe://{{ .TrustDomain }}/spire/agent/dsx_imds/tenant/$OPERATOR_TENANT/bm/{{ .NodeMeta.Name }}'
 
 identityKeys:
   # Stable, unique publisher ID within the shared NATS KV bucket.
@@ -71,6 +72,10 @@ identityKeys:
       credentialsKey: credentials.json
       issuerURL: https://auth.example.com
 ```
+
+The controller-manager's `OPERATOR_TENANT` must equal `global.operatorTenant`.
+Changing both values updates the SPIRE Pod template and rolls the StatefulSet
+without a restart hook.
 
 Identity Keys defaults to two replicas. The Identity Controller uses two when
 enabled. SPIRE deployment and datastore settings pass through to the upstream
@@ -122,7 +127,7 @@ spire:
           plugin_cmd: /opt/spire/plugins/dsx-imds-node-attestor-server
           plugin_checksum: ""
           plugin_data:
-            # DSX JWT issuer accepted for host bootstrap attestation.
+            # DSX JWT-SVID issuer accepted for host bootstrap attestation.
             issuer: https://identity.example.com
             # Audience required on the bootstrap token.
             audience: spiffe://shard.example.com/spire/server

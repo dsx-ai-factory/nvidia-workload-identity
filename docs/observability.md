@@ -52,7 +52,7 @@ metadata:
 
 The service label selects SPIRE registration. The injection annotation selects
 the token fetcher through native admission policy. The audience annotation names
-the relying party for the requested SPIRE JWT-SVID and exchanged DSX JWT.
+the relying party for the requested SPIRE JWT-SVID and exchanged DSX JWT-SVID.
 
 For KubeVirt IMDS injection, put them on the VM Pod template:
 

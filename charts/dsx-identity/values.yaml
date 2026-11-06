@@ -3,9 +3,9 @@
 global:
   imageTag: ""
   dsx:
-    # HTTPS issuer placed in exchanged DSX JWTs and accepted for host attestation.
+    # HTTPS issuer placed in exchanged DSX JWT-SVIDs and accepted for host attestation.
     jwtIssuer: ""
-    # Deployment coordinates encoded in exchanged DSX JWT trust domains.
+    # Deployment coordinates encoded in exchanged DSX JWT-SVID trust domains.
     region: ""
     partition: ""
     # Default service name for chart-owned and controller-managed identities.
@@ -144,7 +144,7 @@ identityKeys:
     port: 8080
     nodePort: null
   jwksURL: ""
-  # Covers DSX JWT validity. Instances refresh each KV entry four times per TTL.
+  # Covers DSX JWT-SVID validity. Instances refresh each KV entry four times per TTL.
   publicKeyTTL: 10m
   # Polling covers file changes missed by filesystem notifications.
   fileWatchPollInterval: 30s

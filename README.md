@@ -16,9 +16,9 @@ across data halls.
 
 ## Documentation
 
-- [Overview](docs/overview.md) covers the user guide, component list, SPIRE upgrades, and deployment.
+- [Overview](docs/overview.md) describes hardware-backed identity, SVID delivery, and deployment.
 - [Architecture](docs/architecture.md) describes the identity hierarchy and identity delivery.
-- [Identity contract](docs/identity-contract.md) defines DSX JWT subjects and the host and VM flows.
+- [Identity contract](docs/identity-contract.md) defines DSX JWT-SVID subjects and the host and VM flows.
 - [Observability](docs/observability.md) covers logs, metrics, and traces.
 
 ## Release candidates

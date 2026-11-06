@@ -1,7 +1,7 @@
 # DSX IMDS NodeAttestor Server Plugin
 
 `dsx-imds-node-attestor-server` is the server half of SPIRE's custom
-`dsx_imds` NodeAttestor. It verifies the host DSX JWT received from the agent
+`dsx_imds` NodeAttestor. It verifies the host DSX JWT-SVID received from the agent
 plugin and returns the DSX subject as a reattestable SPIRE agent ID.
 
 ```mermaid
@@ -18,15 +18,15 @@ sequenceDiagram
     DI->>DA: Request host SPIRE JWT-SVID by dsx-imds hint
     DA-->>DI: Local host SPIRE JWT-SVID
     DI->>EX: NVIDIA Workload Identity Keys local SPIRE JWT-SVID
-    EX-->>DI: Host DSX JWT
+    EX-->>DI: Host DSX JWT-SVID
     HA->>AP: Begin node attestation
     AP->>NI: GET link-local identity with Metadata: true
     NI->>DI: Pass through identity request
-    DI-->>NI: Host DSX JWT
-    NI-->>AP: Host DSX JWT
-    AP-->>HA: Host DSX JWT attestation payload
+    DI-->>NI: Host DSX JWT-SVID
+    NI-->>AP: Host DSX JWT-SVID
+    AP-->>HA: Host DSX JWT-SVID attestation payload
     HA->>SS: Send attestation payload
-    SS->>SP: Verify host DSX JWT
+    SS->>SP: Verify host DSX JWT-SVID
     SP->>JWKS: Load flat aggregate public keys
     SP->>SP: Verify signature, audience, issuer, and subject
     SP-->>SS: dsx_imds agent SPIFFE ID

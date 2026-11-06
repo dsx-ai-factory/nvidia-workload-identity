@@ -1,13 +1,13 @@
 # DSX IMDS NodeAttestor Agent Plugin
 
 `dsx-imds-node-attestor-agent` is the agent half of SPIRE's custom `dsx_imds`
-NodeAttestor. It requests a host DSX JWT through the paired DPU intercept and
+NodeAttestor. It requests a host DSX JWT-SVID through the paired DPU intercept and
 NICo IMDS passthrough, then sends that token as the SPIRE
 node-attestation payload.
 
 The external DPU establishes the first local SPIRE identities through
 `dpu_hw`. DSX IMDS selects the host identity beneath that DPU agent and
-exchanges it for the DSX JWT used by this plugin. The bare-metal host agent must
+exchanges it for the DSX JWT-SVID used by this plugin. The bare-metal host agent must
 complete `dsx_imds` node attestation before it can serve host processes through
 the Unix WorkloadAttestor or provide identities to VMs.
 
@@ -32,8 +32,8 @@ flowchart TB
 
   DPUAgent -->|"dpu_hw node attestation"| DPUIdentities
   DPUIdentities -->|"host SPIRE JWT-SVID"| DSXIMDS
-  DSXIMDS -->|"exchange for host DSX JWT"| IdentityKeys
-  IdentityKeys -->|"host DSX JWT"| DSXIMDS
+  DSXIMDS -->|"exchange for host DSX JWT-SVID"| IdentityKeys
+  IdentityKeys -->|"host DSX JWT-SVID"| DSXIMDS
   HostAgent <-->|"link-local IMDS"| NICoIMDS
   NICoIMDS <-->|"identity passthrough"| DSXIMDS
   HostAgent -->|"dsx_imds node attestation"| HostIdentities
@@ -55,15 +55,15 @@ sequenceDiagram
     DI->>DA: Request host SPIRE JWT-SVID by dsx-imds hint
     DA-->>DI: Local host SPIRE JWT-SVID
     DI->>EX: NVIDIA Workload Identity Keys local SPIRE JWT-SVID
-    EX-->>DI: Host DSX JWT
+    EX-->>DI: Host DSX JWT-SVID
     HA->>AP: Begin node attestation
     AP->>NI: GET link-local identity with Metadata: true
     NI->>DI: Pass through identity request
-    DI-->>NI: Host DSX JWT
-    NI-->>AP: Host DSX JWT
+    DI-->>NI: Host DSX JWT-SVID
+    NI-->>AP: Host DSX JWT-SVID
     AP-->>HA: Attestation payload
     HA->>SS: Send attestation payload
-    SS->>SP: Verify host DSX JWT
+    SS->>SP: Verify host DSX JWT-SVID
     SP-->>SS: dsx_imds agent SPIFFE ID
 ```
 

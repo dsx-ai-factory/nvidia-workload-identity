@@ -5,7 +5,7 @@ each identity shard. It validates only local SPIRE JWT-SVIDs, transforms their
 SPIFFE subject to the NVIDIA Workload Identity contract, preserves the
 registered `aud`, `exp`, `iat`, `jti`, and `nbf` claims, writes the subject
 components as [claims](#token-claims), and signs the
-exchanged DSX JWT with the shard's active key. SPIRE registration determines
+exchanged DSX JWT-SVID with the shard's active key. SPIRE registration determines
 the tenant in the local subject, and NVIDIA Workload Identity Keys preserves
 it while validating the common identity grammar. It obtains local JWT
 verification bundles through the node-local SPIFFE Workload API.
@@ -51,7 +51,7 @@ JWKS endpoint for the shard that issued its tokens.
 
 ## Token claims
 
-The exchanged DSX JWT carries each component of its subject as a claim, so
+The exchanged DSX JWT-SVID carries each component of its subject as a claim, so
 relying parties can authorize on claims without parsing `sub`. Each value is
 the component encoded into `sub`. For
 `spiffe://operator-1.ds9.dsx.nvid.id/bm/worker-1/pod/<pod-uid>/role/web`:
@@ -174,7 +174,7 @@ The exchange endpoint is intentionally unauthenticated because the submitted
 local SPIRE JWT-SVID is the credential being exchanged.
 
 The exchange form requires `grant_type`, `subject_token`, and
-`subject_token_type`. It accepts the optional `requested_token_type`, caps
+`subject_token_type`. It accepts the optional `requested_token_type` and caps
 request bodies at 1 MiB. Audience is preserved from the validated SVID. NVIDIA
 Workload Identity Keys does not accept an audience override or apply a
 relying-party audience allowlist. Error responses do not expose parser or

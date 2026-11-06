@@ -3,7 +3,7 @@
 - Kubernetes and DPUService Pods use the
   [token-fetcher sidecar](token-fetcher/README.md).
 - Paired bare-metal hosts and KubeVirt VMs use DSX IMDS.
-- Relying parties validate DSX JWTs with the NVIDIA Workload Identity Keys JWKS endpoint.
+- Relying parties validate DSX JWT-SVIDs with the NVIDIA Workload Identity Keys JWKS endpoint.
 
 ## Acquire a token from DSX IMDS
 
@@ -44,7 +44,7 @@ Example response:
 
 ```json
 {
-  "token": "<dsx-jwt>",
+  "token": "<dsx-jwt-svid>",
   "expires_in": 300,
   "spiffe_id": "spiffe://tenant-2.ds9.dsx.nvid.id/vm/example-vm"
 }
@@ -63,7 +63,7 @@ curl --fail-with-body --silent --show-error --noproxy '*' --get \
 Plain-text response:
 
 ```text
-<dsx-jwt>
+<dsx-jwt-svid>
 ```
 
 The bare-metal host path is a node-attestation contract, not a generic
@@ -71,19 +71,19 @@ host-process identity contract. See the [DSX IMDS
 API](../cmd/metadata-service/README.md#http-api) for the versioned endpoint and
 plain-text response option.
 
-## Consume a DSX JWT
+## Consume a DSX JWT-SVID
 
 Use the returned `token` value as the relying party bearer credential:
 
 ```bash
 curl --fail-with-body \
-  --header 'Authorization: Bearer <dsx-jwt>' \
+  --header 'Authorization: Bearer <dsx-jwt-svid>' \
   https://relying-party.example/v1/resource
 ```
 
 Do not log or persist the token.
 
-## Validate a DSX JWT
+## Validate a DSX JWT-SVID
 
 Example request:
 

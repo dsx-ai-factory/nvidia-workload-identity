@@ -7,7 +7,7 @@ annotated DPU service Pods.
 
 - Kubernetes 1.36 or later
 - A `csi.spiffe.io` driver backed by the DPU cluster SPIRE agent
-- A NVIDIA Workload Identity Keys exchange endpoint reachable from DPU service Pods
+- An NVIDIA Workload Identity Keys exchange endpoint reachable from DPU service Pods
 
 ## Configuration
 
@@ -29,7 +29,7 @@ metadata:
 ```
 
 The audience annotation is required on every selected Pod. It names the relying
-party for the local SPIRE JWT-SVID and is preserved in the exchanged DSX JWT.
+party for the local SPIRE JWT-SVID and is preserved in the exchanged DSX JWT-SVID.
 
 It adds the token fetcher as a native sidecar, mounts the SPIFFE Workload API
 only into that sidecar, and mounts the exchanged token read-only into every

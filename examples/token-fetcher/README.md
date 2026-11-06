@@ -1,7 +1,7 @@
 # Token-fetcher user guide
 
 The injected `dsx-token-fetcher` sidecar exchanges the workload's local SPIRE
-JWT-SVID for a DSX JWT and refreshes the token file before expiry. NVIDIA
+JWT-SVID for a DSX JWT-SVID and refreshes the token file before expiry. NVIDIA
 Workload Identity must have Pod token fetching enabled.
 
 ## Kubernetes Pods
@@ -81,4 +81,4 @@ loop:
 
 The fetcher preserves an unexpired token after a failed refresh and removes it
 after expiry. Treat an empty cache as an authentication failure. See [Consume a
-DSX JWT](../README.md#consume-a-dsx-jwt) to use the token.
+DSX JWT-SVID](../README.md#consume-a-dsx-jwt-svid) to use the token.
