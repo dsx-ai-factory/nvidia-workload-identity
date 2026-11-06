@@ -38,20 +38,23 @@ pipelines, protected RC tags, registry credentials, and the protected variable
 
 ### Promote an RC
 
-Promotion runs in GitLab's protected `stable-release` environment.
-Allow project Maintainers and Owners to deploy, with no additional approval rules,
-and complete the [GitLab release setup](https://github.com/dsx-ai-factory/dsx-github-actions/blob/main/docs/gitlab-rc-promotion.md)
-before enabling it. The [promotion policy](.gitlab/rc-promotion.json) defines
-the artifact inventory and accepted RC workflow.
-
 1. Have QA validate an RC whose GitLab `verify-rc` job passed.
-2. As a project Maintainer or Owner, run a GitLab pipeline on `master` with `RC_VERSION=X.Y.Z-rc.N`.
-3. Start the manual `promote-rc` job. No separate team approval is required.
-4. GitLab promotes the verified artifacts, then creates `vX.Y.Z` and its release on GitHub.
+2. Open GitHub Actions > Promote RC on `master` and enter `X.Y.Z-rc.N`.
+3. An authorized reviewer approves the `stable-release` deployment. GitHub creates
+   `vX.Y.Z` at the RC commit and publishes its release notes, without accessing NGC.
+4. The mirrored tag starts GitLab's `promote-release` job, which promotes and
+   verifies the RC artifacts. Wait for this job to pass before using the stable artifacts.
+
+Complete the [release setup](https://github.com/dsx-ai-factory/dsx-github-actions/blob/main/docs/gitlab-rc-promotion.md#github-tags-gitlab-promotes)
+first. GitHub keeps the protected approval gate. GitLab needs protected stable
+tags and a mirror user allowed to deploy to its `stable-release` environment.
+The [promotion policy](.gitlab/rc-promotion.json) defines the artifact inventory
+and accepted RC workflow.
 
 Images keep their tested digests. Charts update release metadata and declared
 image tags while preserving templates and vendored dependencies.
 Missing verification records or conflicting stable artifacts stop promotion.
+Retry the failed job for the same tag. Do not move the tag to another RC.
 
 ## CI
 
@@ -81,12 +84,12 @@ NGC publication is off by default. The artifact pipeline is loaded only when
 `GITLAB_PUBLISH_ARTIFACTS=true` and the pipeline targets a protected
 `vX.Y.Z-rc.N` tag. GitHub validation and E2E must pass before creating the tag.
 GitLab builds and publishes the tagged source without repeating those tests.
-GitLab owns NGC publication, verification, and stable promotion. Its promotion
-job creates the final GitHub tag only after verifying the promoted artifacts.
+Protected `vX.Y.Z` tags run artifact promotion instead of rebuilding. GitHub owns
+release tags and notes. GitLab owns NGC publication and verification.
 
 Enable mirror-triggered pipelines only after this configuration is merged.
 To check the release runner tools without publishing, run a GitLab pipeline on
-`master` with `RELEASE_PREFLIGHT=true` and leave `RC_VERSION` empty.
+`master` with `RELEASE_PREFLIGHT=true`.
 
 ## Contributing
 
