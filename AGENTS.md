@@ -2,7 +2,8 @@
 
 The source repository is `https://github.com/dsx-ai-factory/nvidia-workload-identity`.
 Use `gh` for pull requests, GitHub Actions, and release status. The GitLab
-mirror runs analysis and can publish artifacts from protected RC tags.
+mirror owns NGC publication, artifact verification, and stable artifact promotion.
+GitHub owns RC-to-stable tagging and release notes.
 
 ## Before starting
 
@@ -45,7 +46,7 @@ mirror runs analysis and can publish artifacts from protected RC tags.
   Adding or changing an ordinary test does not require a README update.
 - Keep current documentation in these READMEs and in `docs/`, which holds the
   operator pages the root README links to. Fern publishes operator documentation
-  only, through the navigation in `index.yml` and the config in `fern/`. Keep
+  only, through `index.yml` and `.github/fern-docs.yml`. Keep
   developer material such as releases, CI, and E2E out of the Fern navigation.
   Do not add standalone implementation plans unless the user explicitly requests one.
 - Prevent documentation drift. When a change affects behavior, configuration, an
@@ -87,8 +88,8 @@ mirror runs analysis and can publish artifacts from protected RC tags.
 - Use repository-pinned tools and dependencies. Pin container images and never
   use `latest`.
 - Upgrade only the packages required by the change.
-- Pin the Fern CLI to the same version in `fern/fern.config.json` and in every
-  `fern-api@` install in `.github/workflows/`.
+- Keep `fern_cli_version` consistent across the shared Fern workflow callers.
+  The shared action generates `fern/fern.config.json` from the workflow inputs.
 - Use the pinned Go toolchain, standard formatting, structured `slog` logging,
   context cancellation, and the shared telemetry package.
 - Never call `os.Exit` outside `main`. Keep cleanup in an error-returning function
@@ -157,8 +158,14 @@ mirror runs analysis and can publish artifacts from protected RC tags.
 ## Git and pull requests
 
 - Do not post comments as the user, except to trigger CI when needed.
-- GitHub creates release tags. GitLab consumes mirrored tags and does not create
-  or push release tags.
+- GitHub runs product CI and creates RC tags. Its protected Promote RC workflow
+  creates the stable tag and release notes, without NGC credentials or registry
+  operations. Record the selected RC in the annotated stable tag.
+- GitLab publishes and verifies mirrored RC tags. Mirrored stable tags run
+  artifact promotion in its protected `stable-release` environment. Preserve
+  image digests and verify the promoted artifacts without changing GitHub tags.
+- Keep product validation and E2E in GitHub before RC tag creation. GitLab
+  builds and publishes the tagged source and runs advisory analysis.
 - Read active GitHub Actions and release workflows before creating or updating a
   pull request. Search for an equivalent open pull request or branch first.
 - Use a `feat/` or `fix/` branch for release-producing changes.

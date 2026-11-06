@@ -4,27 +4,21 @@ on:
   workflow_dispatch:
     inputs:
       rc_version:
-        description: QA-approved RC version (X.Y.Z-rc.N)
+        description: QA-approved X.Y.Z-rc.N version
         required: true
         type: string
 
 permissions:
   contents: read
+  actions: read
+  deployments: read
 
 jobs:
   promote:
-    if: >-
-      github.repository == 'dsx-ai-factory/nvidia-workload-identity' &&
-      github.ref == 'refs/heads/master' &&
-      vars.DSX_RELEASE_MODE == 'rc-promotion'
-    permissions:
-      contents: read
-      actions: read
-      deployments: read
-    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/promote-rc.yml@29a2dd8dfd1d9ba54cc5ca756e0a708596fe61a6
+    if: github.repository == 'dsx-ai-factory/nvidia-workload-identity'
+    uses: dsx-ai-factory/dsx-github-actions/.github/workflows/promote-rc-tag.yml@d55ac6eb7badadfcadf1197ed9a9244740dbbeb5
     with:
       rc_version: ${{ inputs.rc_version }}
+      policy_path: .gitlab/rc-promotion.json
     secrets:
       RC_PROMOTION_APP_PRIVATE_KEY: ${{ secrets.RC_PROMOTION_APP_PRIVATE_KEY }}
-      RC_PROMOTION_SOURCE_NGC_KEY: ${{ secrets.RC_PROMOTION_SOURCE_NGC_KEY }}
-      RC_PROMOTION_DESTINATION_NGC_KEY: ${{ secrets.RC_PROMOTION_DESTINATION_NGC_KEY }}
