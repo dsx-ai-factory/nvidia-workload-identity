@@ -136,6 +136,9 @@ spec:
               mountPath: /run/secrets/dsx-identity-keys-nats
               readOnly: true
             {{- end }}
+            {{- with .Values.identityKeys.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           # NVIDIA Workload Identity Keys owns its Pod ports, including the metrics listener.
           env:
             - name: POD_NAME
@@ -189,6 +192,9 @@ spec:
             items:
               - key: {{ $natsCredentialsKey }}
                 path: credentials.json
+        {{- end }}
+        {{- with .Values.identityKeys.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
         {{- end }}
 ---
 apiVersion: policy/v1

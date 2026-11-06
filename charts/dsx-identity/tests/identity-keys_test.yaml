@@ -18,6 +18,14 @@ tests:
           path: spec.template.spec.containers[0].image
           value: nvcr.io/0837451325059433/components-dev/dsx-identity-keys:0.1.0
         documentIndex: 0
+      - lengthEqual:
+          path: spec.template.spec.volumes
+          count: 3
+        documentIndex: 0
+      - lengthEqual:
+          path: spec.template.spec.containers[0].volumeMounts
+          count: 3
+        documentIndex: 0
       - isKind:
           of: PodDisruptionBudget
         documentIndex: 1
@@ -152,6 +160,88 @@ tests:
       - equal:
           path: spec.template.spec.volumes[3].secret.items[0].key
           value: oauth.json
+
+  - it: mounts an existing CA Secret while preserving OAuth and signing volumes
+    set:
+      identityKeys.nats.auth:
+        mode: oauth2
+        credentialsSecret: nats-oauth
+        issuerURL: https://oauth.example.com
+      identityKeys.extraVolumes:
+        - name: identity-ca
+          secret:
+            secretName: identity-ca
+            items:
+              - key: ca.crt
+                path: ca.crt
+      identityKeys.extraVolumeMounts:
+        - name: identity-ca
+          mountPath: /etc/ssl/certs/identity-ca.pem
+          subPath: ca.crt
+          readOnly: true
+    template: templates/identity-keys-deployment.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].name
+          value: dsx-identity-keys
+      - equal:
+          path: spec.template.spec.volumes[4].secret.secretName
+          value: identity-ca
+      - equal:
+          path: spec.template.spec.volumes[4].secret.items[0].path
+          value: ca.crt
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: identity-ca
+            mountPath: /etc/ssl/certs/identity-ca.pem
+            subPath: ca.crt
+            readOnly: true
+      - equal:
+          path: spec.template.spec.volumes[0].csi.driver
+          value: csi.spiffe.io
+      - equal:
+          path: spec.template.spec.volumes[1].secret.secretName
+          value: dsx-identity-keys-signing-keyset
+      - equal:
+          path: spec.template.spec.volumes[2].secret.secretName
+          value: dsx-identity-keys-active-kid
+      - equal:
+          path: spec.template.spec.volumes[3].secret.secretName
+          value: nats-oauth
+
+  - it: mounts an existing CA ConfigMap with NATS disabled
+    set:
+      identityKeys.nats.enabled: false
+      identityKeys.extraVolumes:
+        - name: combined-ca
+          configMap:
+            name: combined-ca
+      identityKeys.extraVolumeMounts:
+        - name: combined-ca
+          mountPath: /etc/ssl/certs/identity-ca.pem
+          subPath: ca.crt
+          readOnly: true
+    template: templates/identity-keys-deployment.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[3].configMap.name
+          value: combined-ca
+      - lengthEqual:
+          path: spec.template.spec.volumes
+          count: 4
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: combined-ca
+            mountPath: /etc/ssl/certs/identity-ca.pem
+            subPath: ca.crt
+            readOnly: true
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --disable-nats
 
   - it: rejects unsupported NATS authentication modes
     set:
