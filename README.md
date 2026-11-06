@@ -1,17 +1,18 @@
 # NVIDIA Workload Identity
 
-NVIDIA Workload Identity turns shard-local SPIRE identities into DSX JWTs that
-relying parties can validate across shards. An identity shard contains an
-independent SPIRE deployment and a co-located NVIDIA Workload Identity Keys
-deployment. NVIDIA Workload Identity Keys validates only its local SPIRE
-JWT-SVIDs, issues DSX JWTs, and distributes its public signing keys through
-the external DSX Event Bus.
+NVIDIA Workload Identity provides hardware-backed identities for bare-metal
+hosts, KubeVirt VMs, Kubernetes Pods, and workloads in Kata Containers. Each
+workload receives a unique identity that relying parties use to authenticate it.
 
-There is no SPIRE federation between shards. Cross-shard trust starts after
-token exchange, when another shard or relying party validates a DSX JWT with
-the aggregate public keys served by any NVIDIA Workload Identity Keys
-instance.
+Identities build from the DPU running in zero trust mode to its paired bare-
+metal host, then from the host to its VMs and Pods, including Pods running in
+Kata Containers.
 
+DSX data halls run separate SPIRE deployments. SPIRE attests nodes and workloads
+and issues signed identity credentials called SVIDs. NVIDIA Workload Identity
+exchanges these local SPIRE JWT-SVIDs for DSX JWT-SVIDs and shares public
+signing keys between data halls, so relying parties can authenticate workloads
+across data halls.
 
 ## Documentation
 
