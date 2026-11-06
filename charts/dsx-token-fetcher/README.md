@@ -6,7 +6,7 @@ annotated DPU service Pods.
 ## Prerequisites
 
 - Kubernetes 1.36 or later
-- A `csi.spiffe.io` driver backed by the DPU cluster SPIRE agent
+- A `csi.spiffe.io` driver backed by the DPU cluster [SPIRE](https://spiffe.io/docs/latest/spire-about/) agent
 - An NVIDIA Workload Identity Keys exchange endpoint reachable from DPU service Pods
 
 ## Configuration
@@ -36,6 +36,6 @@ only into that sidecar, and mounts the exchanged token read-only into every
 application container at `/run/secrets/nvidia.com/dsx/token`.
 
 The parent [`dsx-identity`](../dsx-identity/README.md) chart publishes this
-payload through a standalone DPF `DPUService`. Do not add it to a
+payload through a standalone [DPF](https://github.com/NVIDIA/doca-platform) `DPUService`. Do not add it to a
 `DPUDeployment`, because a policy-only service in that lifecycle prevents
 `DPUNodeMaintenance` from completing.

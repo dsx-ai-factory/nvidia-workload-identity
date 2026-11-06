@@ -1,7 +1,7 @@
 # NVIDIA Workload Identity
 
 NVIDIA Workload Identity provides hardware-backed identities for bare-metal
-hosts, KubeVirt VMs, Kubernetes Pods, and workloads in Kata Containers. Each
+hosts, [KubeVirt](https://kubevirt.io/user-guide/) VMs, Kubernetes Pods, and workloads in [Kata Containers](https://katacontainers.io/). Each
 workload receives a unique identity containing its tenant, service, and resource
 identity.
 
@@ -13,13 +13,13 @@ access to a requested secret.
 Identities build from the operator-owned DPU, which runs in zero trust mode. The
 DPU establishes the identity of its paired bare-metal host. The attested host
 provides identities to KubeVirt VMs and Kubernetes Pods. Pods running in Kata
-Containers obtain their identities through a proxy that carries the host's SPIRE
+Containers obtain their identities through a proxy that carries the host's [SPIRE](https://spiffe.io/docs/latest/spire-about/)
 Workload API across the guest VM boundary.
 
 DSX data halls run independent SPIRE deployments, each attesting local nodes and
-workloads and issuing signed identity credentials called SVIDs. NVIDIA Workload
+workloads and issuing signed identity credentials called [SVIDs](https://spiffe.io/docs/latest/spiffe-about/spiffe-concepts/#spiffe-verifiable-identity-document-svid). NVIDIA Workload
 Identity Keys exchanges local SPIRE JWT-SVIDs for DSX JWT-SVIDs and distributes
-public signing keys through the DSX Event Bus, so relying parties can
+public signing keys through the [DSX Event Bus](https://docs.nvidia.com/dsx-exchange/architecture#dsx-event-bus), so relying parties can
 authenticate workloads across data halls.
 
 Kubernetes and DPUService Pods receive DSX JWT-SVIDs through an injected
@@ -35,7 +35,7 @@ See [Architecture](architecture.md) for identity delivery and the
 
 Install the [NVIDIA Workload Identity Helm chart](../charts/dsx-identity/README.md)
 once per identity shard. The chart README covers prerequisites, configuration,
-and optional DPF integration, including the [DSX IMDS](../charts/dsx-imds/README.md)
+and optional [DPF](https://github.com/NVIDIA/doca-platform) integration, including the [DSX IMDS](../charts/dsx-imds/README.md)
 and [DPU token-fetcher admission](../charts/dsx-token-fetcher/README.md) child charts.
 
 ## Components

@@ -1,8 +1,8 @@
 # DSX IMDS
 
 `metadata-service` implements DSX IMDS. It serves DSX JWT-SVIDs through the
-IMDS v1 API, selects a local SPIRE JWT-SVID by hint, exchanges it,
-and returns the DSX JWT-SVID. KubeVirt uses NVIDIA Workload Identity Keys Proxy
+IMDS v1 API, selects a local [SPIRE](https://spiffe.io/docs/latest/spire-about/) JWT-SVID by hint, exchanges it,
+and returns the DSX JWT-SVID. [KubeVirt](https://kubevirt.io/user-guide/) uses NVIDIA Workload Identity Keys Proxy
 CSI. Paired-DPU placement uses a direct URL to its reachable shard-local
 NVIDIA Workload Identity Keys. Each process configures exactly one
 `--identity-keys-url`, whose scheme selects the transport. For a Unix proxy to
@@ -26,9 +26,9 @@ sequenceDiagram
 ```
 
 The same binary serves the `dsx-imds` host identity behind the paired DPU
-intercept and NICo IMDS passthrough, and serves the `dsx-imds-vm`
+intercept and [NICo](https://docs.nvidia.com/infra-controller/) IMDS passthrough, and serves the `dsx-imds-vm`
 identity as a KubeVirt sidecar. The identity chart injects that sidecar through
-`charts/dsx-identity/templates/vm-support.yaml`. DPF deploys the same binary on
+`charts/dsx-identity/templates/vm-support.yaml`. [DPF](https://github.com/NVIDIA/doca-platform) deploys the same binary on
 DPU nodes through `charts/dsx-imds`.
 
 For KubeVirt, the guest initiates the metadata request. The operator-owned
@@ -37,7 +37,7 @@ host's Workload API. The Pod keeps the configured operator tenant while the VM
 identity uses the tenant supplied by its LaunchLayer source. The exact
 `dsx-imds-vm` hint selects the VM identity. It does not select a separate
 SPIRE agent path. The Kubernetes WorkloadAttestor serves the operator
-virt-launcher Pod identity, SPIFFE CSI exposes the same host agent socket to
+virt-launcher Pod identity, [SPIFFE CSI](https://github.com/spiffe/spiffe-csi) exposes the same host agent socket to
 the sidecar, and NVIDIA Workload Identity Keys Proxy CSI carries the exchange
 request to the shard-local NVIDIA Workload Identity Keys.
 
@@ -118,7 +118,7 @@ reports process health.
 
 KubeVirt guests reach DSX IMDS at `169.254.169.254` over IPv4 and
 `fd00:76b9::254` over IPv6. The network setup sidecar configures the endpoints
-for the address families in the primary OVN allocation. Both `bridge` and
+for the address families in the primary [OVN](https://github.com/ovn-kubernetes/ovn-kubernetes) allocation. Both `bridge` and
 `l2bridge` bindings require the OVN-allocated guest address and MAC. See the
 [network setup README](../dsx-imds-network-setup/README.md) for guest routing.
 

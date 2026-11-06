@@ -1,6 +1,6 @@
 # DSX IMDS NodeAttestor Server Plugin
 
-`dsx-imds-node-attestor-server` is the server half of SPIRE's custom
+`dsx-imds-node-attestor-server` is the server half of [SPIRE](https://spiffe.io/docs/latest/spire-about/)'s custom
 `dsx_imds` NodeAttestor. It verifies the host DSX JWT-SVID received from the agent
 plugin and returns the DSX subject as a reattestable SPIRE agent ID.
 

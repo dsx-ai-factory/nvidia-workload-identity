@@ -1,8 +1,8 @@
 # Kata UDS Proxy
 
-`kata-uds-proxy` exposes a host unix socket to workloads inside a Kata
-Containers guest. It exists because a Kata Pod runs in a VM: the SPIFFE CSI
-driver delivers the SPIRE Workload API socket as a host bind mount, and a bind
+`kata-uds-proxy` exposes a host unix socket to workloads inside a [Kata
+Containers](https://katacontainers.io/) guest. It exists because a Kata Pod runs in a VM: the [SPIFFE CSI](https://github.com/spiffe/spiffe-csi)
+driver delivers the [SPIRE](https://spiffe.io/docs/latest/spire-about/) Workload API socket as a host bind mount, and a bind
 mount cannot cross the VM boundary. Without it, a Kata Pod has no path to the
 node's SPIRE agent and cannot obtain an SVID.
 

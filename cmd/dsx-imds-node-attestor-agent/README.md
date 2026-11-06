@@ -1,8 +1,8 @@
 # DSX IMDS NodeAttestor Agent Plugin
 
-`dsx-imds-node-attestor-agent` is the agent half of SPIRE's custom `dsx_imds`
+`dsx-imds-node-attestor-agent` is the agent half of [SPIRE](https://spiffe.io/docs/latest/spire-about/)'s custom `dsx_imds`
 NodeAttestor. It requests a host DSX JWT-SVID through the paired DPU intercept and
-NICo IMDS passthrough, then sends that token as the SPIRE
+[NICo](https://docs.nvidia.com/infra-controller/) IMDS passthrough, then sends that token as the SPIRE
 node-attestation payload.
 
 The external DPU establishes the first local SPIRE identities through

@@ -1,7 +1,7 @@
 # NVIDIA Workload Identity Keys
 
 `dsx-identity-keys` is the NVIDIA Workload Identity Keys process installed in
-each identity shard. It validates only local SPIRE JWT-SVIDs, transforms their
+each identity shard. It validates only local [SPIRE](https://spiffe.io/docs/latest/spire-about/) JWT-SVIDs, transforms their
 SPIFFE subject to the NVIDIA Workload Identity contract, preserves the
 registered `aud`, `exp`, `iat`, `jti`, and `nbf` claims, writes the subject
 components as [claims](#token-claims), and signs the
@@ -36,9 +36,9 @@ Configure the external [DPF identity templates](../../charts/dsx-identity/README
 to supply the local tenant and service segments and this DPUService suffix.
 
 By default, each NVIDIA Workload Identity Keys instance writes only its local
-public keys to one shared NATS KV bucket and watches the complete bucket. It
-retains one aggregate keyed by globally unique `kid`, and its JWKS endpoint
-serves every valid local and remote public key. Startup requires the Event Bus
+public keys to one shared [NATS KV](https://docs.nats.io/nats-concepts/jetstream/key-value-store) bucket and watches the complete bucket. It
+retains one aggregate keyed by globally unique `kid`, and its [JWKS](https://www.rfc-editor.org/rfc/rfc7517#section-5) endpoint
+serves every valid local and remote public key. Startup requires the [Event Bus](https://docs.nvidia.com/dsx-exchange/architecture#dsx-event-bus)
 connection, KV bucket, and initial history. Later connection failures leave
 NVIDIA Workload Identity Keys live but not ready while it reconnects.
 Instances using the same bucket converge on the same aggregate, so relying

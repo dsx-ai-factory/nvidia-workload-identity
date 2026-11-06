@@ -1,6 +1,6 @@
 # NVIDIA Workload Identity Helm chart
 
-Parent chart for one identity shard: SPIRE, Identity Keys, identity injection,
+Parent chart for one identity shard: [SPIRE](https://spiffe.io/docs/latest/spire-about/), Identity Keys, identity injection,
 the Identity Controller, Kata support, and DPF child-chart resources.
 
 ## Prerequisites
@@ -8,9 +8,9 @@ the Identity Controller, Kata support, and DPF child-chart resources.
 | When enabled | Requires | Used for |
 |---|---|---|
 | All installs | Kubernetes 1.36+, Helm 3, matching `spire-crds` chart | Helm deployment and SPIRE APIs |
-| External agent (default) | SPIRE Workload API socket on each selected node | SPIFFE CSI mounts |
-| Identity Keys (default) | Signing-key Secrets. NATS JetStream, OAuth2 issuer, and credentials when NATS is enabled and configured | Key exchange and token signing |
-| Pod tokens or VM support | KubeVirt for VM support | Native sidecar injection and VM identity |
+| External agent (default) | SPIRE Workload API socket on each selected node | [SPIFFE CSI](https://github.com/spiffe/spiffe-csi) mounts |
+| Identity Keys (default) | Signing-key Secrets. [NATS](https://docs.nats.io/nats-concepts/jetstream/key-value-store) JetStream, OAuth2 issuer, and credentials when NATS is enabled and configured | Key exchange and token signing |
+| Pod tokens or VM support | [KubeVirt](https://kubevirt.io/user-guide/) for VM support | Native sidecar injection and VM identity |
 | DPU Pod tokens | DPF `DPUService` CRD and controller | Native token-fetcher injection in DPU clusters |
 | Service monitors (default) | Prometheus Operator CRDs | `ServiceMonitor` and `PodMonitor` |
 | DPU services | DPF `DPUService` CRD and controller | IMDS and token-fetcher child charts |
@@ -181,7 +181,7 @@ setup and `50m` / `64Mi` for metadata-service. Set both `requests` and `limits`
 when overriding them. Equal CPU and memory requests and limits preserve the
 Guaranteed QoS required for dedicated CPU placement.
 
-VM IMDS networking follows the primary OVN allocation and supports IPv4-only,
+VM IMDS networking follows the primary [OVN](https://github.com/ovn-kubernetes/ovn-kubernetes) allocation and supports IPv4-only,
 IPv6-only, and dual-stack guests. See the [guest network requirements](../../cmd/dsx-imds-network-setup/README.md#vm-bindings)
 for supported bindings, addresses, and MAC requirements.
 
@@ -396,7 +396,7 @@ remain valid:
    `/.well-known/jwks.json`.
 3. Change `active_kid` and `alg`, then wait for exchanged JWTs to use the new
    key.
-4. Wait for JWTs signed by the old key to expire and downstream JWKS caches to
+4. Wait for JWTs signed by the old key to expire and downstream [JWKS](https://www.rfc-editor.org/rfc/rfc7517#section-5) caches to
    refresh.
 5. Remove the old private key from the exported keyset. Its public key remains
    available until its NATS lease expires.

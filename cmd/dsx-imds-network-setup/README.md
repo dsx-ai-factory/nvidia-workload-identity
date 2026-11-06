@@ -1,6 +1,6 @@
 # DSX IMDS Network Setup
 
-`dsx-imds-network-setup` runs as a sidecar in a KubeVirt `virt-launcher` Pod. It
+`dsx-imds-network-setup` runs as a sidecar in a [KubeVirt](https://kubevirt.io/user-guide/) `virt-launcher` Pod. It
 configures that Pod network namespace so the KubeVirt VM can reach the DSX IMDS
 (`metadata-service`) sidecar at `169.254.169.254` over IPv4 and `fd00:76b9::254`
 over IPv6.
@@ -30,7 +30,7 @@ spec:
         spiffe.nvidia.com/inject-dsx-imds: "true"
 ```
 
-The chart mounts OVN pod-networks through the Downward API. The network setup
+The chart mounts [OVN](https://github.com/ovn-kubernetes/ovn-kubernetes) pod-networks through the Downward API. The network setup
 container runs as root with `NET_ADMIN` in the launcher network namespace.
 KubeVirt creates the guest bridge and tap. This sidecar adds only the IMDS path.
 Injection is defined in `charts/dsx-identity/templates/vm-injection-policy.yaml`.

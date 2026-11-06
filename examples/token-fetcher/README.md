@@ -1,6 +1,6 @@
 # Token-fetcher user guide
 
-The injected `dsx-token-fetcher` sidecar exchanges the workload's local SPIRE
+The injected `dsx-token-fetcher` sidecar exchanges the workload's local [SPIRE](https://spiffe.io/docs/latest/spire-about/)
 JWT-SVID for a DSX JWT-SVID and refreshes the token file before expiry. NVIDIA
 Workload Identity must have Pod token fetching enabled.
 

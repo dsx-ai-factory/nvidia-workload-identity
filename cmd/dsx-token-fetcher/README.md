@@ -1,6 +1,6 @@
 # DSX Token Fetcher
 
-`dsx-token-fetcher` obtains a local SPIRE JWT-SVID from the Workload API,
+`dsx-token-fetcher` obtains a local [SPIRE](https://spiffe.io/docs/latest/spire-about/) JWT-SVID from the Workload API,
 submits it to the local NVIDIA Workload Identity Keys, and writes the
 exchanged DSX JWT-SVID to a shared file. In long-running mode it refreshes the
 token before expiry and reports readiness at `/healthz`.
