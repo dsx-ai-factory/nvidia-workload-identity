@@ -14,7 +14,7 @@ http://dsx-imds.dsx-identity.svc.cluster.local
 ## Requirements and values
 
 The parent [NVIDIA Workload Identity chart](../dsx-identity/README.md)
-supplies the release version, image, selectors, and exchange URL. DPF supplies
+supplies the release version, image, selectors, and exchange URL. [DPF](https://github.com/NVIDIA/doca-platform) supplies
 scheduling and ownership fields under `serviceDaemonSet`. A registered
 `csi.spiffe.io` driver must expose the local DPU agent Workload API socket.
 
@@ -22,7 +22,7 @@ scheduling and ownership fields under `serviceDaemonSet`. A registered
 |---|---|
 | `metadataService.identityKeysURL` | HTTPS exchange endpoint reachable from the DPU cluster |
 | `metadataService.image` | Released metadata-service image |
-| `metadataService.spireSocketPath` | Socket path mounted through SPIFFE CSI |
+| `metadataService.spireSocketPath` | Socket path mounted through [SPIFFE CSI](https://github.com/spiffe/spiffe-csi) |
 | `spiffeCsiDriver` | Name of the existing SPIFFE CSI driver |
 | `workload` | ServiceAccount and container names shared with controller-derived selectors |
 

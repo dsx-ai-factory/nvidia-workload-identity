@@ -1,23 +1,44 @@
 # NVIDIA Workload Identity
 
-NVIDIA Workload Identity turns shard-local SPIRE identities into DSX JWTs that
-relying parties can validate across shards. An identity shard contains an
-independent SPIRE deployment and a co-located NVIDIA Workload Identity Keys
-deployment. NVIDIA Workload Identity Keys validates only its local SPIRE
-JWT-SVIDs, issues DSX JWTs, and distributes its public signing keys through
-the external DSX Event Bus.
+NVIDIA Workload Identity provides hardware-backed identities for bare-metal
+hosts, [KubeVirt](https://kubevirt.io/user-guide/) VMs, Kubernetes Pods, and workloads in [Kata Containers](https://katacontainers.io/). Each
+workload receives a unique identity containing its tenant, service, and resource
+identity.
 
-There is no SPIRE federation between shards. Cross-shard trust starts after
-token exchange, when another shard or relying party validates a DSX JWT with
-the aggregate public keys served by any NVIDIA Workload Identity Keys
-instance.
+A workload presents a signed identity credential to a relying party, which
+verifies the credential to authenticate the caller. For example, a secrets
+manager can authenticate a VM's tenant identity before applying its rules for
+access to a requested secret.
 
-## User guide
+Identities build from the operator-owned DPU, which runs in zero trust mode. The
+DPU establishes the identity of its paired bare-metal host. The attested host
+provides identities to KubeVirt VMs and Kubernetes Pods. Pods running in Kata
+Containers obtain their identities through a proxy that carries the host's [SPIRE](https://spiffe.io/docs/latest/spire-about/)
+Workload API across the guest VM boundary.
 
-See the [examples user guide](../examples/README.md) to acquire and consume DSX
-JWTs through token-fetcher injection or the DSX IMDS endpoint.
+DSX data halls run independent SPIRE deployments, each attesting local nodes and
+workloads and issuing signed identity credentials called [SVIDs](https://spiffe.io/docs/latest/spiffe-about/spiffe-concepts/#spiffe-verifiable-identity-document-svid). NVIDIA Workload
+Identity Keys exchanges local SPIRE JWT-SVIDs for DSX JWT-SVIDs and distributes
+public signing keys through the [DSX Event Bus](https://docs.nvidia.com/dsx-exchange/architecture#dsx-event-bus), so relying parties can
+authenticate workloads across data halls.
 
-Component commands and runtime configuration:
+Kubernetes and DPUService Pods receive DSX JWT-SVIDs through an injected
+token-fetcher sidecar. KubeVirt VMs request DSX JWT-SVIDs from DSX IMDS. Paired
+bare-metal hosts use DSX JWT-SVIDs from DPU-hosted DSX IMDS to attest their SPIRE
+agents. See the
+[user guide](../examples/README.md) for requests and verification examples.
+
+See [Architecture](architecture.md) for identity delivery and the
+[Identity contract](identity-contract.md) for subject formats and ownership.
+
+## Deployment
+
+Install the [NVIDIA Workload Identity Helm chart](../charts/dsx-identity/README.md)
+once per identity shard. The chart README covers prerequisites, configuration,
+and optional [DPF](https://github.com/NVIDIA/doca-platform) integration, including the [DSX IMDS](../charts/dsx-imds/README.md)
+and [DPU token-fetcher admission](../charts/dsx-token-fetcher/README.md) child charts.
+
+## Components
 
 - [NVIDIA Workload Identity Controller](../cmd/dsx-identity-controller/README.md)
 - [DSX IMDS Network Setup](../cmd/dsx-imds-network-setup/README.md)
@@ -36,10 +57,3 @@ Component commands and runtime configuration:
 Before upgrading SPIRE, check its
 [upgrade requirements](https://github.com/spiffe/spire/blob/main/doc/upgrading.md)
 for supported version skew, upgrade order, and configuration changes.
-
-## Deployment
-
-Install [`charts/dsx-identity`](../charts/dsx-identity/README.md) once per identity
-shard with Helm. When enabled, the parent chart creates DPF DPUService resources
-that reference the [DSX IMDS](../charts/dsx-imds/README.md) and
-[DPU token-fetcher admission](../charts/dsx-token-fetcher/README.md) child charts.

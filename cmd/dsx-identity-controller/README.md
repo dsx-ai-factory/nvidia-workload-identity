@@ -2,7 +2,7 @@
 
 `dsx-identity-controller` watches DPU, Launch Layer `VirtualInstance`, and
 Launch Layer `BareMetalInstance` objects in one management cluster. It derives
-the corresponding SPIRE `ClusterStaticEntry` objects without modifying its
+the corresponding [SPIRE](https://spiffe.io/docs/latest/spire-about/) `ClusterStaticEntry` objects without modifying its
 sources.
 
 The Identity Controller owns non-Pod registration fields. The official SPIRE

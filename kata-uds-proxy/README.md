@@ -1,8 +1,8 @@
 # Kata UDS Proxy
 
-`kata-uds-proxy` exposes a host unix socket to workloads inside a Kata
-Containers guest. It exists because a Kata Pod runs in a VM: the SPIFFE CSI
-driver delivers the SPIRE Workload API socket as a host bind mount, and a bind
+`kata-uds-proxy` exposes a host unix socket to workloads inside a [Kata
+Containers](https://katacontainers.io/) guest. It exists because a Kata Pod runs in a VM: the [SPIFFE CSI](https://github.com/spiffe/spiffe-csi)
+driver delivers the [SPIRE](https://spiffe.io/docs/latest/spire-about/) Workload API socket as a host bind mount, and a bind
 mount cannot cross the VM boundary. Without it, a Kata Pod has no path to the
 node's SPIRE agent and cannot obtain an SVID.
 
@@ -15,7 +15,7 @@ The second container runs with runc and has access to some host interfaces.
 This container listens on the host vsock and forwards connections from it
 to the SPIRE workload API socket.
 Furthermore, the host side of the proxy adds the handlers it spawns for
-each connection to the pod cgroup so that the SPIRE Kuberenetes workload attestor
+each connection to the pod cgroup so that the SPIRE Kubernetes workload attestor
 resolves the proxied connections to the appropriate pod.
 
 This requires no changes to the workload attestor or to Kata, but it does have some
@@ -50,14 +50,15 @@ Nodes must use cgroup v2 with the systemd cgroup driver, and Kata must set
 
 The SPIRE agent must set `disable_container_selectors = true` on its Kubernetes
 workload attestor.
-The proxy cannot distinguish guest processes/containers, so only node-level
-selectors are supported.
+The proxy cannot distinguish guest processes or containers. SPIRE can use
+Pod-level and node-level selectors, but not selectors for individual containers.
 
 ## Deployment
 
 The identity chart owns both halves and ships them disabled. Enable
-`kataSupport` and list every Kata RuntimeClass in use; see the chart section of
-the [repository README](../README.md). The host DaemonSet renders from
+`kataSupport` and list every Kata RuntimeClass in use. See the
+[identity chart configuration](../charts/dsx-identity/README.md#configuration).
+The host DaemonSet renders from
 `charts/dsx-identity/templates/kata-support.yaml`, and the guest sidecar is
 injected by the `add-kata-guest-proxy` rule in
 `charts/dsx-identity/templates/pod-token-fetcher.yaml`, which also replaces the
@@ -74,7 +75,7 @@ The vsock will be accessible to all Kata guests and all containers within the po
 Do not use the proxy for any sockets that should not be accessible to all guests.
 In the case of SPIRE, the workload API is designed to be exposed to workloads.
 
-In the future, CID filtering may be added, but today Kata selects guest CIDs randomly at runtime,
-so this is not feasible.
+Kata randomly assigns guest CIDs at runtime, so the proxy identifies guests by
+their QEMU process and cgroup.
 
 The host proxy caps concurrent connections at 1024.
