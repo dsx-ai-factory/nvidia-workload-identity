@@ -1,0 +1,47 @@
+navigation:
+  - page: Overview
+    path: v1.16.0-rc.7-content/docs/overview.md
+  - page: Architecture
+    path: v1.16.0-rc.7-content/docs/architecture.md
+  - page: Identity contract
+    path: v1.16.0-rc.7-content/docs/identity-contract.md
+  - page: Observability
+    path: v1.16.0-rc.7-content/docs/observability.md
+  - section: User guide
+    contents:
+      - page: Examples
+        path: v1.16.0-rc.7-content/examples/README.md
+      - page: Token fetcher example
+        path: v1.16.0-rc.7-content/examples/token-fetcher/README.md
+  - section: Components
+    contents:
+      - page: Identity controller
+        path: v1.16.0-rc.7-content/cmd/dsx-identity-controller/README.md
+      - page: Identity Keys
+        path: v1.16.0-rc.7-content/cmd/dsx-identity-keys/README.md
+      - page: Keys proxy CSI driver
+        path: v1.16.0-rc.7-content/cmd/dsx-identity-keys-proxy-csi/README.md
+      - page: IMDS network setup
+        path: v1.16.0-rc.7-content/cmd/dsx-imds-network-setup/README.md
+      - page: NodeAttestor agent
+        path: v1.16.0-rc.7-content/cmd/dsx-imds-node-attestor-agent/README.md
+      - page: NodeAttestor server
+        path: v1.16.0-rc.7-content/cmd/dsx-imds-node-attestor-server/README.md
+      - page: Token fetcher
+        path: v1.16.0-rc.7-content/cmd/dsx-token-fetcher/README.md
+      - page: Generate signing keyset
+        path: v1.16.0-rc.7-content/cmd/generate-signing-keyset/README.md
+      - page: IMDS
+        path: v1.16.0-rc.7-content/cmd/metadata-service/README.md
+      - page: Kata UDS proxy
+        path: v1.16.0-rc.7-content/kata-uds-proxy/README.md
+  - section: Charts
+    contents:
+      - page: dsx-identity
+        path: v1.16.0-rc.7-content/charts/dsx-identity/README.md
+      - page: dsx-imds
+        path: v1.16.0-rc.7-content/charts/dsx-imds/README.md
+      - page: dsx-token-fetcher
+        path: v1.16.0-rc.7-content/charts/dsx-token-fetcher/README.md
+      - page: dsx-token-fetcher-example
+        path: v1.16.0-rc.7-content/charts/dsx-token-fetcher-example/README.md
