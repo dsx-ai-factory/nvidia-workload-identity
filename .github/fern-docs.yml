@@ -18,6 +18,10 @@ products:
     path: ../index.yml
     slug: /
     versions:
+      - display-name: v1.16.0-rc.7
+        path: versions/v1.16.0-rc.7.yml
+        slug: v1.16.0-rc.7
+        availability: stable
       - display-name: v1.16.0-rc.5
         path: versions/v1.16.0-rc.5.yml
         slug: v1.16.0-rc.5
