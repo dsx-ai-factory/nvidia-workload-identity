@@ -1,8 +1,8 @@
 # DSX IMDS
 
-`metadata-service` implements DSX IMDS. It serves DSX JWTs through the
-IMDS v1 API, selects a local SPIRE JWT-SVID by hint, exchanges it,
-and returns the DSX JWT. KubeVirt uses NVIDIA Workload Identity Keys Proxy
+`metadata-service` implements DSX IMDS. It serves DSX JWT-SVIDs through the
+IMDS v1 API, selects a local [SPIRE](https://spiffe.io/docs/latest/spire-about/) JWT-SVID by hint, exchanges it,
+and returns the DSX JWT-SVID. [KubeVirt](https://kubevirt.io/user-guide/) uses NVIDIA Workload Identity Keys Proxy
 CSI. Paired-DPU placement uses a direct URL to its reachable shard-local
 NVIDIA Workload Identity Keys. Each process configures exactly one
 `--identity-keys-url`, whose scheme selects the transport. For a Unix proxy to
@@ -21,14 +21,14 @@ sequenceDiagram
     SA-->>MS: Local SPIRE JWT-SVID
     MS->>CSI: RFC 8693 request over Unix socket
     CSI->>EX: Forward request over verified TLS
-    EX-->>MS: Exchanged DSX JWT
-    MS-->>VM: JSON object or plain DSX JWT
+    EX-->>MS: Exchanged DSX JWT-SVID
+    MS-->>VM: JSON object or plain DSX JWT-SVID
 ```
 
 The same binary serves the `dsx-imds` host identity behind the paired DPU
-intercept and NICo IMDS passthrough, and serves the `dsx-imds-vm`
+intercept and [NICo](https://docs.nvidia.com/infra-controller/) IMDS passthrough, and serves the `dsx-imds-vm`
 identity as a KubeVirt sidecar. The identity chart injects that sidecar through
-`charts/dsx-identity/templates/vm-support.yaml`. DPF deploys the same binary on
+`charts/dsx-identity/templates/vm-support.yaml`. [DPF](https://github.com/NVIDIA/doca-platform) deploys the same binary on
 DPU nodes through `charts/dsx-imds`.
 
 For KubeVirt, the guest initiates the metadata request. The operator-owned
@@ -37,14 +37,14 @@ host's Workload API. The Pod keeps the configured operator tenant while the VM
 identity uses the tenant supplied by its LaunchLayer source. The exact
 `dsx-imds-vm` hint selects the VM identity. It does not select a separate
 SPIRE agent path. The Kubernetes WorkloadAttestor serves the operator
-virt-launcher Pod identity, SPIFFE CSI exposes the same host agent socket to
+virt-launcher Pod identity, [SPIFFE CSI](https://github.com/spiffe/spiffe-csi) exposes the same host agent socket to
 the sidecar, and NVIDIA Workload Identity Keys Proxy CSI carries the exchange
 request to the shard-local NVIDIA Workload Identity Keys.
 
 ## VM identity trust path
 
 The VM SPIRE JWT-SVID remains inside the virt-launcher Pod. DSX IMDS exchanges
-it through the proxy and serves only the resulting DSX JWT to the VM.
+it through the proxy and serves only the resulting DSX JWT-SVID to the VM.
 
 ```mermaid
 flowchart TB
@@ -54,7 +54,7 @@ flowchart TB
   Proxy["NVIDIA Workload Identity<br/>Keys Proxy CSI<br/>node plugin Pod"]
   IdentityKeys["Shard-local<br/>NVIDIA Workload Identity<br/>Keys"]
   VMJWT["VM SPIRE JWT-SVID"]
-  DSXJWT["VM DSX JWT"]
+  DSXJWT["VM DSX JWT-SVID"]
   VM["KubeVirt VM"]
 
   HostAgent -->|"Workload API socket"| CSI
@@ -80,7 +80,7 @@ flowchart TB
   Proxy["NVIDIA Workload Identity<br/>Keys Proxy CSI<br/>node plugin Pod"]
   IdentityKeys["Shard-local<br/>NVIDIA Workload Identity<br/>Keys Deployment"]
   VMJWT["VM SPIRE JWT-SVID"]
-  DSXJWT["VM DSX JWT"]
+  DSXJWT["VM DSX JWT-SVID"]
   VM["KubeVirt VM guest"]
 
   HostAgent -->|"Workload API socket"| CSI
@@ -110,7 +110,7 @@ Accept: application/json
 
 Requests require `Metadata: true`, reject proxy forwarding headers, and may
 repeat `aud`. `Accept` supports `application/json` and `text/plain`. An absent
-header defaults to JSON. Plain text returns only the DSX JWT. JSON returns
+header defaults to JSON. Plain text returns only the DSX JWT-SVID. JSON returns
 `token`, `expires_in`, and `spiffe_id`. Successful identity responses use
 `Cache-Control: no-store`. Response connections use IPv4 TTL 1 or IPv6 hop
 limit 1. Dependency failures return sanitized HTTP errors. `GET /health`
@@ -118,7 +118,7 @@ reports process health.
 
 KubeVirt guests reach DSX IMDS at `169.254.169.254` over IPv4 and
 `fd00:76b9::254` over IPv6. The network setup sidecar configures the endpoints
-for the address families in the primary OVN allocation. Both `bridge` and
+for the address families in the primary [OVN](https://github.com/ovn-kubernetes/ovn-kubernetes) allocation. Both `bridge` and
 `l2bridge` bindings require the OVN-allocated guest address and MAC. See the
 [network setup README](../dsx-imds-network-setup/README.md) for guest routing.
 
@@ -128,12 +128,17 @@ curl --noproxy '*' -g -H 'Metadata: true' \
 ```
 
 ```json
-{"token":"<DSX JWT>","expires_in":300,"spiffe_id":"spiffe://tenant-2.ds9.dsx.nvid.id/vm/vm-1234"}
+{"token":"<DSX JWT-SVID>","expires_in":300,"spiffe_id":"spiffe://tenant-2.ds9.dsx.nvid.id/vm/vm-1234"}
 ```
 
-The API is intentionally tokenless. The paired DPU intercept and NICo enforce
-physical source binding, network isolation, and response hop limits. `Metadata: true` and proxy-header rejection are additional request
-checks, not a replacement for that network boundary.
+The identity API accepts requests without a bearer token. For paired hosts, the
+DPU intercept and NICo enforce physical source binding and network isolation.
+For KubeVirt VMs, the [network setup sidecar](../dsx-imds-network-setup/README.md)
+connects the guest to DSX IMDS in its virt-launcher Pod.
+
+DSX IMDS sets response IPv4 TTL or IPv6 hop limit to 1, requires `Metadata: true`,
+and rejects proxy forwarding headers. These request checks depend on the network
+boundary for source isolation.
 
 ## Flags
 

@@ -1,6 +1,8 @@
 # Identity contract
 
-DSX JWT subjects use complete key/value pairs with unique keys:
+A DSX JWT-SVID subject (`sub`) is a [SPIFFE](https://spiffe.io/docs/latest/spiffe-about/overview/) URI. Its trust domain identifies the
+tenant, region, service, and partition. Its resource path uses complete key/value
+pairs with unique keys:
 
 ```text
 spiffe://<tenant>.<region>.<service>.<partition>/<key>/<value>[/<key>/<value>...]
@@ -24,7 +26,7 @@ exchanged: spiffe://<tenant>.<region>.dsx.<partition>/cluster/cluster-1/namespac
 Path keys and values retain their case and order. Each segment starts with an
 ASCII letter or digit, followed by ASCII letters, digits, `.`, `_`, or `-`.
 
-Cluster-local SPIRE identities encode the same fields under the shard trust
+Cluster-local [SPIRE](https://spiffe.io/docs/latest/spire-about/) identities encode the same fields under the shard trust
 domain. Exchange takes the region and partition from explicit configuration,
 the tenant and service from the local subject, and preserves the resource path.
 
@@ -34,17 +36,18 @@ spiffe://<local-trust-domain>/tenant/<tenant>/service/<service>/<key>/<value>[/<
 
 | Resource | Tenant source | Subject resource path |
 |---|---|---|
-| DPU | Operator tenant in DPF identity templates | `/dpu/<normalized-serial>` resource prefix |
+| DPU | Operator tenant in [DPF](https://github.com/NVIDIA/doca-platform) identity templates | `/dpu/<normalized-serial>` resource prefix |
 | DPU-paired operator bare-metal host | `global.operatorTenant` | `/bm/<dpu-machine-id>` |
 | Operator bare-metal Kubernetes worker | `global.operatorTenant` | `/bm/<node-name>` |
 | Kubernetes Pod | `global.operatorTenant` | `/bm/<node-name>/pod/<pod-uid>` |
 | Bare-metal host with a Launch Layer source | `launchlayer.nvidia.com/org-id` annotation | `/bm/<bm-id>` |
 | VM with a Launch Layer source | `launchlayer.nvidia.com/org-id` annotation | `/vm/<vm-id>` |
 
-Every Kubernetes worker is an operator-owned bare-metal host. There is no
-configured worker list and no LaunchLayer source for these hosts. The Pod
-registration template derives the host ID directly from the Kubernetes node
-name. The DPU source supplies the BM resource ID through its
+Every host-cluster Kubernetes worker is an operator-owned bare-metal host. DPU
+workers in Kamaji clusters use the DPU identity path. The Pod
+registration template derives the host ID from the Kubernetes node name, without
+a configured worker list or LaunchLayer source. The DPU source supplies the BM
+resource ID through its
 `carbide.nvidia.com/dpu-machine-id` label.
 
 Every DSX Kubernetes Pod supplies its service label. SPIRE uses its value for
@@ -58,24 +61,13 @@ metadata:
     spiffe.nvidia.com/role: database  # optional
 ```
 
-```yaml
-spire:
-  spire-server:
-    controllerManager:
-      extraEnv:
-        - name: OPERATOR_TENANT
-          value: operator-1
-      parentIDTemplate: 'spiffe://{{ .TrustDomain }}/spire/agent/dsx_imds/tenant/$OPERATOR_TENANT/bm/{{ .NodeMeta.Name }}'
-```
-
-The chart requires the controller-manager value to equal
-`global.operatorTenant`. Because it is part of the SPIRE Pod template, changing
-both values causes the StatefulSet to roll out without a restart hook.
+See the [identity chart configuration](../charts/dsx-identity/README.md#configuration)
+for the worker registration template and operator tenant settings.
 
 The paired host identity is a controller-derived static entry parented to
 the external `dpu_hw` agent identified by the normalized DPU serial. DPUs are
 Kubernetes nodes in their Kamaji clusters. The DPU agent's Kubernetes
-WorkloadAttestor identifies the IMDS Pod, and SPIFFE CSI exposes the agent's
+WorkloadAttestor identifies the IMDS Pod, and [SPIFFE CSI](https://github.com/spiffe/spiffe-csi) exposes the agent's
 Workload API socket to that Pod.
 
 The [NVIDIA Workload Identity
@@ -116,8 +108,8 @@ for the DPF templates used to produce these subjects.
 ## NVIDIA Workload Identity Keys and Event Bus
 
 [NVIDIA Workload Identity Keys](../cmd/dsx-identity-keys/README.md) validates
-local SPIRE JWT-SVIDs and issues DSX JWTs. By default it publishes public
-signing keys to the Event Bus and serves aggregate JWKS. With NATS disabled it
+local SPIRE JWT-SVIDs and issues DSX JWT-SVIDs. By default it publishes public
+signing keys to the [Event Bus](https://docs.nvidia.com/dsx-exchange/architecture#dsx-event-bus) and serves aggregate [JWKS](https://www.rfc-editor.org/rfc/rfc7517#section-5). With [NATS](https://docs.nats.io/nats-concepts/jetstream/key-value-store) disabled it
 serves only local public signing keys. The external Gateway terminates TLS and
 applies source-aware request quotas. Clients configure the Gateway HTTPS
 endpoint.
@@ -133,4 +125,4 @@ Driver](../cmd/dsx-identity-keys-proxy-csi/README.md) carries VM exchange
 requests, and [DSX IMDS Network Setup](../cmd/dsx-imds-network-setup/README.md)
 routes the VM's metadata traffic to `169.254.169.254` over IPv4 and
 `fd00:76b9::254` over IPv6. It configures the address families present in the
-primary OVN allocation, including IPv4-only, IPv6-only, and dual-stack guests.
+primary [OVN](https://github.com/ovn-kubernetes/ovn-kubernetes) allocation, including IPv4-only, IPv6-only, and dual-stack guests.
