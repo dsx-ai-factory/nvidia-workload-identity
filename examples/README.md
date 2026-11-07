@@ -2,8 +2,8 @@
 
 - Kubernetes and DPUService Pods use the
   [token-fetcher sidecar](token-fetcher/README.md).
-- Paired bare-metal hosts and KubeVirt VMs use DSX IMDS.
-- Relying parties validate DSX JWTs with the NVIDIA Workload Identity Keys JWKS endpoint.
+- Paired bare-metal hosts and [KubeVirt](https://kubevirt.io/user-guide/) VMs use DSX IMDS.
+- Relying parties validate DSX JWT-SVIDs with the NVIDIA Workload Identity Keys [JWKS](https://www.rfc-editor.org/rfc/rfc7517#section-5) endpoint.
 
 ## Acquire a token from DSX IMDS
 
@@ -14,10 +14,10 @@
 | KubeVirt VM over IPv6 | `http://[fd00:76b9::254]/latest/meta-data/identity` |
 
 Paired bare-metal hosts reach DPU-hosted DSX IMDS through NICo. The host
-`dsx_imds` NodeAttestor uses the returned host token to attest its SPIRE agent.
+`dsx_imds` NodeAttestor uses the returned host token to attest its [SPIRE](https://spiffe.io/docs/latest/spire-about/) agent.
 KubeVirt VMs reach a DSX IMDS sidecar in the virt-launcher Pod and receive their
 VM identity. The VM network setup sidecar enables IPv4, IPv6, or both from the
-primary OVN allocation. See
+primary [OVN](https://github.com/ovn-kubernetes/ovn-kubernetes) allocation. See
 [VM network requirements](../cmd/dsx-imds-network-setup/README.md#vm-bindings).
 
 Request a token over IPv4:
@@ -44,7 +44,7 @@ Example response:
 
 ```json
 {
-  "token": "<dsx-jwt>",
+  "token": "<dsx-jwt-svid>",
   "expires_in": 300,
   "spiffe_id": "spiffe://tenant-2.ds9.dsx.nvid.id/vm/example-vm"
 }
@@ -63,7 +63,7 @@ curl --fail-with-body --silent --show-error --noproxy '*' --get \
 Plain-text response:
 
 ```text
-<dsx-jwt>
+<dsx-jwt-svid>
 ```
 
 The bare-metal host path is a node-attestation contract, not a generic
@@ -71,19 +71,19 @@ host-process identity contract. See the [DSX IMDS
 API](../cmd/metadata-service/README.md#http-api) for the versioned endpoint and
 plain-text response option.
 
-## Consume a DSX JWT
+## Consume a DSX JWT-SVID
 
 Use the returned `token` value as the relying party bearer credential:
 
 ```bash
 curl --fail-with-body \
-  --header 'Authorization: Bearer <dsx-jwt>' \
+  --header 'Authorization: Bearer <dsx-jwt-svid>' \
   https://relying-party.example/v1/resource
 ```
 
 Do not log or persist the token.
 
-## Validate a DSX JWT
+## Validate a DSX JWT-SVID
 
 Example request:
 
@@ -118,5 +118,5 @@ audience: spiffe://ds9.dsx.nvid.id/openbao
 jwks_url: https://identity-keys.shard.example.com/.well-known/jwks.json
 ```
 
-With NATS enabled, every shard serves the aggregate JWKS. With NATS disabled,
+With [NATS](https://docs.nats.io/nats-concepts/jetstream/key-value-store) enabled, every shard serves the aggregate JWKS. With NATS disabled,
 use the issuing shard's endpoint.

@@ -21,6 +21,9 @@ GitHub owns RC-to-stable tagging and release notes.
 ## Prose, comments, and documentation
 
 - Use NVIDIA Workload Identity as the project name in prose.
+- Describe hardware-backed workload identity rooted in the operator-owned DPU,
+  which runs in zero trust mode. Call exchanged tokens DSX JWT-SVIDs and local
+  SPIRE tokens SPIRE JWT-SVIDs.
 - Write compact, factual sentences with plain words and active verbs. Match the
   surrounding comments and documentation. Remove words that add no information.
 - State supported behavior directly. Avoid AI-speak, marketing language, vague
@@ -28,6 +31,11 @@ GitHub owns RC-to-stable tagging and release notes.
   unsupported behavior. Do not explain a feature by saying what it is not.
 - Avoid duplicating dependency versions in documentation. Link to the pinned
   build configuration and keep version numbers only where behavior depends on them.
+- Introduce concepts before using them. Explain non-obvious reasoning before
+  describing the mechanism it motivates. Keep explanations brief and avoid
+  repeating facts already established on the page.
+- Preserve technical information when rewriting prose. Move misplaced details
+  to the relevant guide and keep links to them.
 - Document current behavior. Omit internal history, revision narrative,
   meta-documentation, and speculative future designs.
 - Use plain punctuation. Do not use em dashes, en dashes, curly quotes, or
@@ -38,6 +46,9 @@ GitHub owns RC-to-stable tagging and release notes.
   Keep them accurate when changing the implementation.
 - In Helm templates and YAML, explain non-obvious templating, merge semantics,
   ordering, compatibility, and cross-resource behavior inline.
+- Keep command, package, and chart READMEs scoped to their component. Put
+  architecture explanations in the architecture guide. Rewrite prose only when
+  it meaningfully improves clarity or accuracy. Preserve diagrams by default.
 - Root and component READMEs describe the chart and applications users run.
   Keep special test setup, fixtures, and E2E workflow instructions in
   `local-e2e-tests/README.md`. Link there when those instructions are needed.

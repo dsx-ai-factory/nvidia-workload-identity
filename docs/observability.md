@@ -6,9 +6,9 @@ through their SDK and the sidecar collector installed by the DSX observability
 stack. Structured allow, deny, and dependency events never include
 credentials.
 
-SPIRE server, controller-manager, and the optional local SPIRE agent expose
+[SPIRE](https://spiffe.io/docs/latest/spire-about/) server, controller-manager, and the optional local SPIRE agent expose
 their native Prometheus metrics through chart-owned monitors. SPIRE
-does not produce traces. SPIFFE CSI Driver, CSI node-driver-registrar, and
+does not produce traces. [SPIFFE CSI Driver](https://github.com/spiffe/spiffe-csi), CSI node-driver-registrar, and
 the `socat` proxy expose no native application telemetry. Their health checks,
 container logs, and platform container metrics remain available.
 
@@ -52,9 +52,9 @@ metadata:
 
 The service label selects SPIRE registration. The injection annotation selects
 the token fetcher through native admission policy. The audience annotation names
-the relying party for the requested SPIRE JWT-SVID and exchanged DSX JWT.
+the relying party for the requested SPIRE JWT-SVID and exchanged DSX JWT-SVID.
 
-For KubeVirt IMDS injection, put them on the VM Pod template:
+For [KubeVirt](https://kubevirt.io/user-guide/) IMDS injection, put them on the VM Pod template:
 
 ```yaml
 spec:

@@ -1,11 +1,11 @@
 # NVIDIA Workload Identity Keys
 
 `dsx-identity-keys` is the NVIDIA Workload Identity Keys process installed in
-each identity shard. It validates only local SPIRE JWT-SVIDs, transforms their
+each identity shard. It validates only local [SPIRE](https://spiffe.io/docs/latest/spire-about/) JWT-SVIDs, transforms their
 SPIFFE subject to the NVIDIA Workload Identity contract, preserves the
 registered `aud`, `exp`, `iat`, `jti`, and `nbf` claims, writes the subject
 components as [claims](#token-claims), and signs the
-exchanged DSX JWT with the shard's active key. SPIRE registration determines
+exchanged DSX JWT-SVID with the shard's active key. SPIRE registration determines
 the tenant in the local subject, and NVIDIA Workload Identity Keys preserves
 it while validating the common identity grammar. It obtains local JWT
 verification bundles through the node-local SPIFFE Workload API.
@@ -36,9 +36,9 @@ Configure the external [DPF identity templates](../../charts/dsx-identity/README
 to supply the local tenant and service segments and this DPUService suffix.
 
 By default, each NVIDIA Workload Identity Keys instance writes only its local
-public keys to one shared NATS KV bucket and watches the complete bucket. It
-retains one aggregate keyed by globally unique `kid`, and its JWKS endpoint
-serves every valid local and remote public key. Startup requires the Event Bus
+public keys to one shared [NATS KV](https://docs.nats.io/nats-concepts/jetstream/key-value-store) bucket and watches the complete bucket. It
+retains one aggregate keyed by globally unique `kid`, and its [JWKS](https://www.rfc-editor.org/rfc/rfc7517#section-5) endpoint
+serves every valid local and remote public key. Startup requires the [Event Bus](https://docs.nvidia.com/dsx-exchange/architecture#dsx-event-bus)
 connection, KV bucket, and initial history. Later connection failures leave
 NVIDIA Workload Identity Keys live but not ready while it reconnects.
 Instances using the same bucket converge on the same aggregate, so relying
@@ -51,7 +51,7 @@ JWKS endpoint for the shard that issued its tokens.
 
 ## Token claims
 
-The exchanged DSX JWT carries each component of its subject as a claim, so
+The exchanged DSX JWT-SVID carries each component of its subject as a claim, so
 relying parties can authorize on claims without parsing `sub`. Each value is
 the component encoded into `sub`. For
 `spiffe://operator-1.ds9.dsx.nvid.id/bm/worker-1/pod/<pod-uid>/role/web`:
@@ -174,7 +174,7 @@ The exchange endpoint is intentionally unauthenticated because the submitted
 local SPIRE JWT-SVID is the credential being exchanged.
 
 The exchange form requires `grant_type`, `subject_token`, and
-`subject_token_type`. It accepts the optional `requested_token_type`, caps
+`subject_token_type`. It accepts the optional `requested_token_type` and caps
 request bodies at 1 MiB. Audience is preserved from the validated SVID. NVIDIA
 Workload Identity Keys does not accept an audience override or apply a
 relying-party audience allowlist. Error responses do not expose parser or
