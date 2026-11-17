@@ -4,8 +4,7 @@ NVIDIA Workload Identity provides hardware-backed identities for bare-metal
 hosts, [KubeVirt](https://kubevirt.io/user-guide/) VMs, Kubernetes Pods, and workloads in [Kata Containers](https://katacontainers.io/). Each
 workload receives a unique identity that relying parties use to authenticate it.
 
-Identities build from the DPU running in zero trust mode to its paired bare-
-metal host, then from the host to its VMs and Pods, including Pods running in
+Identities build from the DPU running in zero trust mode to its paired bare-metal host, then from the host to its VMs and Pods, including Pods running in
 Kata Containers.
 
 DSX data halls run separate [SPIRE](https://spiffe.io/docs/latest/spire-about/) deployments. SPIRE attests nodes and workloads
