@@ -245,7 +245,7 @@ jobs:
             echo EOF
           } >> "$GITHUB_OUTPUT"
       - name: Build and scan both platforms
-        uses: dsx-ai-factory/dsx-github-actions/.github/actions/docker-build@db3780bff4b2cbf90ba9117a63e41ddea066791b
+        uses: dsx-ai-factory/dsx-github-actions/.github/actions/docker-build@a86675cddd27de0cc3182d2a33db75a26c20bb90 # v1.35.1
         with:
           image: local/${{ matrix.name }}
           tags: ${{ github.sha }}
