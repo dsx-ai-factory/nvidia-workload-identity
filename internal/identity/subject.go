@@ -28,7 +28,8 @@ type Subject struct {
 	Service      string
 	ResourceType ResourceType
 	ResourceID   string
-	// Path contains key/value pairs after ResourceID.
+	// ResourceType and ResourceID form the required first pair of the resource path.
+	// Path contains only the additional key/value pairs after that pair.
 	// For dpu/dpu-1/dpuservice/storage/namespace/system, it contains
 	// [dpuservice, storage, namespace, system].
 	Path []string

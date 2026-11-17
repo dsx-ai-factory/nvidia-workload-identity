@@ -8,7 +8,8 @@ SPDX-License-Identifier: Apache-2.0
     "name": {{printf "%q" .Name}},
     "version": {{printf "%q" .Version}},
     "license": {{printf "%q" .LicenseName}},
-    "source": {{printf "%q" .LicenseURL}},
+    {{/* LicenseURL depends on live repository probes. Use a versioned package license page. */}}
+    "source": {{printf "%q" (printf "https://pkg.go.dev/%s@%s?tab=licenses" .Name .Version)}},
     "text": {{printf "%q" .LicenseText}}
   }
 {{end}}

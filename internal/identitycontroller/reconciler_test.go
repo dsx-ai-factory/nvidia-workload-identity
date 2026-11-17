@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	spirev1alpha1 "github.com/spiffe/spire-controller-manager/api/v1alpha1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -22,6 +23,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+
+	"dsx-identity/internal/dsxidentity"
+	"dsx-identity/internal/spireidentity"
 )
 
 var testDPUMetadataSelectors = []string{
@@ -96,6 +100,7 @@ func TestDPUDesiredEntryFailsClosedOnAssignmentLookupErrors(t *testing.T) {
 		listErr     error
 		discoverErr error
 		assigned    bool
+		role        string
 		wantEntry   bool
 		wantErr     bool
 	}{
@@ -108,6 +113,7 @@ func TestDPUDesiredEntryFailsClosedOnAssignmentLookupErrors(t *testing.T) {
 		{name: "HTTP not found is not API absence", listErr: apierrors.NewNotFound(resource, ""), wantErr: true},
 		{name: "supported API without assignment", version: "v1alpha1", wantEntry: true},
 		{name: "tenant assignment suppresses operator entry", version: "v1alpha1", assigned: true},
+		{name: "invalid role invalidates tenant assignment", version: "v1alpha1", assigned: true, role: "Trainer", wantEntry: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			dpu := &unstructured.Unstructured{}
@@ -121,7 +127,11 @@ func TestDPUDesiredEntryFailsClosedOnAssignmentLookupErrors(t *testing.T) {
 			}
 			builder := fake.NewClientBuilder().WithScheme(testScheme(t)).WithRESTMapper(mapper)
 			if test.assigned {
-				builder = builder.WithObjects(newBareMetalInstance("assigned-host", "tenant-system", "940863e9-1e6f-40ea-9104-c46a7b041ce5", "tenant-2", "instance-1", "machine-1", "52TF43G001G"))
+				instance := newBareMetalInstance("assigned-host", "tenant-system", "940863e9-1e6f-40ea-9104-c46a7b041ce5", "tenant-2", "instance-1", "machine-1", "52TF43G001G")
+				annotations := instance.GetAnnotations()
+				annotations[RoleAnnotation] = test.role
+				instance.SetAnnotations(annotations)
+				builder = builder.WithObjects(instance)
 			}
 			c := builder.WithInterceptorFuncs(interceptor.Funcs{
 				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
@@ -733,6 +743,93 @@ func TestConfigSourceAPIPollInterval(t *testing.T) {
 			if err := config.Validate(); (err != nil) != (interval <= 0) {
 				t.Fatalf("Validate with interval %v = %v", interval, err)
 			}
+		})
+	}
+}
+
+func TestLaunchLayerRoleLifecycle(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []string{"bm", "vm"} {
+		t.Run(kind, func(t *testing.T) {
+			source := newBareMetalInstance("source", "tenant-system", "7ae7fe75-e671-4b0e-a76d-ef02bb5b040b", "tenant-2", "instance-1", "dpu-1", "dpu-1")
+			parent := "spiffe://k2.sjc-1.nvidia.com/spire/agent/dpu_hw/dpu-1"
+			hint := "dsx-imds"
+			selectors := testDPUMetadataSelectors
+			if kind == "vm" {
+				source = newVirtualInstance("source", "tenant-system", "e35e41ae-a112-4f64-8841-298c2a6662b0", "tenant-2", "instance-1", "host-1", "e35e41ae-a112-4f64-8841-298c2a6662b0")
+				parent = "spiffe://k2.sjc-1.nvidia.com/spire/agent/dsx_imds/tenant/operator-1/bm/host-1"
+				hint = "dsx-imds-vm"
+				selectors = []string{"k8s:pod-uid:e35e41ae-a112-4f64-8841-298c2a6662b0"}
+			}
+			c := &applyClient{Client: fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(source).Build()}
+			r := &LaunchLayerReconciler{Client: c, Config: testConfig, SourceGVK: source.GroupVersionKind()}
+			request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(source)}
+			for _, tc := range []struct {
+				role    string
+				invalid bool
+			}{
+				{"", false}, {"trainer_1-gpu", false}, {"a", false}, {strings.Repeat("a", 63), false},
+				{"Trainer", true}, {"a/b", true}, {"a.b", true}, {" a", true}, {"a%2fb", true}, {"_a", true}, {strings.Repeat("a", 64), true},
+				{"corrected", false},
+			} {
+				source.SetAnnotations(map[string]string{OrgIDAnnotation: "tenant-2", "launchlayer.nvidia.com/role": tc.role})
+				if err := c.Update(t.Context(), source); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := r.Reconcile(t.Context(), request); err != nil {
+					t.Fatal(err)
+				}
+				if tc.invalid {
+					entry := &spirev1alpha1.ClusterStaticEntry{}
+					if err := c.Get(t.Context(), client.ObjectKey{Name: childName(source)}, entry); !apierrors.IsNotFound(err) {
+						t.Fatalf("invalid role %q retained entry: %v", tc.role, err)
+					}
+					continue
+				}
+				suffix := ""
+				if tc.role != "" {
+					suffix = "/role/" + tc.role
+				}
+				entry := getEntry(t, c, childName(source))
+				assertEntry(t, entry, "spiffe://k2.sjc-1.nvidia.com/tenant/tenant-2/service/dsx/"+kind+"/instance-1"+suffix, parent, hint, selectors)
+				id, err := spiffeid.FromString(entry.Spec.SPIFFEID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				subject, err := spireidentity.Parse(id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				exchanged, err := dsxidentity.ID(subject, "ds9", "nvid.id")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if want := "spiffe://tenant-2.ds9.dsx.nvid.id/" + kind + "/instance-1" + suffix; exchanged.String() != want {
+					t.Fatalf("exchanged subject = %s, want %s", exchanged, want)
+				}
+				claims, err := dsxidentity.Claims(subject, "ds9", "nvid.id")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if tc.role != "" {
+					last := claims.Resource[len(claims.Resource)-1]
+					if last.ResourceType != "role" || last.ResourceID != tc.role {
+						t.Fatalf("role claim pair = %#v", last)
+					}
+				} else if len(claims.Resource) != 1 {
+					t.Fatalf("unexpected resource pairs: %#v", claims.Resource)
+				}
+			}
+			annotations := source.GetAnnotations()
+			delete(annotations, "launchlayer.nvidia.com/role")
+			source.SetAnnotations(annotations)
+			if err := c.Update(t.Context(), source); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := r.Reconcile(t.Context(), request); err != nil {
+				t.Fatal(err)
+			}
+			assertEntry(t, getEntry(t, c, childName(source)), "spiffe://k2.sjc-1.nvidia.com/tenant/tenant-2/service/dsx/"+kind+"/instance-1", parent, hint, selectors)
 		})
 	}
 }
