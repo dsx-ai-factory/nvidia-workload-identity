@@ -80,12 +80,17 @@ kind: VirtualInstance
 metadata:
   annotations:
     launchlayer.nvidia.com/org-id: tenant-2
+    launchlayer.nvidia.com/role: trainer  # optional
 spec:
   instance_id: vm-1234
   node_name: host-1234
 status:
   pod_uid: <virt-launcher-pod-uid>
 ```
+
+The optional `launchlayer.nvidia.com/role` annotation appends `/role/<role>`
+to BM and VM subjects. Nonempty roles match `[a-z0-9][a-z0-9_-]{0,62}`.
+Omitted or empty roles leave the subject unchanged.
 
 `BareMetalInstance` uses the same tenant annotation, `spec.instance_id`, and
 `status.primary_dpu.machine_id` plus `status.primary_dpu.serial_number`. The
