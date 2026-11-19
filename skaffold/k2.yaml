@@ -277,7 +277,7 @@ deploy:
         wait: true
         remoteChart: spire
         repo: https://spiffe.github.io/helm-charts-hardened/
-        version: 0.30.4
+        version: 0.31.0
         namespace: dsx-identity
         valuesFiles:
           - ../local-e2e-tests/dsx-imds-host-agent-values.yaml
@@ -306,7 +306,7 @@ deploy:
       - name: dpu-spiffe-csi
         remoteChart: spire
         repo: https://spiffe.github.io/helm-charts-hardened/
-        version: 0.30.4
+        version: 0.31.0
         namespace: dsx-identity
         valuesFiles:
           - ../local-e2e-tests/k2/spiffe-csi-values.yaml

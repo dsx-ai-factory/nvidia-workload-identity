@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-ARG BUILDER_IMG=golang:1.26.10
+ARG BUILDER_IMG=golang:1.26.11
 
 FROM --platform=$BUILDPLATFORM ${BUILDER_IMG} AS builder
 
