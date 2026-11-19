@@ -91,6 +91,9 @@ GitHub owns RC-to-stable tagging and release notes.
   builds that rebuild or repackage their binaries.
 - Consume upstream Helm chart releases with their bundled image defaults. Do
   not override their image pins to apply security fixes.
+- When upgrading SPIRE, verify that the `spire` and `spire-crds` chart versions
+  are compatible. Keep the pins aligned across deployments. Upgrade
+  `spire-crds` first when the upstream upgrade notes require it.
 - Put deployment configuration in Helm values. Use command-line overrides only
   for dynamic values.
 - Prefer upstream defaults. Document every required nondefault setting next to it.
