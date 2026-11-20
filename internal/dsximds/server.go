@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/go-jose/go-jose/v4"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
@@ -32,10 +33,9 @@ func NewVerifier(ctx context.Context, issuer, audience string, trustDomain spiff
 	if trustDomain.IsZero() {
 		return nil, fmt.Errorf("trust domain is required")
 	}
-	ctx = oidc.ClientContext(ctx, newRemoteHTTPClient(timeout))
 	// Issuer, audience, accepted algorithms, and keys are invariant across tokens.
 	// Public JWKS can verify only the supported asymmetric algorithms listed here.
-	tokenVerifier := oidc.NewVerifier(issuer, oidc.NewRemoteKeySet(ctx, jwksURL), &oidc.Config{
+	config := &oidc.Config{
 		ClientID: audience,
 		SupportedSigningAlgs: []string{
 			oidc.RS256, oidc.RS384, oidc.RS512,
@@ -43,7 +43,14 @@ func NewVerifier(ctx context.Context, issuer, audience string, trustDomain spiff
 			oidc.PS256, oidc.PS384, oidc.PS512,
 			oidc.EdDSA,
 		},
-	})
+	}
+	keys := &remoteKeySet{
+		ctx: context.WithoutCancel(ctx), url: jwksURL, client: newRemoteHTTPClient(timeout),
+	}
+	for _, algorithm := range config.SupportedSigningAlgs {
+		keys.algorithms = append(keys.algorithms, jose.SignatureAlgorithm(algorithm))
+	}
+	tokenVerifier := oidc.NewVerifier(issuer, keys, config)
 	return &Verifier{
 		trustDomain:   trustDomain,
 		tokenVerifier: tokenVerifier,

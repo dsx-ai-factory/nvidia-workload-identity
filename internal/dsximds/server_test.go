@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
@@ -203,8 +202,10 @@ func TestRemoteVerifierRefreshesUnknownKID(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	ctx := oidc.ClientContext(context.Background(), server.Client())
-	keys := oidc.NewRemoteKeySet(ctx, server.URL)
+	keys := &remoteKeySet{
+		ctx: t.Context(), url: server.URL, client: server.Client(),
+		algorithms: []jose.SignatureAlgorithm{jose.ES256},
+	}
 	claims := jwt.Claims{Expiry: jwt.NewNumericDate(time.Now().Add(time.Minute))}
 	firstToken := signTokenWithKID(t, first, "first-key", claims)
 	if _, err := keys.VerifySignature(context.Background(), firstToken); err != nil {
