@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 ARG BUILDER_IMG=rust:1.97.1-alpine
-ARG RUNTIME_IMG=alpine:3.24.3
+ARG RUNTIME_IMG=alpine:3.24.4
 
 FROM --platform=$BUILDPLATFORM ${BUILDER_IMG} AS builder
 

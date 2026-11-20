@@ -18,7 +18,7 @@ build:
         target: dsx-identity-keys
         buildArgs:
           <<: &coreBuildArgs
-            BUILDER_IMG: 127.0.0.1:5002/docker.io/library/golang:1.26.10
+            BUILDER_IMG: 127.0.0.1:5002/docker.io/library/golang:1.26.11
           BINARY: dsx-identity-keys
     - image: dsx-identity/dsx-token-fetcher
       context: ..
@@ -80,5 +80,5 @@ build:
       docker:
         dockerfile: Dockerfile.e2e
         buildArgs:
-          BUILDER_IMG: 127.0.0.1:5002/docker.io/library/golang:1.26.10
+          BUILDER_IMG: 127.0.0.1:5002/docker.io/library/golang:1.26.11
           RUNTIME_IMG: 127.0.0.1:5002/docker.io/curlimages/curl:8.23.0
