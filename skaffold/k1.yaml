@@ -271,7 +271,7 @@ deploy:
       - name: dsx-imds-host-agent
         remoteChart: spire
         repo: https://spiffe.github.io/helm-charts-hardened/
-        version: 0.30.4
+        version: 0.31.0
         namespace: dsx-identity
         valuesFiles:
           - ../local-e2e-tests/dsx-imds-host-agent-values.yaml

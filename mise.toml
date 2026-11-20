@@ -1,7 +1,7 @@
 [tools]
-go = "1.26.10"
+go = "1.26.11"
 rust = { version = "1.97.1", components = "rustfmt,clippy" }
-kind = "v0.32.0"
+kind = "v0.33.0"
 kubectl = "v1.34.0"
 helm = "v3.21.2"
 "github:helm-unittest/helm-unittest" = { version = "1.0.3", bin = "untt" }
