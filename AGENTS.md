@@ -182,6 +182,8 @@ GitHub owns RC-to-stable tagging and release notes.
   builds and publishes the tagged source and runs advisory analysis.
 - Read active GitHub Actions and release workflows before creating or updating a
   pull request. Search for an equivalent open pull request or branch first.
+- Target new changes at `master`. After they merge, cherry-pick release fixes
+  from `master` into the applicable `release/X.Y.Z` branch through a pull request.
 - Use a `feat/` or `fix/` branch for release-producing changes.
 - Use a Conventional Commit title. Use `feat` for a capability and `fix` for
   corrections, reliability, performance, or maintenance.
