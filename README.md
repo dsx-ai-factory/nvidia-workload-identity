@@ -22,9 +22,9 @@ across data halls.
 
 ## Release candidates
 
-1. Send feature PRs to `master`.
+1. Send all new changes to `master` through PRs.
 2. When ready for QA, cut protected `release/X.Y.Z` from a tested `master` commit.
-3. Send release fixes to that branch, then cherry-pick them back to `master` through PRs.
+3. Cherry-pick merged fixes from `master` into the release branch through PRs.
 
 Release-worthy merges create `vX.Y.Z-rc.N` after GitHub CI passes.
 GitLab picks up the mirrored tag, publishes the images and charts to NGC,
